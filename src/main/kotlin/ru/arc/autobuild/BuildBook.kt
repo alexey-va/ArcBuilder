@@ -19,11 +19,17 @@ data class BuildBookMaterialRequirement(
     val amount: Int,
 ) {
     fun validated(): BuildBookMaterialRequirement = apply {
-        require(material.isItem && !material.isAir) { "Build-book player material must be an item" }
+        require(material.name !in AIR_MATERIAL_NAMES && !material.name.startsWith("LEGACY_")) {
+            "Build-book player material must be a modern non-air material"
+        }
         require(amount in 1..1_000_000) { "Build-book player material amount is outside its safety bound" }
     }
 
     val materialKey: String get() = material.key.toString()
+
+    private companion object {
+        val AIR_MATERIAL_NAMES = setOf("AIR", "CAVE_AIR", "VOID_AIR")
+    }
 }
 
 object BuildBookMaterialRequirements {

@@ -8,7 +8,10 @@ internal object BuilderBookConstructionCosts {
     fun calculate(book: ItemStack, data: BuildBookData, gameMode: GameMode): List<BuilderItemAmount> {
         val exactBook = book.clone().also { it.amount = 1 }
         val playerMaterials = if (BuilderGameModePolicy.usesInventory(gameMode)) {
-            data.playerMaterials.map { requirement -> ItemStack(requirement.material, requirement.amount) }
+            data.playerMaterials.map { requirement ->
+                require(requirement.material.isItem) { "Build-book player material is not available as an item" }
+                ItemStack(requirement.material, requirement.amount)
+            }
         } else {
             emptyList()
         }
