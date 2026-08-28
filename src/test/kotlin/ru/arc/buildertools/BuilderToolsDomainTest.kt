@@ -398,13 +398,19 @@ class BuilderToolsDomainTest : FunSpec({
     }
 
     test("bundled builder messages use the historical tools prefix without dot bullets") {
-        val bundled = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
+        val tools = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
+            .bufferedReader()
+            .use { it.readText() }
+        val books = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/auto-build.yml"))
             .bufferedReader()
             .use { it.readText() }
 
-        bundled.lines().count { it.trim() == "prefix: \"<#92bed8>🛠 \"" } shouldBe 2
-        bundled.contains("◇") shouldBe false
-        bundled.contains("•") shouldBe false
+        tools.lines().count { it.trim() == "prefix: \"<#92bed8>🛠 \"" } shouldBe 2
+        books.contains("<#92bed8>🛠 ") shouldBe true
+        listOf(tools, books).forEach { bundled ->
+            bundled.contains("◇") shouldBe false
+            bundled.contains("•") shouldBe false
+        }
     }
 
     test("permission policy accepts canonical feature and build-book entry nodes") {

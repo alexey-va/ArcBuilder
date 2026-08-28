@@ -49,6 +49,7 @@ import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 internal class BuilderToolsRuntime(
@@ -398,7 +399,7 @@ internal class BuilderToolsRuntime(
             initializedPreviews?.close()
             taskScope.close()
             operationLocks.close()
-            storageExecutor.shutdownNow()
+            closeStorageExecutor()
             shop.close()
             BuildingManager.installPreviewBridge(null)
             displayRenderer.close()
@@ -1505,7 +1506,7 @@ internal class BuilderToolsRuntime(
         playerRecoveries.close()
         books.close()
         taskScope.close()
-        storageExecutor.shutdownNow()
+        closeStorageExecutor()
         shop.close()
         operationLocks.close()
         selections.clear()
@@ -1514,7 +1515,20 @@ internal class BuilderToolsRuntime(
         displayRenderer.close()
     }
 
+    private fun closeStorageExecutor() {
+        storageExecutor.shutdownNow()
+        try {
+            if (!storageExecutor.awaitTermination(STORAGE_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                warn("Builder-tools storage executor did not stop within {} seconds", STORAGE_SHUTDOWN_TIMEOUT_SECONDS)
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            warn("Builder-tools storage executor shutdown wait was interrupted")
+        }
+    }
+
     private companion object {
         const val HEALTH_PUBLISH_PERIOD_TICKS = 20L
+        const val STORAGE_SHUTDOWN_TIMEOUT_SECONDS = 5L
     }
 }
