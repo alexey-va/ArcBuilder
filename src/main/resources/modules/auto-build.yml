@@ -14,12 +14,14 @@ build-book:
     - '<#8c8c8c>Объём: <#e6fff3><blocks> блоков'
     - '<#8c8c8c>Себестоимость: <#2bba43><price>'
     - ''
-    - '<#92bed8>ПКМ <#8c8c8c>— превью / дальше'
+    - '<#92bed8>ПКМ по блоку <#8c8c8c>— перенести'
+    - '<#92bed8>ПКМ в воздух <#8c8c8c>— продолжить'
     - '<#92bed8>Shift+ПКМ <#8c8c8c>— положение'
   received: '<#92bed8>🛠 <#2bba43>Книга строительства создана: <#e6fff3><building>'
   draft-preview-message: |-
+
     <#92bed8>🛠 <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
-    <#8c8c8c>  ПКМ — смета <#8c8c8c>— Shift+ПКМ — положение
+    <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — смета
   player-copy:
     max-offset: 16
     max-per-player: 24
@@ -82,8 +84,9 @@ build-book:
 # На classic (спавн/данжи): true. На survival: false.
 disable-building: false
 cant-build-message: |-
+
   <#92bed8>🛠 <#c42323>Здесь нельзя разместить эту постройку.
-  <#8c8c8c>  <#e6fff3>Проверьте право строительства на всей площадке.
+  <#8c8c8c>   <#e6fff3>Проверьте право строительства на всей площадке.
 disabled-message: '<#92bed8>🛠 <#ff9f0f>Автопостройка в этом мире отключена.'
 display:
   border-particle-interval: 5
@@ -97,8 +100,9 @@ display:
   max-blocks: 20000
   max-per-10-min: 10000000
 start-message: |-
+
   <#92bed8>🛠 <#e6fff3>Превью открыто.
-  <#8c8c8c>  ПКМ — дальше <#8c8c8c>— Shift+ПКМ — положение
+  <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — продолжить
 confirm-time: 180
 construction:
   # Default limit for books without arc:cooldown_seconds. Set a book to 0 for unlimited simple builds.

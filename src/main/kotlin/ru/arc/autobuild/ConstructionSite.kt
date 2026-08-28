@@ -13,6 +13,11 @@ internal enum class PreviewTransformUpdateResult(val allowsBookUpdate: Boolean =
     PROTECTION_DENIED,
 }
 
+internal object BuildBookRelativeRotation {
+    fun resolve(playerRotation: Int, sourceRotation: Int, manualRotation: Int): Int =
+        BuildBookTransform.normalizeRotation(playerRotation - sourceRotation + manualRotation)
+}
+
 /** Lightweight placement model; construction itself is owned by BuilderPlan. */
 class ConstructionSite(
     val building: Building,
@@ -27,7 +32,11 @@ class ConstructionSite(
     var bookData: BuildBookData = bookData
         private set
 
-    val fullRotation: Int get() = BuildBookTransform.normalizeRotation(rotation + bookData.transform.rotation)
+    val fullRotation: Int get() = BuildBookRelativeRotation.resolve(
+        rotation,
+        bookData.sourceRotation,
+        bookData.transform.rotation,
+    )
     val adjustedCenter: Location get() {
         val (x, y, z) = bookData.transform.rotatedOffset(fullRotation)
         return centerBlock.clone().add(x.toDouble(), y.toDouble(), z.toDouble())

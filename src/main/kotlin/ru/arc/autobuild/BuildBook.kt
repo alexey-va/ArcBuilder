@@ -68,6 +68,7 @@ data class BuildBookData(
     val buildingId: String,
     val title: String,
     val transform: BuildBookTransform = BuildBookTransform(),
+    val sourceRotation: Int = 0,
     val playerCreated: Boolean = false,
     val creatorId: UUID? = null,
     val creatorName: String? = null,
@@ -85,6 +86,9 @@ data class BuildBookData(
         require(BUILDING_ID.matches(buildingId)) { "Build-book building id is invalid" }
         require(title.isNotBlank() && title.length <= 48 && title.none(Char::isISOControl)) { "Build-book title is invalid" }
         transform.validated()
+        require(sourceRotation in BuildBookTransform.CARDINAL_ROTATIONS) {
+            "Build-book source rotation must be cardinal"
+        }
         require(blockCount == null || blockCount in 1..10_000) { "Build-book block count is invalid" }
         require(cooldownSeconds == null || cooldownSeconds in 0..BuildCooldownPolicy.MAX_SECONDS) {
             "Build-book cooldown is invalid"
@@ -178,7 +182,7 @@ object BuildBookSettings {
 }
 
 object BuildBookCodec {
-    private const val SCHEMA_VERSION = 3
+    private const val SCHEMA_VERSION = 4
     // Durable books already issued by ARC use the `arc` namespace. Keep it
     // stable after extraction so moving the feature cannot invalidate items.
     @Suppress("DEPRECATION")
@@ -190,6 +194,7 @@ object BuildBookCodec {
     private val offsetXKey get() = key("build_book_offset_x")
     private val offsetYKey get() = key("build_book_offset_y")
     private val offsetZKey get() = key("build_book_offset_z")
+    private val sourceRotationKey get() = key("build_book_source_rotation")
     private val playerCreatedKey get() = key("build_book_player_created")
     private val creatorKey get() = key("build_book_creator")
     private val creatorNameKey get() = key("build_book_creator_name")
@@ -221,6 +226,7 @@ object BuildBookCodec {
                         offsetY = pdc.get(offsetYKey, PersistentDataType.INTEGER) ?: 0,
                         offsetZ = pdc.get(offsetZKey, PersistentDataType.INTEGER) ?: 0,
                     ),
+                    sourceRotation = pdc.get(sourceRotationKey, PersistentDataType.INTEGER) ?: 0,
                     playerCreated = (pdc.get(playerCreatedKey, PersistentDataType.BYTE) ?: 0) != 0.toByte(),
                     creatorId = pdc.get(creatorKey, PersistentDataType.STRING)?.let(UUID::fromString),
                     creatorName = pdc.get(creatorNameKey, PersistentDataType.STRING),
@@ -251,6 +257,7 @@ object BuildBookCodec {
             pdc.set(offsetXKey, PersistentDataType.INTEGER, checked.transform.offsetX)
             pdc.set(offsetYKey, PersistentDataType.INTEGER, checked.transform.offsetY)
             pdc.set(offsetZKey, PersistentDataType.INTEGER, checked.transform.offsetZ)
+            pdc.set(sourceRotationKey, PersistentDataType.INTEGER, checked.sourceRotation)
             pdc.set(playerCreatedKey, PersistentDataType.BYTE, (if (checked.playerCreated) 1 else 0).toByte())
             pdc.setOrRemove(creatorKey, PersistentDataType.STRING, checked.creatorId?.toString())
             pdc.setOrRemove(creatorNameKey, PersistentDataType.STRING, checked.creatorName)

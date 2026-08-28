@@ -10,10 +10,18 @@ import org.bukkit.Material
 import org.bukkit.block.Block
 import org.bukkit.block.TileState
 import org.bukkit.block.data.BlockData
+import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.Lightable
+import org.bukkit.block.data.Segmentable
 import org.bukkit.block.data.Powerable
 import org.bukkit.block.data.Waterlogged
+import org.bukkit.block.data.type.Bed
+import org.bukkit.block.data.type.Candle
+import org.bukkit.block.data.type.FlowerBed
+import org.bukkit.block.data.type.SeaPickle
 import org.bukkit.block.data.type.Slab
+import org.bukkit.block.data.type.Snow
+import org.bukkit.block.data.type.TrapDoor
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.PlayerInventory
@@ -79,10 +87,27 @@ internal object BuilderItemCodec {
 }
 
 internal object BuilderPlacementCost {
-    fun item(data: BlockData): ItemStack = ItemStack(
-        data.material,
-        if (data is Slab && data.type == Slab.Type.DOUBLE) 2 else 1,
-    )
+    fun itemOrNull(data: BlockData): ItemStack? {
+        if (data is Bed && data.part == Bed.Part.HEAD) return null
+        if (data is Bisected && data !is TrapDoor && data.half == Bisected.Half.TOP) return null
+        val material = constructionItem(data.material) ?: return null
+        val amount = when (data) {
+            is Slab -> if (data.type == Slab.Type.DOUBLE) 2 else 1
+            is Candle -> data.candles
+            is SeaPickle -> data.pickles
+            is FlowerBed -> data.flowerAmount
+            is Snow -> data.layers
+            is Segmentable -> data.segmentAmount
+            else -> 1
+        }
+        return ItemStack(material, amount)
+    }
+
+    fun constructionItem(material: Material): Material? = when (material) {
+        Material.WALL_TORCH -> Material.TORCH
+        Material.SOUL_WALL_TORCH -> Material.SOUL_TORCH
+        else -> material.takeIf(Material::isItem)
+    }
 }
 
 internal class BuilderJournalStore(
@@ -326,10 +351,11 @@ internal class BuilderBlockSafety(
             data.asString.startsWith("minecraft:") &&
             (data !is Waterlogged || !data.isWaterlogged) &&
             (data !is Lightable || !data.isLit) &&
-            (data !is Powerable || !data.isPowered)
+            (data !is Powerable || !data.isPowered) &&
+            (data !is Bed || !data.isOccupied)
 
     fun isSafeMaterial(material: Material): Boolean {
-        if (!material.isBlock || !material.isItem || !material.isSolid || material.isAir) return false
+        if (!material.isBlock || material.isAir || BuilderPlacementCost.constructionItem(material) == null) return false
         if (material in UNSAFE_MATERIALS) return false
         val name = material.name
         if (UNSAFE_FRAGMENTS.any(name::contains)) return false
@@ -341,10 +367,10 @@ internal class BuilderBlockSafety(
     private fun isCustom(block: Block): Boolean {
         if (CustomBlockData.hasCustomBlockData(block, plugin)) return true
         HookRegistry.sfHook?.let { hook ->
-            if (runCatching { hook.isSlimefunBlock(block) }.getOrDefault(true)) return true
+            if (hook.isSlimefunBlock(block)) return true
         }
         if (Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
-            if (runCatching { CustomBlock.byAlreadyPlaced(block) != null }.getOrDefault(true)) return true
+            if (CustomBlock.byAlreadyPlaced(block) != null) return true
         }
         return false
     }
@@ -380,9 +406,6 @@ internal class BuilderBlockSafety(
             "SCULK_SENSOR",
             "SCULK_SHRIEKER",
             "_PORTAL",
-            "_BED",
-            "_DOOR",
-            "TRAPDOOR",
             "_SIGN",
             "_HANGING_SIGN",
             "CHEST",
@@ -405,7 +428,7 @@ internal class BuilderBlockSafety(
             "PISTON",
             "_HEAD",
             "_SKULL",
-            "_TORCH",
+            "REDSTONE_TORCH",
             "_RAIL",
             "_BUTTON",
             "_PRESSURE_PLATE",
@@ -414,18 +437,10 @@ internal class BuilderBlockSafety(
             "COMPARATOR",
             "TRIPWIRE",
             "LEVER",
-            "LADDER",
-            "SCAFFOLDING",
             "_BANNER",
-            "_CARPET",
-            "_CANDLE",
             "CANDLE_CAKE",
-            "POINTED_DRIPSTONE",
-            "SEA_PICKLE",
             "TURTLE_EGG",
             "FROGSPAWN",
-            "COCOA",
-            "LILY_PAD",
         )
     }
 }

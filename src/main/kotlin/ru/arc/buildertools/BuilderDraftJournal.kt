@@ -22,6 +22,7 @@ internal data class BuilderDraftRecord(
     val buildingId: String,
     val blueprintId: UUID,
     val contentSha256: String,
+    val sourceRotation: Int = 0,
     val schematicSha256: String? = null,
     val blockCount: Int,
     val phase: BuilderDraftPhase,
@@ -29,7 +30,8 @@ internal data class BuilderDraftRecord(
     val updatedAtMillis: Long,
 ) {
     fun validated(maxBlocks: Int = BuilderPlan.ABSOLUTE_MAX_CHANGES): BuilderDraftRecord = apply {
-        require(schemaVersion == CURRENT_SCHEMA_VERSION) { "Unsupported builder-draft journal schema" }
+        require(schemaVersion in 1..CURRENT_SCHEMA_VERSION) { "Unsupported builder-draft journal schema" }
+        require(sourceRotation in setOf(0, 90, 180, 270)) { "Builder-draft source rotation is invalid" }
         require(playerName.matches(Regex("[A-Za-z0-9_]{1,16}"))) {
             "Builder-draft player name is invalid"
         }
@@ -62,7 +64,7 @@ internal data class BuilderDraftRecord(
     }
 
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
         private val SHA256 = Regex("[a-f0-9]{64}")
     }
 }

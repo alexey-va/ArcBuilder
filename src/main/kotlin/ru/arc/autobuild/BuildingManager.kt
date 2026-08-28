@@ -51,9 +51,10 @@ object BuildingManager {
         return site
     }
 
-    internal fun closePreview(playerId: UUID) {
-        previews.remove(playerId)
-        previewBridge?.close(playerId)
+    internal fun closePreview(playerId: UUID): Boolean {
+        val removed = previews.remove(playerId) != null
+        if (removed) previewBridge?.close(playerId)
+        return removed
     }
 
     internal fun pending(playerId: UUID): ConstructionSite? = previews[playerId]

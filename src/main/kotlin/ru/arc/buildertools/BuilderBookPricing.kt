@@ -30,7 +30,7 @@ internal class BuilderBookPricing(
 ) {
     fun quote(player: Player, clipboard: BuilderClipboard): BuilderBookQuoteResult {
         val items = clipboard.validated(config.maxClipboardBlocks).blocks.mapNotNull { block ->
-            Bukkit.createBlockData(block.blockData).takeUnless { it.material.isAir }?.let(BuilderPlacementCost::item)
+            Bukkit.createBlockData(block.blockData).takeUnless { it.material.isAir }?.let(BuilderPlacementCost::itemOrNull)
         }
         return quoteItems(player, items)
     }
@@ -39,7 +39,7 @@ internal class BuilderBookPricing(
         val clipboard = runCatching { building.clipboard }.getOrElse { return BuilderBookQuoteResult.LimitExceeded }
         if (clipboard.region.volume !in 1..config.maxScanVolume) return BuilderBookQuoteResult.LimitExceeded
         val items = clipboard.region.asSequence().mapNotNull { position ->
-            BukkitAdapter.adapt(clipboard.getFullBlock(position)).takeUnless { it.material.isAir }?.let(BuilderPlacementCost::item)
+            BukkitAdapter.adapt(clipboard.getFullBlock(position)).takeUnless { it.material.isAir }?.let(BuilderPlacementCost::itemOrNull)
         }.take(config.maxClipboardBlocks + 1).toList()
         if (items.size > config.maxClipboardBlocks) return BuilderBookQuoteResult.LimitExceeded
         return quoteItems(player, items)

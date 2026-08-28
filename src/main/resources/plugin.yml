@@ -20,55 +20,55 @@ commands:
     description: Survival-friendly builder tools
     usage: /builder [help|wand|fill|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status]
 permissions:
-  arc.builder.tools.use:
+  arcbuild.use:
     description: Use survival-friendly ArcBuilder tools
     default: false
     children:
-      arc.builder.tools.fill: true
-      arc.builder.tools.copy: true
-      arc.builder.tools.paste: true
-      arc.builder.tools.deconstruct: true
-      arc.builder.tools.crown: true
-      arc.build.book.create: true
-  arc.builder.tools.fill:
+      arcbuild.fill: true
+      arcbuild.copy: true
+      arcbuild.paste: true
+      arcbuild.deconstruct: true
+      arcbuild.crown: true
+      arcbuild.book.create: true
+  arcbuild.fill:
     default: false
-  arc.builder.tools.copy:
+  arcbuild.copy:
     default: false
-  arc.builder.tools.paste:
+  arcbuild.paste:
     default: false
-  arc.builder.tools.deconstruct:
+  arcbuild.deconstruct:
     default: false
-  arc.builder.tools.crown:
+  arcbuild.crown:
     default: false
-  arc.builder.tools.selection.size.20:
+  arcbuild.selection.size.20:
     default: false
-  arc.builder.tools.selection.size.40:
+  arcbuild.selection.size.40:
     default: false
-  arc.builder.tools.selection.size.60:
+  arcbuild.selection.size.60:
     default: false
-  arc.builder.tools.selection.size.80:
+  arcbuild.selection.size.80:
     default: false
-  arc.builder.tools.selection.size.100:
+  arcbuild.selection.size.100:
     default: false
-  arc.builder.tools.hourly.20000:
+  arcbuild.hourly.20000:
     default: false
-  arc.builder.tools.hourly.50000:
+  arcbuild.hourly.50000:
     default: false
-  arc.builder.tools.hourly.100000:
+  arcbuild.hourly.100000:
     default: false
-  arc.builder.tools.hourly.150000:
+  arcbuild.hourly.150000:
     default: false
-  arc.builder.tools.hourly.200000:
+  arcbuild.hourly.200000:
     default: false
-  arc.build.book.create:
+  arcbuild.book.create:
     default: false
     children:
-      arc.build.book.edit: true
-      arc.build.book.sell: true
-      arc.build.book.use: true
-  arc.build.book.edit:
+      arcbuild.book.edit: true
+      arcbuild.book.sell: true
+      arcbuild.book.use: true
+  arcbuild.book.edit:
     default: false
-  arc.build.book.sell:
+  arcbuild.book.sell:
     default: false
-  arc.build.book.use:
+  arcbuild.book.use:
     default: false

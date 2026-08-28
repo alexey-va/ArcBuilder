@@ -133,7 +133,7 @@ private class DeconstructionHarness(
         safety = safety,
         maximumChanges = maximumChanges,
         isPreferredTool = { _, tool -> tool.type == Material.DIAMOND_PICKAXE },
-        constructionRefund = { block -> BuilderPlacementCost.item(block.blockData) },
+        constructionRefund = { block -> BuilderPlacementCost.itemOrNull(block.blockData) },
         host = object : BuilderDeconstructionHost {
             override fun ensurePermission(player: Player) {
                 permissions++

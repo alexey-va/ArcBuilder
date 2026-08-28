@@ -35,6 +35,7 @@ internal interface BuilderClipboardHost {
         player: Player,
         changes: List<BuilderBlockChange>,
         costs: List<BuilderItemAmount>,
+        rewards: List<BuilderItemAmount>,
         skippedUnsafeBlocks: Int,
     ): BuilderPlan
     fun fail(path: String): Nothing
@@ -55,6 +56,7 @@ internal class BuilderClipboardController(
     private val host: BuilderClipboardHost,
     private val nowMillis: () -> Long = System::currentTimeMillis,
     private val blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
+    private val replacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
 ) : AutoCloseable {
     private val ttlMillis = clipboardTtl.toMillis()
     private val clipboards = mutableMapOf<UUID, BuilderClipboard>()
@@ -128,6 +130,7 @@ internal class BuilderClipboardController(
             rotationFromYaw(player.yaw) - clipboard.sourceRotation + rotationAdjustments.getOrDefault(player.uniqueId, 0),
         )
         val costs = mutableListOf<ItemStack>()
+        val rewards = mutableListOf<ItemStack>()
         var skippedUnsafe = 0
         val changes = clipboard.blocks.mapNotNull { copied ->
             val localX = copied.dx - clipboard.originDx
@@ -146,18 +149,26 @@ internal class BuilderClipboardController(
                 return@mapNotNull null
             }
             if (block.blockData.asString == after.asString) return@mapNotNull null
-            if (!safety.isReplaceable(block)) {
+            val replaceable = safety.isReplaceable(block)
+            if (!replaceable && !safety.isSafeExisting(block)) {
                 skippedUnsafe += 1
                 return@mapNotNull null
             }
             host.ensurePlacement(player, block, after.material)
             if (BuilderGameModePolicy.usesInventory(player.gameMode)) {
-                costs += BuilderPlacementCost.item(after)
+                BuilderPlacementCost.itemOrNull(after)?.let(costs::add)
+                if (!replaceable) replacementRefund(block)?.let(rewards::add)
             }
             BuilderBlockChange(position, block.blockData.asString, after.asString)
         }
         if (changes.isEmpty()) host.fail("errors.nothing-to-change")
-        return host.createPastePlan(player, changes, BuilderItemCodec.aggregate(costs), skippedUnsafe)
+        return host.createPastePlan(
+            player,
+            changes,
+            BuilderItemCodec.aggregate(costs),
+            BuilderItemCodec.aggregate(rewards),
+            skippedUnsafe,
+        )
     }
 
     fun rotate(playerId: UUID, delta: Int) {

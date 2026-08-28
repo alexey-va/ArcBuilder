@@ -31,6 +31,14 @@ class BuildBookTest : TestBase() {
     }
 
     @Test
+    fun `book placement is relative to the facing captured at copy time`() {
+        assertEquals(0, BuildBookRelativeRotation.resolve(90, 90, 0))
+        assertEquals(90, BuildBookRelativeRotation.resolve(180, 90, 0))
+        assertEquals(180, BuildBookRelativeRotation.resolve(90, 90, 180))
+        assertEquals(270, BuildBookRelativeRotation.resolve(0, 90, 0))
+    }
+
+    @Test
     fun `non-cardinal rotations are rejected`() {
         assertThrows(IllegalArgumentException::class.java) {
             BuildBookTransform(rotation = 45).validated()
@@ -51,6 +59,7 @@ class BuildBookTest : TestBase() {
             buildingId = "player-0123456789abcdef0123456789abcdef-0123456789abcdef0123.schem",
             title = "Дом у озера",
             transform = BuildBookTransform(270, 2, -1, 4),
+            sourceRotation = 90,
             playerCreated = true,
             creatorId = UUID.randomUUID(),
             blockCount = 37,

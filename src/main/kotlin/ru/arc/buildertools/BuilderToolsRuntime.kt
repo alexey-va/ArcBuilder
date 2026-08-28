@@ -55,12 +55,16 @@ import java.util.concurrent.atomic.AtomicReference
 internal class BuilderToolsRuntime(
     private val plugin: JavaPlugin,
     private val config: BuilderToolsConfig,
+    private val taskScope: LifecycleTaskScope = LifecycleTaskScope(),
     private val displayRenderer: BuilderDisplayRenderer = BuilderBlockDisplayRenderer(
         plugin,
         config.previewMaxPlanParticles,
+        config.messages(),
+        taskScope,
     ),
     blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
     draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
+    bookSchematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
@@ -69,7 +73,6 @@ internal class BuilderToolsRuntime(
     private val journal = BuilderJournalStore(plugin.dataPath, config.maxChanges)
     private val stateService = PaperPlayerStateService()
     private val stateCodec = PaperPlayerStateCodec()
-    private val taskScope = LifecycleTaskScope()
     private val storageExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "arc-builder-tools-storage").apply { isDaemon = true }
     }
@@ -136,13 +139,14 @@ internal class BuilderToolsRuntime(
                 player: Player,
                 changes: List<BuilderBlockChange>,
                 costs: List<BuilderItemAmount>,
+                rewards: List<BuilderItemAmount>,
                 skippedUnsafeBlocks: Int,
             ): BuilderPlan = newPlan(
                 player,
                 BuilderPlanKind.PASTE,
                 changes,
                 costs,
-                emptyList(),
+                rewards,
                 skippedUnsafeBlocks = skippedUnsafeBlocks,
             )
 
@@ -302,6 +306,7 @@ internal class BuilderToolsRuntime(
                 operationLocks = operationLocks,
                 draftJournal = BuilderDraftJournal(plugin.dataPath, BuilderPlan.ABSOLUTE_MAX_CHANGES),
                 draftStorage = draftStorage,
+                schematicVerifier = bookSchematicVerifier,
                 host = object : BuilderBookLifecycleHost {
                     override fun ensureOperationalContext(player: Player) =
                         this@BuilderToolsRuntime.ensureOperationalContext(player)
@@ -590,8 +595,8 @@ internal class BuilderToolsRuntime(
     }
 
     private fun planBuildBook(player: Player, site: ConstructionSite, book: ItemStack): BuilderPlan {
-        if (!player.hasPermission("arc.build.book.use")) throw BuilderUserFailure("errors.no-permission")
-        val data = site.bookData?.takeIf { it.playerCreated } ?: throw BuilderUserFailure("book.invalid")
+        if (!player.hasPermission("arcbuild.book.use")) throw BuilderUserFailure("errors.no-permission")
+        val data = site.bookData.takeIf { it.playerCreated } ?: throw BuilderUserFailure("book.invalid")
         if (data.draft) throw BuilderUserFailure("book.unactivated")
         if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
         if (!data.available) throw BuilderUserFailure("book.invalid")
@@ -978,6 +983,9 @@ internal class BuilderToolsRuntime(
             "operation.completed",
             mapOf("kind" to kindLabel(player, durable.plan.kind), "count" to messages.literal(durable.plan.changes.size)),
         )
+        if (durable.plan.kind == BuilderPlanKind.PASTE && clipboardController.current(player.uniqueId) != null) {
+            player.sendActionBar(messages.render("clipboard.retained", locale(player)))
+        }
         info(debugLine.line("event" to "committed", "operation" to durable.operationId, "player" to durable.playerId, "kind" to durable.plan.kind, "blocks" to durable.plan.changes.size))
         durable.plan.sourceRecordId?.let { markSourceUndone(it) }
         cleanupOldRecords()
@@ -1081,6 +1089,8 @@ internal class BuilderToolsRuntime(
         if (previews.contains(player.uniqueId)) {
             discardPendingPlan(player.uniqueId)
             send(player, "plan.cancelled")
+        } else if (BuildingManager.closePreview(player.uniqueId)) {
+            send(player, "book.preview-cancelled")
         } else {
             throw BuilderUserFailure("errors.expired")
         }
@@ -1363,7 +1373,7 @@ internal class BuilderToolsRuntime(
                     event.action == org.bukkit.event.block.Action.RIGHT_CLICK_AIR
                 ) {
                     event.isCancelled = true
-                    handleBookInteraction(player, item, data)
+                    handleBookInteraction(player, item, data, event.action, event.clickedBlock?.location)
                     return
                 }
             }
@@ -1383,7 +1393,13 @@ internal class BuilderToolsRuntime(
         }
     }
 
-    private fun handleBookInteraction(player: Player, item: ItemStack, data: BuildBookData) {
+    private fun handleBookInteraction(
+        player: Player,
+        item: ItemStack,
+        data: BuildBookData,
+        action: org.bukkit.event.block.Action,
+        clickedLocation: Location?,
+    ) {
         try {
             ensureAvailable(player)
             if (player.isSneaking) {
@@ -1391,20 +1407,23 @@ internal class BuilderToolsRuntime(
                 return
             }
             val current = BuildingManager.pending(player.uniqueId)
-            if (current?.isExactOpenPreview(player, data) != true) {
+            if (action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
                 books.verifySchematic(data)
-                val opened = BuildingManager.openPreview(player, player.location, data)
+                val opened = BuildingManager.openPreview(player, checkNotNull(clickedLocation), data)
                     ?: throw BuilderUserFailure("book.invalid")
-                send(
-                    player,
-                    "book.preview-opened",
-                    mapOf(
-                        "name" to messages.literal(data.title),
-                        "state" to messages.render(if (data.draft) "book.state.draft" else "book.state.active", locale(player)),
-                    ),
-                )
+                if (current?.isExactOpenPreview(player, data) != true) {
+                    send(
+                        player,
+                        "book.preview-opened",
+                        mapOf(
+                            "name" to messages.literal(data.title),
+                            "state" to messages.render(if (data.draft) "book.state.draft" else "book.state.active", locale(player)),
+                        ),
+                    )
+                }
                 return
             }
+            if (current?.isExactOpenPreview(player, data) != true) throw BuilderUserFailure("book.preview-required")
             if (data.draft) {
                 books.handleCommand(player, listOf("activate"))
             } else {

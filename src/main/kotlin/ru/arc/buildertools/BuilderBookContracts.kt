@@ -60,6 +60,7 @@ internal data class BuilderBookBlueprint(
     val constructionFeeMinor: Long,
     val issuePriceMinor: Long,
     val createdAtMillis: Long,
+    val sourceRotation: Int = 0,
 ) {
     fun validated(): BuilderBookBlueprint = apply {
         require(PLAYER_NAME.matches(creatorName)) { "Builder-book creator name is invalid" }
@@ -78,6 +79,7 @@ internal data class BuilderBookBlueprint(
             "Builder-book issue price does not equal its cost components"
         }
         require(issuePriceMinor <= MAX_PRICE_MINOR) { "Builder-book issue price exceeds its hard bound" }
+        require(sourceRotation in setOf(0, 90, 180, 270)) { "Builder-book source rotation is invalid" }
         require(createdAtMillis > 0L) { "Builder-book creation time is invalid" }
     }
 

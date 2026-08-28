@@ -100,7 +100,7 @@ internal object BuilderDeconstructionRefunds {
     )
 
     fun exactConstructionItem(data: BlockData, drops: Collection<ItemStack>): ItemStack? {
-        val expected = BuilderPlacementCost.item(data)
+        val expected = BuilderPlacementCost.itemOrNull(data) ?: return null
         val expectedPrototype = expected.clone().also { it.amount = 1 }
         var amount = 0
         drops.forEach { drop ->

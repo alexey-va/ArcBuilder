@@ -9,8 +9,11 @@ import net.kyori.adventure.text.format.TextDecoration
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.GameMode
 import org.bukkit.Material
+import org.bukkit.block.data.Bisected
+import org.bukkit.block.data.type.Candle
 import org.bukkit.block.data.Waterlogged
 import org.bukkit.block.data.type.Slab
+import org.bukkit.block.data.type.TrapDoor
 import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.Plugin
 import org.bukkit.plugin.PluginDescriptionFile
@@ -416,14 +419,16 @@ class BuilderToolsDomainTest : FunSpec({
     test("permission policy accepts canonical feature and build-book entry nodes") {
         fun permissions(vararg nodes: String): (String) -> Boolean = nodes.toSet()::contains
 
-        BuilderPermissionPolicy.canUse(BuilderFeature.FILL, permissions("arc.builder.tools.fill")) shouldBe true
-        BuilderPermissionPolicy.canUse(BuilderFeature.COPY, permissions("arc.builder.tools.copy")) shouldBe true
+        BuilderPermissionPolicy.canUse(BuilderFeature.FILL, permissions("arcbuild.fill")) shouldBe true
+        BuilderPermissionPolicy.canUse(BuilderFeature.COPY, permissions("arcbuild.copy")) shouldBe true
+        BuilderPermissionPolicy.canUse(BuilderFeature.FILL, permissions("arc.builder.tools.fill")) shouldBe false
         BuilderPermissionPolicy.canUse(BuilderFeature.PASTE, permissions("arc.buildertools.paste")) shouldBe false
         BuilderPermissionPolicy.canUse(BuilderFeature.CROWN, permissions("arc.crown")) shouldBe false
-        BuilderPermissionPolicy.canUseAny(permissions("arc.builder.tools.deconstruct")) shouldBe true
-        BuilderPermissionPolicy.canUseAny(permissions("arc.build.book.create")) shouldBe true
-        BuilderPermissionPolicy.canUseAny(permissions("arc.build.book.sell")) shouldBe true
-        BuilderPermissionPolicy.canUseAny(permissions("arc.build.book.use")) shouldBe true
+        BuilderPermissionPolicy.canUseAny(permissions("arcbuild.deconstruct")) shouldBe true
+        BuilderPermissionPolicy.canUseAny(permissions("arcbuild.book.create")) shouldBe true
+        BuilderPermissionPolicy.canUseAny(permissions("arcbuild.book.sell")) shouldBe true
+        BuilderPermissionPolicy.canUseAny(permissions("arcbuild.book.use")) shouldBe true
+        BuilderPermissionPolicy.canUseAny(permissions("arc.build.book.create")) shouldBe false
         BuilderPermissionPolicy.canUseAny(permissions()) shouldBe false
     }
 
@@ -432,29 +437,29 @@ class BuilderToolsDomainTest : FunSpec({
             val plugin = paper.createSimplePlugin("BuilderPermissionContract")
             val description = checkNotNull(javaClass.classLoader.getResourceAsStream("plugin.yml"))
                 .use(::PluginDescriptionFile)
-            val required = setOf("arc.build.book.create", "arc.build.book.sell", "arc.build.book.use")
+            val required = setOf("arcbuild.book.create", "arcbuild.book.sell", "arcbuild.book.use")
             description.permissions
                 .filter { it.name in required }
-                .sortedBy { it.name == "arc.build.book.create" }
+                .sortedBy { it.name == "arcbuild.book.create" }
                 .forEach(paper.server.pluginManager::addPermission)
             val player = paper.addPlayer("BookSeller")
 
-            player.addAttachment(plugin, "arc.build.book.create", true)
+            player.addAttachment(plugin, "arcbuild.book.create", true)
             player.recalculatePermissions()
 
-            player.hasPermission("arc.build.book.sell") shouldBe true
-            player.hasPermission("arc.build.book.use") shouldBe true
+            player.hasPermission("arcbuild.book.sell") shouldBe true
+            player.hasPermission("arcbuild.book.use") shouldBe true
         }
     }
 
     test("permission policy applies canonical selection and hourly tiers under absolute bounds") {
         fun permissions(vararg nodes: String): (String) -> Boolean = nodes.toSet()::contains
 
-        BuilderPermissionPolicy.maximumAxis(permissions("arc.builder.tools.selection.size.100"), 48) shouldBe 48
-        BuilderPermissionPolicy.maximumAxis(permissions("arc.builder.tools.selection.size.40"), 48) shouldBe 40
+        BuilderPermissionPolicy.maximumAxis(permissions("arcbuild.selection.size.100"), 48) shouldBe 48
+        BuilderPermissionPolicy.maximumAxis(permissions("arcbuild.selection.size.40"), 48) shouldBe 40
         BuilderPermissionPolicy.maximumAxis(permissions(), 48) shouldBe 20
-        BuilderPermissionPolicy.hourlyChanges(permissions("arc.builder.tools.hourly.150000"), 20_000) shouldBe 150_000
-        BuilderPermissionPolicy.hourlyChanges(permissions("arc.builder.tools.hourly.50000"), 20_000) shouldBe 50_000
+        BuilderPermissionPolicy.hourlyChanges(permissions("arcbuild.hourly.150000"), 20_000) shouldBe 150_000
+        BuilderPermissionPolicy.hourlyChanges(permissions("arcbuild.hourly.50000"), 20_000) shouldBe 50_000
         BuilderPermissionPolicy.hourlyChanges(permissions(), 20_000) shouldBe 20_000
     }
 
@@ -526,11 +531,25 @@ class BuilderToolsDomainTest : FunSpec({
             safety.isSafeMaterial(Material.STONE) shouldBe true
             safety.isSafeMaterial(Material.OAK_STAIRS) shouldBe true
             safety.isSafeMaterial(Material.OAK_LEAVES) shouldBe true
+            safety.isSafeMaterial(Material.OAK_DOOR) shouldBe true
+            safety.isSafeMaterial(Material.OAK_TRAPDOOR) shouldBe true
+            safety.isSafeMaterial(Material.WHITE_CARPET) shouldBe true
+            safety.isSafeMaterial(Material.LADDER) shouldBe true
+            safety.isSafeMaterial(Material.SCAFFOLDING) shouldBe true
+            safety.isSafeMaterial(Material.CANDLE) shouldBe true
+            safety.isSafeMaterial(Material.TORCH) shouldBe true
+            safety.isSafeMaterial(Material.WALL_TORCH) shouldBe true
+            safety.isSafeMaterial(Material.POINTED_DRIPSTONE) shouldBe true
+            safety.isSafeMaterial(Material.SEA_PICKLE) shouldBe true
+            safety.isSafeMaterial(Material.LILY_PAD) shouldBe true
             safety.isSafeMaterial(Material.TNT) shouldBe false
             safety.isSafeMaterial(Material.SAND) shouldBe true
             safety.isSafeMaterial(Material.BROWN_CONCRETE_POWDER) shouldBe true
             safety.isSafeMaterial(Material.BEDROCK) shouldBe false
             safety.isSafeMaterial(Material.REDSTONE_TORCH) shouldBe false
+            safety.isSafeMaterial(Material.REDSTONE_WALL_TORCH) shouldBe false
+            safety.isSafeMaterial(Material.PISTON) shouldBe false
+            safety.isSafeMaterial(Material.HOPPER) shouldBe false
             safety.isSafeMaterial(Material.CHEST) shouldBe false
 
             val waterlogged = paper.server.createBlockData(Material.OAK_STAIRS) as Waterlogged
@@ -539,7 +558,21 @@ class BuilderToolsDomainTest : FunSpec({
 
             val doubleSlab = paper.server.createBlockData(Material.OAK_SLAB) as Slab
             doubleSlab.type = Slab.Type.DOUBLE
-            BuilderPlacementCost.item(doubleSlab).amount shouldBe 2
+            BuilderPlacementCost.itemOrNull(doubleSlab)?.amount shouldBe 2
+
+            val lowerDoor = paper.server.createBlockData(Material.OAK_DOOR) as Bisected
+            lowerDoor.half = Bisected.Half.BOTTOM
+            BuilderPlacementCost.itemOrNull(lowerDoor)?.let { it.type to it.amount } shouldBe (Material.OAK_DOOR to 1)
+            lowerDoor.half = Bisected.Half.TOP
+            BuilderPlacementCost.itemOrNull(lowerDoor) shouldBe null
+
+            val topTrapdoor = paper.server.createBlockData(Material.OAK_TRAPDOOR) as TrapDoor
+            topTrapdoor.half = Bisected.Half.TOP
+            BuilderPlacementCost.itemOrNull(topTrapdoor)?.amount shouldBe 1
+
+            val candles = paper.server.createBlockData(Material.CANDLE) as Candle
+            candles.candles = 4
+            BuilderPlacementCost.itemOrNull(candles)?.amount shouldBe 4
         }
     }
 

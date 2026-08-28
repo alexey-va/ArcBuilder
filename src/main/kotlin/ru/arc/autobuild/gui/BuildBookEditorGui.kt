@@ -29,7 +29,7 @@ object BuildBookEditorGui {
     private val config: Config get() = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
 
     fun open(player: Player) {
-        if (!player.hasPermission("arc.build.book.edit")) {
+        if (!player.hasPermission("arcbuild.book.edit")) {
             player.sendMessage(text("build-book.editor.no-permission"))
             return
         }
@@ -139,7 +139,7 @@ object BuildBookEditorGui {
         val player = event.whoClicked as? Player ?: return
         val held = player.inventory.itemInMainHand
         val current = BuildBookCodec.read(held)
-        if (current == null || !player.hasPermission("arc.build.book.edit")) {
+        if (current == null || !player.hasPermission("arcbuild.book.edit")) {
             player.closeInventory()
             player.sendMessage(text("build-book.editor.invalid"))
             return

@@ -20,6 +20,9 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.opentest4j.TestAbortedException
 import ru.arc.autobuild.ConstructionSite
+import ru.arc.autobuild.BuildBookCodec
+import ru.arc.autobuild.Building
+import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.PlayerBuildBookStore
 import ru.arc.autobuild.PlayerBuildBookDigestInspection
 import ru.arc.autobuild.PlayerBuildBookTemplate
@@ -205,6 +208,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
 
             listOf(10.5, 14.5, 18.5).forEach { x ->
                 player.teleport(Location(world, x, 64.0, 3.5, 0f, 0f))
+                if (x == 14.5) world.getBlockAt(14, 64, 0).type = Material.DEEPSLATE
                 player.performCommand("builder paste") shouldBe true
                 player.performCommand("builder confirm") shouldBe true
                 journey.awaitSettled(player) {
@@ -227,6 +231,60 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 journey.paper.callEvent(commandEvent)
                 !commandEvent.isCancelled && journey.activeLeases() == 0
             }
+
+            val draft = checkNotNull(BuildBookCodec.read(player.inventory.itemInMainHand))
+            draft.sourceRotation shouldBe BuildingManager.rotationFromYaw(player.yaw)
+            BuildingManager.addBuilding(Building(draft.buildingId))
+
+            val firstAnchor = world.getBlockAt(6, 64, 6)
+            journey.paper.callEvent(
+                PlayerInteractEvent(
+                    player,
+                    Action.RIGHT_CLICK_BLOCK,
+                    player.inventory.itemInMainHand,
+                    firstAnchor,
+                    BlockFace.UP,
+                    EquipmentSlot.HAND,
+                ),
+            )
+            checkNotNull(BuildingManager.pending(player.uniqueId)).also { preview ->
+                preview.centerBlock.blockX shouldBe 6
+                preview.centerBlock.blockZ shouldBe 6
+                preview.fullRotation shouldBe 0
+            }
+
+            val secondAnchor = world.getBlockAt(9, 64, 11)
+            journey.paper.callEvent(
+                PlayerInteractEvent(
+                    player,
+                    Action.RIGHT_CLICK_BLOCK,
+                    player.inventory.itemInMainHand,
+                    secondAnchor,
+                    BlockFace.UP,
+                    EquipmentSlot.HAND,
+                ),
+            )
+            checkNotNull(BuildingManager.pending(player.uniqueId)).also { preview ->
+                preview.centerBlock.blockX shouldBe 9
+                preview.centerBlock.blockZ shouldBe 11
+            }
+
+            player.performCommand("builder cancel") shouldBe true
+            BuildingManager.pending(player.uniqueId) shouldBe null
+
+            journey.paper.callEvent(
+                PlayerInteractEvent(
+                    player,
+                    Action.RIGHT_CLICK_BLOCK,
+                    player.inventory.itemInMainHand,
+                    firstAnchor,
+                    BlockFace.UP,
+                    EquipmentSlot.HAND,
+                ),
+            )
+            checkNotNull(BuildingManager.pending(player.uniqueId))
+            player.performCommand("builder book cancel") shouldBe true
+            BuildingManager.pending(player.uniqueId) shouldBe null
         }
     }
 })
@@ -245,14 +303,14 @@ private class ArcBuilderJourney private constructor(
 
     fun grantBuilderPermissions(player: Player) {
         listOf(
-            "arc.builder.tools.use",
-            "arc.builder.tools.fill",
-            "arc.builder.tools.copy",
-            "arc.builder.tools.paste",
-            "arc.builder.tools.deconstruct",
-            "arc.builder.tools.crown",
-            "arc.build.book.use",
-            "arc.build.book.create",
+            "arcbuild.use",
+            "arcbuild.fill",
+            "arcbuild.copy",
+            "arcbuild.paste",
+            "arcbuild.deconstruct",
+            "arcbuild.crown",
+            "arcbuild.book.use",
+            "arcbuild.book.create",
         ).forEach { permission -> player.addAttachment(plugin, permission, true) }
         player.recalculatePermissions()
     }
@@ -348,6 +406,7 @@ private class ArcBuilderJourney private constructor(
                     displayRenderer = renderer,
                     blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
                     draftStorage = InMemoryBuilderDraftStorage(),
+                    bookSchematicVerifier = BuilderBookSchematicVerifier { true },
                 )
                 checkNotNull(plugin.getCommand("builder")).apply {
                     setExecutor(runtime)

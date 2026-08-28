@@ -126,6 +126,7 @@ internal class BuilderBookSqlRegistry(
             statement.setString(index++, checked.blueprint.buildingId)
             statement.setString(index++, checked.blueprint.contentSha256)
             statement.setString(index++, checked.blueprint.schematicSha256)
+            statement.setInt(index++, checked.blueprint.sourceRotation)
             statement.setInt(index++, checked.blueprint.blockCount)
             statement.setInt(index++, checked.blueprint.materialTypes)
             statement.setInt(index++, checked.blueprint.materialItems)
@@ -704,6 +705,7 @@ internal class BuilderBookSqlRegistry(
             statement.setString(index++, blueprint.buildingId)
             statement.setString(index++, blueprint.contentSha256)
             statement.setString(index++, blueprint.schematicSha256)
+            statement.setInt(index++, blueprint.sourceRotation)
             statement.setInt(index++, blueprint.blockCount)
             statement.setInt(index++, blueprint.materialTypes)
             statement.setInt(index++, blueprint.materialItems)
@@ -796,6 +798,7 @@ internal class BuilderBookSqlRegistry(
         buildingId = getString("${prefix}building_id"),
         contentSha256 = getString("${prefix}content_sha256"),
         schematicSha256 = getString("${prefix}schematic_sha256"),
+        sourceRotation = getInt("${prefix}source_rotation"),
         blockCount = getInt("${prefix}block_count"),
         materialTypes = getInt("${prefix}material_types"),
         materialItems = getInt("${prefix}material_items"),
@@ -836,6 +839,7 @@ internal class BuilderBookSqlRegistry(
             buildingId = getString("building_id"),
             contentSha256 = getString("content_sha256"),
             schematicSha256 = getString("schematic_sha256"),
+            sourceRotation = getInt("source_rotation"),
             blockCount = getInt("block_count"),
             materialTypes = getInt("material_types"),
             materialItems = getInt("material_items"),
@@ -882,7 +886,7 @@ internal class BuilderBookSqlRegistry(
 
     companion object {
         const val MIGRATION_NAMESPACE = "arc_builder_books"
-        const val CURRENT_SCHEMA_VERSION = 4
+        const val CURRENT_SCHEMA_VERSION = 5
 
         val MIGRATIONS = listOf(
             SqlMigration(
@@ -1023,8 +1027,28 @@ internal class BuilderBookSqlRegistry(
                 },
             ),
             MySqlOneTimeUseLedger.createTableMigration(
-                version = CURRENT_SCHEMA_VERSION,
+                version = 4,
                 description = "Create shared one-time-use ledger for builder books",
+            ),
+            SqlMigration(
+                version = 5,
+                description = "Preserve the player's source facing for relative blueprint placement",
+                statements = buildList {
+                    addAll(
+                        addColumnIfMissing(
+                            table = "arc_builder_book_blueprints",
+                            column = "source_rotation",
+                            definition = "source_rotation SMALLINT NOT NULL DEFAULT 0 AFTER schematic_sha256",
+                        ),
+                    )
+                    addAll(
+                        addColumnIfMissing(
+                            table = "arc_builder_book_mints",
+                            column = "source_rotation",
+                            definition = "source_rotation SMALLINT NOT NULL DEFAULT 0 AFTER schematic_sha256",
+                        ),
+                    )
+                },
             ),
         )
 
@@ -1068,10 +1092,10 @@ internal class BuilderBookSqlRegistry(
             "INSERT INTO arc_builder_book_mints (transaction_uuid, kind, player_uuid, blueprint_uuid, instance_uuid, " +
                 "source_instance_uuid, source_instance_generation, " +
                 "delivery_rotation, delivery_offset_x, delivery_offset_y, delivery_offset_z, " +
-                "creator_uuid, creator_name, title, building_id, content_sha256, schematic_sha256, block_count, " +
+                "creator_uuid, creator_name, title, building_id, content_sha256, schematic_sha256, source_rotation, block_count, " +
                 "material_types, material_items, material_cost_minor, construction_fee_minor, issue_price_minor, " +
                 "blueprint_created_at_ms, status, open_player_uuid, created_at_ms, updated_at_ms) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
         private const val UPDATE_MINT =
             "UPDATE arc_builder_book_mints SET status = ?, open_player_uuid = ?, updated_at_ms = ?, balance_before_minor = ?, " +
@@ -1080,8 +1104,8 @@ internal class BuilderBookSqlRegistry(
 
         private const val INSERT_BLUEPRINT =
             "INSERT INTO arc_builder_book_blueprints (blueprint_uuid, creator_uuid, creator_name, title, building_id, " +
-                "content_sha256, schematic_sha256, block_count, material_types, material_items, material_cost_minor, " +
-                "construction_fee_minor, issue_price_minor, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "content_sha256, schematic_sha256, source_rotation, block_count, material_types, material_items, material_cost_minor, " +
+                "construction_fee_minor, issue_price_minor, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
         private const val INSERT_INSTANCE =
             "INSERT INTO arc_builder_book_instances (instance_uuid, blueprint_uuid, transaction_uuid, minted_by_uuid, " +

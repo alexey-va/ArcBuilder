@@ -21,6 +21,7 @@ class BuilderDraftJournalTest : FunSpec({
         buildingId = "player-${playerId.toString().replace("-", "")}-$contentSha256.schem",
         blueprintId = blueprintId,
         contentSha256 = contentSha256,
+        sourceRotation = 270,
         blockCount = 42,
         phase = BuilderDraftPhase.PREPARED,
         createdAtMillis = 1_800_000_000_000L,
@@ -36,6 +37,7 @@ class BuilderDraftJournalTest : FunSpec({
         ready.operationId shouldBe prepared.operationId
         ready.playerId shouldBe prepared.playerId
         ready.blueprintId shouldBe prepared.blueprintId
+        ready.sourceRotation shouldBe 270
 
         shouldThrow<IllegalArgumentException> {
             ready.ready("c".repeat(64), ready.updatedAtMillis + 1)

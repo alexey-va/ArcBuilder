@@ -10,6 +10,8 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.Block
+import org.bukkit.block.data.Bisected
+import org.bukkit.block.data.type.Door
 import org.bukkit.block.data.type.Leaves
 import org.bukkit.block.data.type.Slab
 import org.bukkit.entity.Player
@@ -90,7 +92,39 @@ class BuilderClipboardControllerTest : FunSpec({
         }
     }
 
-    test("occupied paste target is skipped without mutation or unsafe-block spam") {
+    test("copy and paste preserve both door halves while charging one door") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderClipboardDoorTest")
+            val world = paper.addSimpleWorld("clipboard-door")
+            val player = paper.addPlayer("ClipboardDoorOwner")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            val lower = paper.server.createBlockData(Material.OAK_DOOR) as Door
+            lower.half = Bisected.Half.BOTTOM
+            val upper = lower.clone() as Door
+            upper.half = Bisected.Half.TOP
+            world.getBlockAt(0, 64, 0).blockData = lower
+            world.getBlockAt(0, 65, 0).blockData = upper
+            val harness = ClipboardHarness(plugin)
+            harness.select(player, world, 0, 64, 0, 0, 65, 0)
+
+            harness.controller.use { controller ->
+                val clipboard = controller.copy(player)
+                clipboard.blocks.size shouldBe 2
+                clipboard.skippedUnsafeBlocks shouldBe 0
+
+                player.teleport(Location(world, 10.5, 64.0, 12.5))
+                val plan = controller.planPaste(player)
+                plan.changes.size shouldBe 2
+                BuilderItemCodec.decode(plan.costs.single()).let { (item, amount) ->
+                    item.type shouldBe Material.OAK_DOOR
+                    amount shouldBe 1
+                }
+                plan.skippedUnsafeBlocks shouldBe 0
+            }
+        }
+    }
+
+    test("occupied safe paste target is replaced and returned as a survival material") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderClipboardUnsafeTest")
             val world = paper.addSimpleWorld("clipboard-unsafe")
@@ -105,9 +139,42 @@ class BuilderClipboardControllerTest : FunSpec({
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
                 world.getBlockAt(10, 64, 10).type = Material.DEEPSLATE
 
-                shouldThrow<ClipboardFailure> { controller.planPaste(player) }.path shouldBe "errors.nothing-to-change"
-                harness.mutableBlocks shouldBe 0
+                val plan = controller.planPaste(player)
+                plan.changes.single().beforeBlockData shouldBe Material.DEEPSLATE.createBlockData().asString
+                plan.changes.single().afterBlockData shouldBe Material.STONE.createBlockData().asString
+                BuilderItemCodec.decode(plan.rewards.single()).let { (item, amount) ->
+                    item.type shouldBe Material.DEEPSLATE
+                    amount shouldBe 1
+                }
+                plan.skippedUnsafeBlocks shouldBe 0
+                harness.mutableBlocks shouldBe 1
                 world.getBlockAt(10, 64, 10).type shouldBe Material.DEEPSLATE
+            }
+        }
+    }
+
+    test("paste still skips containers and other unsafe occupied targets") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderClipboardUnsafeTargetTest")
+            val world = paper.addSimpleWorld("clipboard-unsafe-target")
+            val player = paper.addPlayer("ClipboardUnsafeTargetOwner")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+            val harness = ClipboardHarness(plugin)
+            harness.select(player, world, 0, 64, 0, 1, 64, 0)
+
+            harness.controller.use { controller ->
+                controller.copy(player)
+                player.teleport(Location(world, 10.5, 64.0, 12.5))
+                world.getBlockAt(10, 64, 10).type = Material.DEEPSLATE
+                world.getBlockAt(11, 64, 10).type = Material.CHEST
+
+                val plan = controller.planPaste(player)
+                plan.changes.size shouldBe 1
+                plan.changes.single().position.x shouldBe 10
+                plan.skippedUnsafeBlocks shouldBe 1
+                world.getBlockAt(11, 64, 10).type shouldBe Material.CHEST
             }
         }
     }
@@ -161,6 +228,7 @@ private class ClipboardHarness(
         maximumBlocks = maximumBlocks,
         clipboardTtl = Duration.ofMinutes(1),
         nowMillis = nowMillis,
+        replacementRefund = { block -> BuilderPlacementCost.itemOrNull(block.blockData) },
         host = object : BuilderClipboardHost {
             override fun ensureCopyPermission(player: Player) {
                 copyPermissions++
@@ -199,6 +267,7 @@ private class ClipboardHarness(
                 player: Player,
                 changes: List<BuilderBlockChange>,
                 costs: List<BuilderItemAmount>,
+                rewards: List<BuilderItemAmount>,
                 skippedUnsafeBlocks: Int,
             ): BuilderPlan {
                 val now = nowMillis()
@@ -208,7 +277,7 @@ private class ClipboardHarness(
                     kind = BuilderPlanKind.PASTE,
                     changes = changes,
                     costs = costs,
-                    rewards = emptyList(),
+                    rewards = rewards,
                     skippedUnsafeBlocks = skippedUnsafeBlocks,
                     createdAtMillis = now,
                     expiresAtMillis = now + 30_000L,

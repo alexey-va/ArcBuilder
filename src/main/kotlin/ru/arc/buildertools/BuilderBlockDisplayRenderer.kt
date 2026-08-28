@@ -11,11 +11,17 @@ import org.bukkit.entity.Entity
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.util.Transformation
+import net.kyori.adventure.bossbar.BossBar
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.title.Title
 import org.joml.Quaternionf
 import org.joml.Vector3f
 import ru.arc.autobuild.BuildBookPreviewBridge
+import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.ConstructionSite
+import ru.arc.core.LifecycleTaskScope
 import ru.arc.util.BlockUtils.rotateBlockData
+import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
 
 /**
@@ -37,6 +43,8 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
 internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
     private val maxPlanDisplays: Int,
+    private val messages: LocalizedMiniMessage,
+    taskScope: LifecycleTaskScope,
 ) : BuilderDisplayRenderer {
     private enum class Layer { SELECTION, PLAN, BOOK }
 
@@ -56,9 +64,18 @@ internal class BuilderBlockDisplayRenderer(
 
     private data class Scene(val worldId: UUID, val signature: Int, val entities: List<Entity>)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
+    private val bookSites = mutableMapOf<UUID, ConstructionSite>()
+    private val bookBossBars = mutableMapOf<UUID, BossBar>()
 
     init {
         require(maxPlanDisplays in 32..512)
+        checkNotNull(
+            taskScope.runTimer(0L, 20L) {
+                bookSites.values.toList().forEach { site ->
+                    if (site.player.isOnline) showBookActionBar(site)
+                }
+            },
+        ) { "Builder preview guidance task scope is inactive" }
     }
 
     override fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?) {
@@ -116,9 +133,70 @@ internal class BuilderBlockDisplayRenderer(
 
     override fun clearPlan(playerId: UUID) = remove(playerId, Layer.PLAN)
 
-    override fun open(site: ConstructionSite) = renderBook(site)
-    override fun refresh(site: ConstructionSite) = renderBook(site)
-    override fun close(playerId: UUID) = remove(playerId, Layer.BOOK)
+    override fun open(site: ConstructionSite) {
+        renderBook(site)
+        showBookGuidance(site, showTitle = true)
+    }
+
+    override fun refresh(site: ConstructionSite) {
+        renderBook(site)
+        showBookGuidance(site, showTitle = false)
+    }
+
+    override fun close(playerId: UUID) {
+        remove(playerId, Layer.BOOK)
+        closeBookGuidance(playerId)
+    }
+
+    private fun showBookGuidance(site: ConstructionSite, showTitle: Boolean) {
+        val player = site.player
+        val locale = player.locale().toLanguageTag()
+        bookSites[player.uniqueId] = site
+        val name = messages.literal(BuildBookItems.compactTitle(site.bookData.title, 16))
+        val bossBar = bookBossBars[player.uniqueId] ?: BossBar.bossBar(
+            messages.render(
+                if (site.bookData.draft) "book.preview.bossbar-draft" else "book.preview.bossbar-active",
+                locale,
+                mapOf("name" to name),
+            ),
+            1f,
+            if (site.bookData.draft) BossBar.Color.YELLOW else BossBar.Color.GREEN,
+            BossBar.Overlay.PROGRESS,
+        ).also {
+            bookBossBars[player.uniqueId] = it
+            player.showBossBar(it)
+        }
+        bossBar.name(
+            messages.render(
+                if (site.bookData.draft) "book.preview.bossbar-draft" else "book.preview.bossbar-active",
+                locale,
+                mapOf("name" to name),
+            ),
+        )
+        bossBar.color(if (site.bookData.draft) BossBar.Color.YELLOW else BossBar.Color.GREEN)
+        showBookActionBar(site)
+        if (showTitle) {
+            player.showTitle(
+                Title.title(
+                    messages.render("book.preview.title", locale),
+                    messages.render("book.preview.subtitle", locale),
+                    5,
+                    35,
+                    10,
+                ),
+            )
+        }
+    }
+
+    private fun showBookActionBar(site: ConstructionSite) {
+        site.player.sendActionBar(messages.render("book.preview.actionbar", site.player.locale().toLanguageTag()))
+    }
+
+    private fun closeBookGuidance(playerId: UUID) {
+        val player = bookSites.remove(playerId)?.player ?: Bukkit.getPlayer(playerId)
+        bookBossBars.remove(playerId)?.let { bar -> player?.hideBossBar(bar) }
+        player?.sendActionBar(Component.empty())
+    }
 
     private fun renderBook(site: ConstructionSite) {
         if (site.player.world.uid != site.world.uid) {
@@ -232,9 +310,13 @@ internal class BuilderBlockDisplayRenderer(
         scenes.remove(playerId to layer)?.entities?.forEach(Entity::remove)
     }
 
-    override fun clearPlayer(playerId: UUID) = Layer.entries.forEach { remove(playerId, it) }
+    override fun clearPlayer(playerId: UUID) {
+        Layer.entries.forEach { remove(playerId, it) }
+        closeBookGuidance(playerId)
+    }
 
     override fun close() {
+        bookBossBars.keys.toList().forEach(::closeBookGuidance)
         scenes.values.flatMap(Scene::entities).forEach(Entity::remove)
         scenes.clear()
     }

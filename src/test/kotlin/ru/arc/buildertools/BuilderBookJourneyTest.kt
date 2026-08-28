@@ -74,8 +74,6 @@ class BuilderBookJourneyTest : FunSpec({
             "/builder wand",
             "/builder copy",
             "/builder book draft",
-            "/builder book activate",
-            "/builder book confirm",
             "/builder book copy",
             "/builder book sell",
             "/builder book status",
@@ -90,7 +88,7 @@ class BuilderBookJourneyTest : FunSpec({
         val russianGuide = config.stringList("locales.ru.book.guide").joinToString("\n")
         russianGuide shouldContain "Контур виден постоянно"
         russianGuide shouldContain "бесплатный черновик"
-        russianGuide shouldContain "смета без оплаты"
+        russianGuide shouldContain "смету без оплаты"
         config.string("locales.ru.book.status.active") shouldContain "Себестоимость копии"
         config.string("locales.en.book.status.active") shouldContain "Copy at stored cost"
         config.string("locales.ru.book.status.checking") shouldContain "UUID, владельца и поколение"
@@ -110,18 +108,34 @@ class BuilderBookJourneyTest : FunSpec({
 
         listOf("ru", "en").forEach { locale ->
             val plan = config.string("locales.$locale.plan.ready").lines()
-            plan.size shouldBe 4
+            plan.size shouldBe 5
+            plan.first() shouldBe ""
             plan.single { it.contains("<cost>") }.contains("<reward>") shouldBe false
             plan.single { it.contains("<reward>") }.contains("<cost>") shouldBe false
 
             val quote = config.string("locales.$locale.book.quote").lines()
-            quote.size shouldBe 4
+            quote.size shouldBe 5
+            quote.first() shouldBe ""
             quote.single { it.contains("<materials>") }.contains("<labor>") shouldBe false
             quote.single { it.contains("<labor>") }.contains("<materials>") shouldBe false
+
+            plan.drop(2).all { line -> line.contains(">   ") } shouldBe true
+            quote.drop(2).all { line -> line.contains(">   ") } shouldBe true
 
             config.string("locales.$locale.items.none").isNotBlank() shouldBe true
             config.string("locales.$locale.items.summary") shouldContain "<items>"
             config.string("locales.$locale.items.summary") shouldContain "<types>"
         }
+    }
+
+    test("player guidance hides internal state names and capitalizes operation labels") {
+        val config = Config(Files.createTempDirectory("arc-builder-wording-"), "modules/builder-tools.yml")
+
+        config.string("locales.ru.book.quote-expired").lowercase().contains("activate") shouldBe false
+        config.string("locales.ru.book.quote-expired").lowercase().contains("copy") shouldBe false
+        config.string("locales.en.book.quote-expired").lowercase().contains("activate") shouldBe false
+        config.string("locales.en.book.quote-expired").lowercase().contains("copy") shouldBe false
+        config.string("locales.ru.kinds.paste") shouldBe "Вставка чертежа"
+        config.string("locales.en.kinds.paste") shouldBe "Blueprint paste"
     }
 })

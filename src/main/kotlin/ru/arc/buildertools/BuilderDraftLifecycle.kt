@@ -57,6 +57,7 @@ internal data class BuilderDraftInventoryEvidence(
                 data.title == record.title &&
                 data.contentSha256 == record.contentSha256 &&
                 data.schematicSha256 == record.schematicSha256 &&
+                data.sourceRotation == record.sourceRotation &&
                 data.blockCount == record.blockCount
     }
 }
@@ -145,7 +146,7 @@ internal class BuilderDraftLifecycle(
 
     fun createDraft(player: Player, rawTitle: List<String>) {
         host.ensureCopyPermission(player)
-        if (!player.hasPermission("arc.build.book.create")) fail("errors.no-permission")
+        if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
         if (!ready) fail(if (failed) "book.failed" else "book.draft-recovery-starting")
         if (player.uniqueId in conflictedPlayers) fail("book.manual-review")
         if (pending[player.uniqueId] != null) {
@@ -174,6 +175,7 @@ internal class BuilderDraftLifecycle(
             buildingId = prepared.fileName,
             blueprintId = UUID.randomUUID(),
             contentSha256 = prepared.contentSha256,
+            sourceRotation = clipboard.sourceRotation,
             blockCount = prepared.blockCount,
             phase = BuilderDraftPhase.PREPARED,
             createdAtMillis = now,
@@ -585,6 +587,7 @@ internal class BuilderDraftLifecycle(
     private fun draftData(record: BuilderDraftRecord): BuildBookData = BuildBookData(
         buildingId = record.buildingId,
         title = record.title,
+        sourceRotation = record.sourceRotation,
         playerCreated = true,
         creatorId = record.playerId,
         creatorName = record.playerName,

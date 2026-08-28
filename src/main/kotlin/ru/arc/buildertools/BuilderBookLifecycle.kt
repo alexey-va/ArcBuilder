@@ -49,6 +49,19 @@ internal interface BuilderBookLifecycleHost {
     fun send(player: Player, path: String, values: Map<String, Component> = emptyMap())
 }
 
+internal fun interface BuilderBookSchematicVerifier {
+    fun matches(data: BuildBookData): Boolean
+}
+
+internal object PlayerBuildBookSchematicVerifier : BuilderBookSchematicVerifier {
+    override fun matches(data: BuildBookData): Boolean {
+        val expectedFile = data.schematicSha256 ?: return false
+        val expectedContent = data.contentSha256 ?: return false
+        return PlayerBuildBookStore.schematicSha256(data.buildingId) == expectedFile &&
+            PlayerBuildBookStore.contentSha256(data.buildingId) == expectedContent
+    }
+}
+
 internal data class BuilderBookLifecycleHealth(
     val deliveryWaitingForSpace: Int,
     val reservationReleaseBacklog: Int,
@@ -75,6 +88,7 @@ internal class BuilderBookLifecycle(
     private val host: BuilderBookLifecycleHost,
     draftJournal: BuilderDraftJournal,
     draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
+    private val schematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
 ) : AutoCloseable {
     private data class PendingMint(
         val kind: BuilderBookMintKind,
@@ -219,7 +233,7 @@ internal class BuilderBookLifecycle(
     }
 
     fun ensureAvailable(player: Player) {
-        if (!player.hasPermission("arc.build.book.use")) fail("errors.no-permission")
+        if (!player.hasPermission("arcbuild.book.use")) fail("errors.no-permission")
         host.ensureOperationalContext(player)
     }
 
@@ -238,11 +252,7 @@ internal class BuilderBookLifecycle(
     }
 
     fun verifySchematic(data: BuildBookData) {
-        val expectedFile = data.schematicSha256 ?: fail("book.invalid")
-        val expectedContent = data.contentSha256 ?: fail("book.invalid")
-        val actualFile = PlayerBuildBookStore.schematicSha256(data.buildingId) ?: fail("book.invalid")
-        val actualContent = PlayerBuildBookStore.contentSha256(data.buildingId) ?: fail("book.invalid")
-        if (actualFile != expectedFile || actualContent != expectedContent) fail("book.invalid")
+        if (!schematicVerifier.matches(data)) fail("book.invalid")
     }
 
     fun reserveForBuild(player: Player, plan: BuilderPlan, plannedMode: GameMode) {
@@ -472,7 +482,7 @@ internal class BuilderBookLifecycle(
     }
 
     private fun prepareActivation(player: Player) {
-        if (!player.hasPermission("arc.build.book.create")) fail("errors.no-permission")
+        if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
         val activeRegistry = requireRegistry()
         val held = player.inventory.itemInMainHand
         val data = BuildBookCodec.read(held)?.takeIf { it.draft } ?: fail("book.draft-required")
@@ -505,6 +515,7 @@ internal class BuilderBookLifecycle(
                                 buildingId = data.buildingId,
                                 contentSha256 = checkNotNull(data.contentSha256),
                                 schematicSha256 = checkNotNull(data.schematicSha256),
+                                sourceRotation = data.sourceRotation,
                                 blockCount = data.blockCount ?: quoted.quote.materialItems,
                                 materialTypes = quoted.quote.materialTypes,
                                 materialItems = quoted.quote.materialItems,
@@ -542,7 +553,7 @@ internal class BuilderBookLifecycle(
     }
 
     private fun prepareCopy(player: Player) {
-        if (!player.hasPermission("arc.build.book.create")) fail("errors.no-permission")
+        if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
         val activeRegistry = requireRegistry()
         val held = player.inventory.itemInMainHand
         val data = BuildBookCodec.read(held)?.takeIf { it.available } ?: fail("book.active-required")
@@ -593,7 +604,7 @@ internal class BuilderBookLifecycle(
     }
 
     private fun sell(player: Player, rawPrice: String?) {
-        if (!player.hasPermission("arc.build.book.sell")) fail("errors.no-permission")
+        if (!player.hasPermission("arcbuild.book.sell")) fail("errors.no-permission")
         requireRegistry()
         if (operationLocks.isPlayerLocked(player.uniqueId)) fail("errors.busy")
         val price = BuilderBookAuctionPrice.parse(rawPrice) ?: fail("book.auction-price")
@@ -829,7 +840,8 @@ internal class BuilderBookLifecycle(
 
     private fun cancelMint(player: Player) {
         if (pendingMints.remove(player.uniqueId) != null) send(player, "book.quote-cancelled")
-        else fail("book.quote-expired")
+        else if (BuildingManager.closePreview(player.uniqueId)) send(player, "book.preview-cancelled")
+        else fail("book.nothing-to-cancel")
     }
 
     private fun waitForDeliverySpace(player: Player) {
@@ -875,6 +887,7 @@ internal class BuilderBookLifecycle(
             data.buildingId == blueprint.buildingId &&
             data.contentSha256 == blueprint.contentSha256 &&
             data.schematicSha256 == blueprint.schematicSha256 &&
+            data.sourceRotation == blueprint.sourceRotation &&
             data.blockCount == blueprint.blockCount &&
             (data.issuePriceMinor == null || data.issuePriceMinor == blueprint.issuePriceMinor)
 
@@ -888,6 +901,7 @@ internal class BuilderBookLifecycle(
         buildingId = blueprint.buildingId,
         title = blueprint.title,
         transform = BuildBookTransform(placement.rotation, placement.offsetX, placement.offsetY, placement.offsetZ),
+        sourceRotation = blueprint.sourceRotation,
         playerCreated = true,
         creatorId = blueprint.creatorId,
         creatorName = blueprint.creatorName,
