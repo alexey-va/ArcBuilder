@@ -56,3 +56,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: MySQL migrations, contention, recovery, and anti-duplication
         run: ./gradlew --no-daemon integrationTest
+      - name: Preserve MySQL integration test report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ArcBuilder-mysql-integration-${{ github.sha }}
+          path: |
+            build/reports/tests/integrationTest/
+            build/test-results/integrationTest/
+          if-no-files-found: warn
