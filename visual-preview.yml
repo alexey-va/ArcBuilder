@@ -1,0 +1,290 @@
+schema: 1
+plugin: ArcBuilder
+minecraft-version: '1.21.11'
+minecraft-client-sha1: ba2df812c2d12e0219c489c4cd9a5e1f0760f5bd
+
+resource-pack:
+  url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip
+  sha256-url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip.sha256
+
+custom-items:
+  arc:background:
+    material: GRAY_STAINED_GLASS_PANE
+    model: assets/arc/models/gui/background.json
+
+sources:
+  builder:
+    path: src/main/resources/modules/builder-tools.yml
+    root: locales.ru
+    prefix-key: prefix
+    exclude:
+      - prefix
+  autobuild:
+    path: src/main/resources/modules/auto-build.yml
+    include:
+      - build-book.display-name
+      - build-book.lore
+      - build-book.received
+      - build-book.draft-preview-message
+      - build-book.editor.*
+      - cant-build-message
+      - disabled-message
+      - start-message
+      - confirm-message
+      - confirm-gui.*
+      - start-build-message
+      - already-building-message
+      - building-gui.*
+      - inactivity-cancel-message
+      - messages.*
+      - cancel-build-message
+      - construction.npc-prompt
+
+placeholders:
+  amount: '384'
+  balance: '842.50 💰'
+  blocks: '1 248'
+  building: 'Дом у северной гавани'
+  cost: '64 камня, 32 дубовых доски'
+  count: '1 248'
+  creator: 'AlexeyBuilder'
+  density: 'естественная'
+  full_price: '1 920.00 💰'
+  items: '96'
+  kind: 'Вставка чертежа'
+  labor: '240.00 💰'
+  material: 'Дубовые доски ×32'
+  materials: '1 680.00 💰'
+  max: '2 000'
+  missing_price: '640.00 💰'
+  name: 'Дом у северной гавани'
+  noise: 'мягкий'
+  offset_x: '-5'
+  offset_y: '2'
+  offset_z: '12'
+  price: '1 920.00 💰'
+  progress: '67'
+  purchased: '48'
+  radius: '6'
+  reward: '12 глубинного сланца'
+  rotation: '90'
+  seconds: '30'
+  setting: 'Густота'
+  shape: 'раскидистая'
+  skipped: '3'
+  state: 'черновик'
+  status: 'готово'
+  total: '1 920.00 💰'
+  types: '4'
+  value: '-5'
+  volume: '1 728'
+  weight: '40%'
+  x: '-1266'
+  y: '85'
+  z: '-506'
+
+glyph-fallbacks:
+  '🛠': '⛏'
+
+glyphs:
+  - character: '💰'
+    path: '@ops/classic_survival/plugins/ItemsAdder/contents/arc/resourcepack/arc/textures/glyphs/coin.png'
+    height: 9
+    ascent: 8
+    advance: 10
+
+surfaces:
+  hud:
+    - id: book-draft-preview
+      title: builder:book.preview.title
+      subtitle: builder:book.preview.subtitle
+      actionbar: builder:book.preview.actionbar
+      bossbar: builder:book.preview.bossbar-draft
+      bossbar-color: yellow
+      bossbar-progress: 1.0
+      placeholders:
+        name: Дом у северной гавани
+    - id: book-active-preview
+      title: builder:book.preview.title
+      subtitle: builder:book.preview.subtitle
+      actionbar: builder:book.preview.actionbar
+      bossbar: builder:book.preview.bossbar-active
+      bossbar-color: green
+      bossbar-progress: 1.0
+      placeholders:
+        name: Дом у северной гавани
+
+  items:
+    - id: selector-wand
+      material: ECHO_SHARD
+      name: builder:wand.name
+      lore: builder:wand.lore
+    - id: crown-brush
+      material: BRUSH
+      name: builder:crown-brush.name
+      lore: builder:crown-brush.lore
+    - id: draft-build-book
+      material: BOOK
+      name: autobuild:build-book.display-name
+      lore: autobuild:build-book.lore
+      placeholders:
+        state: Бесплатный черновик
+        price: после проверки
+    - id: active-build-book
+      material: BOOK
+      name: autobuild:build-book.display-name
+      lore: autobuild:build-book.lore
+      placeholders:
+        state: Активная одноразовая книга
+        price: '1 920.00 💰'
+    - id: delivery-pending-book
+      material: BOOK
+      name: autobuild:build-book.display-name
+      lore: autobuild:build-book.lore
+      placeholders:
+        state: Подтверждается реестром
+        price: '1 920.00 💰'
+
+  inventories:
+    - id: book-editor-default
+      title: autobuild:build-book.editor.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      placeholders:
+        name: Дом у северной гавани
+        rotation: '90'
+        offset_x: '-5'
+        offset_y: '2'
+        offset_z: '12'
+      items:
+        - slot: 4
+          material: BOOK
+          name: autobuild:build-book.editor.overview.name
+          lore: autobuild:build-book.editor.overview.lore
+        - slot: 11
+          material: REDSTONE_TORCH
+          name: autobuild:build-book.editor.axis-x.name
+          lore: autobuild:build-book.editor.axis-x.lore
+          placeholders: {value: '-5'}
+        - slot: 13
+          material: SCAFFOLDING
+          name: autobuild:build-book.editor.axis-y.name
+          lore: autobuild:build-book.editor.axis-y.lore
+          placeholders: {value: '2'}
+        - slot: 15
+          material: RECOVERY_COMPASS
+          name: autobuild:build-book.editor.axis-z.name
+          lore: autobuild:build-book.editor.axis-z.lore
+          placeholders: {value: '12'}
+        - slot: 21
+          material: CLOCK
+          name: autobuild:build-book.editor.rotation.name
+          lore: autobuild:build-book.editor.rotation.lore
+          placeholders: {value: '90'}
+        - slot: 23
+          material: REPEATER
+          name: autobuild:build-book.editor.reset.name
+          lore: autobuild:build-book.editor.reset.lore
+    - id: book-editor-preview-inactive
+      extends: book-editor-default
+      items:
+        - slot: 11
+          material: REDSTONE_TORCH
+          name: autobuild:build-book.editor.preview-inactive.name
+          lore: autobuild:build-book.editor.preview-inactive.lore
+    - id: book-editor-book-mismatch
+      extends: book-editor-default
+      items:
+        - slot: 13
+          material: SCAFFOLDING
+          name: autobuild:build-book.editor.preview-book-mismatch.name
+          lore: autobuild:build-book.editor.preview-book-mismatch.lore
+    - id: book-editor-protection-denied
+      extends: book-editor-default
+      items:
+        - slot: 15
+          material: RECOVERY_COMPASS
+          name: autobuild:build-book.editor.preview-protection-denied.name
+          lore: autobuild:build-book.editor.preview-protection-denied.lore
+    - id: build-confirmation
+      title: autobuild:confirm-gui.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - slot: 11
+          material: PAPER
+          name: autobuild:confirm-gui.confirm.display
+          lore: autobuild:confirm-gui.confirm.lore
+        - slot: 15
+          material: RED_STAINED_GLASS_PANE
+          name: autobuild:confirm-gui.cancel.display
+          lore: autobuild:confirm-gui.cancel.lore
+    - id: building-progress
+      title: autobuild:building-gui.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - slot: 4
+          material: PAPER
+          name: autobuild:building-gui.progress.display
+          lore: autobuild:building-gui.progress.lore
+          placeholders: {progress: '67'}
+        - slot: 13
+          material: RED_STAINED_GLASS_PANE
+          name: autobuild:building-gui.cancel.display
+          lore: autobuild:building-gui.cancel.lore
+    - id: building-cancel-confirmation
+      title: autobuild:building-gui.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - slot: 4
+          material: PAPER
+          name: autobuild:building-gui.progress.display
+          lore: autobuild:building-gui.progress.lore
+          placeholders: {progress: '67'}
+        - slot: 13
+          material: RED_STAINED_GLASS_PANE
+          name: autobuild:building-gui.cancel-confirm.display
+          lore: autobuild:building-gui.cancel-confirm.lore
+    - id: building-admin
+      title: autobuild:building-gui.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - slot: 4
+          material: PAPER
+          name: autobuild:building-gui.progress.display
+          lore: autobuild:building-gui.progress.lore
+          placeholders: {progress: '67'}
+        - slot: 13
+          material: RED_STAINED_GLASS_PANE
+          name: autobuild:building-gui.cancel.display
+          lore: autobuild:building-gui.cancel.lore
+        - slot: 22
+          material: BLAZE_POWDER
+          name: autobuild:building-gui.fast-finish.display
+          lore: autobuild:building-gui.fast-finish.lore
+
+  world:
+    - id: builder-npc-confirmation
+      text: autobuild:construction.npc-prompt
+
+  fragments:
+    - source: builder
+      include:
+        - crown.labels.*
+        - book.quote-kind.*
+        - book.state.*
+        - operation.kind.*
+
+  chat:
+    - source: builder
+      include: ['*']
+    - source: autobuild
+      include: ['*']

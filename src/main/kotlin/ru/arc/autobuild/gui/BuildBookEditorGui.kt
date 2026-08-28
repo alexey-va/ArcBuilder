@@ -7,7 +7,9 @@ import com.github.stefvanschie.inventoryframework.pane.OutlinePane
 import com.github.stefvanschie.inventoryframework.pane.Pane
 import com.github.stefvanschie.inventoryframework.pane.StaticPane
 import com.github.stefvanschie.inventoryframework.pane.util.Slot
+import dev.lone.itemsadder.api.CustomStack
 import net.kyori.adventure.text.Component
+import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.entity.Player
@@ -191,8 +193,18 @@ object BuildBookEditorGui {
     }
 
     private fun background(): GuiItem = GuiItem(
-        BuildBookEditorPresentation.item(Material.GRAY_STAINED_GLASS_PANE, Component.empty(), emptyList()),
+        serverBackground(),
     ) { it.isCancelled = true }
+
+    private fun serverBackground(): ItemStack {
+        val item = if (Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
+            runCatching { CustomStack.getInstance("arc:background")?.itemStack?.clone() }.getOrNull()
+        } else {
+            null
+        } ?: ItemStack(Material.GRAY_STAINED_GLASS_PANE)
+        BuildBookEditorPresentation.state(Component.empty(), emptyList()).applyTo(item)
+        return item
+    }
 }
 
 internal data class BuildBookEditorItemState(

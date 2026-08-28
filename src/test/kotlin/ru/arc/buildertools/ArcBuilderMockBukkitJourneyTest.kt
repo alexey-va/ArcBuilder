@@ -10,8 +10,11 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.BlockFace
+import org.bukkit.block.data.Bisected
+import org.bukkit.block.data.type.Door
 import org.bukkit.entity.Player
 import org.bukkit.event.block.Action
+import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerQuitEvent
@@ -135,6 +138,126 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(13, 64, 13).type shouldBe Material.AIR
             journey.amount(player, Material.SAND) shouldBe 0
             journey.amount(player, Material.BROWN_CONCRETE_POWDER) shouldBe 0
+        }
+    }
+
+    test("an all-unsafe copy keeps the previous clipboard and never leaves the player locked") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("UnsafeBuilder", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            val wand = player.inventory.itemInMainHand
+            journey.select(player, world, wand, 0, 64, 0, 0, 64, 0)
+            player.performCommand("builder copy") shouldBe true
+
+            world.getBlockAt(2, 64, 0).type = Material.BEDROCK
+            journey.select(player, world, wand, 2, 64, 0, 2, 64, 0)
+            player.performCommand("builder copy") shouldBe true
+
+            journey.activeLeases() shouldBe 0
+            PlayerCommandPreprocessEvent(player, "/builder status").also(journey.paper::callEvent).isCancelled shouldBe false
+            BlockBreakEvent(world.getBlockAt(4, 64, 0), player).also(journey.paper::callEvent).isCancelled shouldBe false
+
+            player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
+            player.performCommand("builder paste") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
+        }
+    }
+
+    test("survival paste replaces safe blocks skips containers and retains its clipboard") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("ReplaceBuilder", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.OAK_PLANKS
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
+            player.performCommand("builder copy") shouldBe true
+
+            world.getBlockAt(10, 64, 0).type = Material.DEEPSLATE
+            world.getBlockAt(11, 64, 0).type = Material.CHEST
+            player.inventory.addItem(ItemStack(Material.STONE))
+            player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
+            player.performCommand("builder paste") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
+            world.getBlockAt(11, 64, 0).type shouldBe Material.CHEST
+
+            player.inventory.addItem(ItemStack(Material.STONE), ItemStack(Material.OAK_PLANKS))
+            player.teleport(Location(world, 14.5, 64.0, 3.5, 0f, 0f))
+            player.performCommand("builder paste") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) {
+                world.getBlockAt(14, 64, 0).type == Material.STONE &&
+                    world.getBlockAt(15, 64, 0).type == Material.OAK_PLANKS
+            }
+        }
+    }
+
+    test("survival clipboard copies and rebuilds both halves of a door for one door item") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("DoorBuilder", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            val bottom = Material.OAK_DOOR.createBlockData() as Door
+            bottom.half = Bisected.Half.BOTTOM
+            val top = bottom.clone() as Door
+            top.half = Bisected.Half.TOP
+            world.getBlockAt(0, 64, 0).setBlockData(bottom, false)
+            world.getBlockAt(0, 65, 0).setBlockData(top, false)
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 65, 0)
+            player.performCommand("builder copy") shouldBe true
+            player.inventory.addItem(ItemStack(Material.OAK_DOOR))
+
+            player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
+            player.performCommand("builder paste") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) {
+                world.getBlockAt(10, 64, 0).type == Material.OAK_DOOR &&
+                    world.getBlockAt(10, 65, 0).type == Material.OAK_DOOR
+            }
+            (world.getBlockAt(10, 64, 0).blockData as Door).half shouldBe Bisected.Half.BOTTOM
+            (world.getBlockAt(10, 65, 0).blockData as Door).half shouldBe Bisected.Half.TOP
+            journey.amount(player, Material.OAK_DOOR) shouldBe 0
+        }
+    }
+
+    test("changing game mode discards only the stale preview and releases every operation lock") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("ModeBuilder", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            player.performCommand("builder copy") shouldBe true
+            player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
+            player.performCommand("builder paste") shouldBe true
+
+            player.gameMode = GameMode.SURVIVAL
+            player.performCommand("builder confirm") shouldBe true
+            journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
+            world.getBlockAt(10, 64, 0).type shouldBe Material.AIR
+            journey.activeLeases() shouldBe 0
+            BlockBreakEvent(world.getBlockAt(4, 64, 0), player).also(journey.paper::callEvent).isCancelled shouldBe false
+
+            player.gameMode = GameMode.CREATIVE
+            player.performCommand("builder paste") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
         }
     }
 

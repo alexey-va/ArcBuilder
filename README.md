@@ -49,6 +49,25 @@ python3 ../arc-core/scripts/verify_consumer_architecture.py .
 The disposable MySQL integration suite is intentionally CI-only and runs in
 the repository's `mysql-integration` GitHub Actions job.
 
+## Complete visual preview
+
+Render every declared Russian player-facing surface with one command:
+
+```bash
+./scripts/render-visual-preview
+```
+
+The manifest at `visual-preview.yml` classifies the real locale/config keys as
+chat, title/subtitle/action bar/boss bar, item tooltip, inventory GUI, world
+text, or reusable fragment. The renderer downloads the pinned official
+Minecraft 1.21.11 client and the currently published RusCrafting resource pack,
+verifies their digests, uses the exact bitmap font, container/tooltip sprites,
+vanilla item textures, and declared custom item models such as
+`arc:background`, then writes a paginated gallery to
+`build/reports/visual-preview/index.html` with `report.json` coverage evidence.
+Generation fails if a new player-visible key is not assigned to a surface or a
+placeholder has no representative value.
+
 The production artifact is `build/libs/ArcBuilder-1.0.0.jar`. From the ops
 repository it is deployed independently with:
 
