@@ -1,0 +1,18 @@
+schema = 1
+platform = "paper"
+core_version = "2.1.2"
+
+capabilities = [
+  "durable-recovery",
+  "health",
+  "localized-text",
+  "logging",
+  "metrics",
+  "one-time-use",
+  "paper-testing",
+  "player-state",
+  "runtime",
+  "scheduling",
+  "sql",
+  "structured-debug",
+]

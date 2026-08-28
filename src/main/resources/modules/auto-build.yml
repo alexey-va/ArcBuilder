@@ -1,0 +1,187 @@
+# =============================================================================
+# auto-build.yml — автопостройка по книге (BuildingManager): лимиты, частицы, NPC, материалы.
+# construction — скорость постройки, звуки, списки пропускаемых блоков, скины NPC.
+# =============================================================================
+
+# Тик интервала очистки «зависших» построек
+cleanup-interval: 20
+build-book:
+  display-name: '<#92bed8><bold><name>'
+  lore:
+    - '<#92bed8><state>'
+    - ''
+    - '<#8c8c8c>Автор: <#e6fff3><creator>'
+    - '<#8c8c8c>Объём: <#e6fff3><blocks> блоков'
+    - '<#8c8c8c>Себестоимость: <#2bba43><price>'
+    - ''
+    - '<#92bed8>ПКМ <#8c8c8c>— превью / дальше'
+    - '<#92bed8>Shift+ПКМ <#8c8c8c>— положение'
+  received: '<#92bed8>◇ <#2bba43>Книга строительства создана: <#e6fff3><building>'
+  draft-preview-message: |-
+    <#92bed8>◇ <#ff9f0f>Черновик <#8c8c8c>• оплаты ещё нет
+    <#8c8c8c>  ПКМ — смета <#8c8c8c>• Shift+ПКМ — положение
+  player-copy:
+    max-offset: 16
+    max-per-player: 24
+    custom-model-data: 0
+    default-name: 'Моя постройка'
+  editor:
+    title: '<dark_gray>Настройка книги'
+    invalid: '<#92bed8>◇ <#c42323>Книга повреждена или её чертёж недоступен.'
+    no-permission: '<#92bed8>◇ <#c42323>У вас нет доступа к настройке этой книги.'
+    preview-inactive:
+      name: '<#ff9f0f><bold>Предпросмотр завершён'
+      lore:
+        - '<#e6fff3>Контур уже закрыт.'
+        - '<#8c8c8c>Откройте превью снова.'
+    preview-book-mismatch:
+      name: '<#ff9f0f><bold>Открыта другая книга'
+      lore:
+        - '<#e6fff3>Контур относится к другой книге.'
+        - '<#8c8c8c>Откройте нужную книгу снова.'
+    preview-protection-denied:
+      name: '<#ff9f0f><bold>Положение недоступно'
+      lore:
+        - '<#e6fff3>Здесь нельзя поставить часть блоков.'
+        - '<#8c8c8c>Измените сдвиг или поворот.'
+    overview:
+      name: '<#92bed8><bold><name>'
+      lore:
+        - '<#8c8c8c>Поворот: <#92bed8><rotation>°'
+        - '<#8c8c8c>Сдвиг: <#92bed8><offset_x> / <offset_y> / <offset_z>'
+        - ''
+        - '<#969696>Esc — закрыть'
+    axis-x:
+      name: '<#92bed8><bold>Смещение X'
+      lore:
+        - '<#8c8c8c>Сейчас: <#92bed8><value>'
+        - '<#e6fff3>ЛКМ −1 <#8c8c8c>• <#e6fff3>ПКМ +1'
+        - '<#969696>Shift: шаг 5'
+    axis-y:
+      name: '<#92bed8><bold>Высота Y'
+      lore:
+        - '<#8c8c8c>Сейчас: <#92bed8><value>'
+        - '<#e6fff3>ЛКМ −1 <#8c8c8c>• <#e6fff3>ПКМ +1'
+        - '<#969696>Shift: шаг 5'
+    axis-z:
+      name: '<#92bed8><bold>Смещение Z'
+      lore:
+        - '<#8c8c8c>Сейчас: <#92bed8><value>'
+        - '<#e6fff3>ЛКМ −1 <#8c8c8c>• <#e6fff3>ПКМ +1'
+        - '<#969696>Shift: шаг 5'
+    rotation:
+      name: '<#92bed8><bold>Поворот'
+      lore:
+        - '<#8c8c8c>Сейчас: <#92bed8><value>°'
+        - '<#e6fff3>ЛКМ −90° <#8c8c8c>• <#e6fff3>ПКМ +90°'
+    reset:
+      name: '<#ff9f0f><bold>Сбросить настройку'
+      lore:
+        - '<#e6fff3>Сдвиг 0 / 0 / 0'
+        - '<#8c8c8c>Поворот 0°'
+# На classic (спавн/данжи): true. На survival: false.
+disable-building: false
+cant-build-message: |-
+  <#92bed8>◇ <#c42323>Здесь нельзя разместить эту постройку.
+  <#8c8c8c>  • <#e6fff3>Проверьте право строительства на всей площадке.
+disabled-message: '<#92bed8>◇ <#ff9f0f>Автопостройка в этом мире отключена.'
+display:
+  border-particle-interval: 5
+  border-particle: FLAME
+  border-particle-count: 1
+  border-particle-corner-count: 3
+  border-particle-offset: 0.0
+  border-particle-corner-offset: 0.07
+  center-particle: NAUTILUS
+  center-particle-count: 1
+  max-blocks: 20000
+  max-per-10-min: 10000000
+start-message: |-
+  <#92bed8>◇ <#e6fff3>Превью открыто.
+  <#8c8c8c>  ПКМ — дальше <#8c8c8c>• Shift+ПКМ — положение
+confirm-time: 180
+construction:
+  # Default limit for books without arc:cooldown_seconds. Set a book to 0 for unlimited simple builds.
+  default-cooldown-seconds: 3600
+  # Citizens holograms use legacy colors. The prompt stays visible for the whole confirmation phase.
+  npc-prompt:
+    - '&bПлан готов к подтверждению'
+    - '&7(Нажмите ПКМ)'
+  npc-skins:
+    '&6Агадиль': https://minesk.in/e8eae58c095949de87ff9c9b5b7c17f2
+    '&6Николаич': https://minesk.in/6666ba384aa3486b88c21fa7541fb856
+    '&6Иваныч': https://minesk.in/3ff30e8f08ae48c2abece46bbf0c09d6
+    '&6Петрович': https://minesk.in/faca74c68a104b6987bc8c11ffebb092
+  not-drop-materials:
+    - GRASS_BLOCK
+    - SHORT_GRASS
+    - TALL_GRASS
+    - DIRT
+  skip-materials:
+    - TRAPPED_CHEST
+    - BARREL
+    - PLAYER_HEAD
+    - CHEST
+    - PLAYER_WALL_HEAD
+  cycle-duration-ticks: 10
+  blocks-per-tick: 3
+  play-sounds: true
+  show-particles: false
+confirm-message: '<#92bed8>◇ <#e6fff3>Проверьте площадку и нажмите <#92bed8>ПКМ по строителю<#e6fff3>.'
+confirm-gui:
+  title: '<dark_gray>Подтверждение постройки'
+  confirm:
+    material: PAPER
+    display: '<#2bba43><bold>Начать строительство'
+    lore:
+      - '<#e6fff3>Применить показанный план.'
+      - ''
+      - '<#8c8c8c>• <#ff9f0f>Книга будет израсходована <#8c8c8c>•'
+    customModelData: 0
+  cancel:
+    material: RED_STAINED_GLASS_PANE
+    display: '<#c42323><bold>Вернуться к настройке'
+    lore:
+      - '<#e6fff3>Закрыть подтверждение без изменений.'
+    customModelData: 0
+start-build-message: '<#92bed8>◇ <#2bba43>Строительство началось.'
+already-building-message: '<#92bed8>◇ <#ff9f0f>Сначала завершите текущую постройку.'
+building-gui:
+  title: '<dark_gray>Строительство'
+  progress:
+    material: PAPER
+    display: '<#92bed8><bold>Ход строительства'
+    lore:
+      - '<#e6fff3>Завершено: <#92bed8><progress>%'
+      - ''
+      - '<#969696>Панель обновляется автоматически.'
+  cancel:
+    material: RED_STAINED_GLASS_PANE
+    display: '<#c42323><bold>Отменить строительство'
+    lore:
+      - '<#e6fff3>Остановить текущую постройку.'
+      - ''
+      - '<#8c8c8c>• <#ff9f0f>Использованная книга не вернётся <#8c8c8c>•'
+      - '<#969696>Нажмите, чтобы перейти к подтверждению.'
+    customModelData: 0
+  cancel-confirm:
+    display: '<#ff9f0f><bold>Подтвердить отмену'
+    lore:
+      - '<#e6fff3>Строительство остановится сразу.'
+      - ''
+      - '<#ff9f0f>Уже поставленные блоки останутся на месте.'
+      - '<#ff9f0f>Использованная книга не вернётся.'
+      - ''
+      - '<#c42323>Нажмите ещё раз, чтобы отменить.'
+  fast-finish:
+    material: BLAZE_POWDER
+    display: '<#2bba43><bold>Завершить мгновенно'
+    lore:
+      - '<#e6fff3>Поставить все оставшиеся блоки без ожидания.'
+      - ''
+      - '<#969696>Служебное действие для администрации.'
+inactivity-cancel-message: '<#92bed8>◇ <#969696>Предпросмотр закрыт из-за неактивности.'
+messages:
+  display-limit: '<#92bed8>◇ <#ff9f0f>Показана часть чертежа: <#e6fff3><amount>/<max> блоков.'
+  display-limit-2: '<#92bed8>◇ <#c42323>Этот чертёж слишком велик для безопасного предпросмотра.'
+cancel-build-message: '<#92bed8>◇ <#969696>Постройка отменена.'

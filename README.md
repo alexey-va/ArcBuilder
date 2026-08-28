@@ -1,0 +1,57 @@
+# ArcBuilder
+
+Standalone RusCrafting Paper plugin for survival-friendly building assistance:
+selection, fill, copy/paste with player-relative anchors and rotation,
+deconstruction, procedural tree crowns, construction-book drafts, pricing,
+activation, copying, selling, and one-time-use protection.
+
+The plugin uses arc-core 2.1.2 and does not depend on the ARC monolith.
+
+## Player flow
+
+- `/builder wand` gives selection guidance. Left click selects point 1; right
+  click selects point 2. Distinct straight BlockDisplay outlines remain visible
+  until the selection is cleared or expires.
+- `/builder copy` stores the build relative to the player's position and facing.
+  `/builder paste` previews it at the player's current position; rotation can be
+  adjusted before confirmation.
+- Fill, paste, deconstruction, crowns, and books silently skip containers,
+  technical blocks, custom Slimefun/ItemsAdder blocks, and other unsafe state.
+  Ordinary stone, sand, and concrete powder are supported.
+- Wilderness is buildable. Inside a Lands claim the normal place/break checks
+  still apply. WorldGuard is not a dependency.
+- Construction books start as free drafts. Right click opens the world preview;
+  right click again shows the exact activation or build quote. Shift-right click
+  opens the compact symmetric transform menu.
+- Money is represented internally as integer minor units. Decimal provider APIs
+  are normalized only at the integration boundary.
+
+## Runtime ownership
+
+ArcBuilder owns `/builder`, its permissions, book UUID/MySQL registry, preview
+entities, and the following configuration under `plugins/ArcBuilder/modules/`:
+
+- `builder-tools.yml`
+- `auto-build.yml`
+- `builder-tools-runtime.yml`
+
+The existing schematic library remains at `plugins/ARC/schematics/` through the
+configured `../ARC/schematics` path. ARC must not contain Builder classes,
+commands, listeners, permissions, or module configs after migration.
+
+## Build
+
+```bash
+./gradlew --no-daemon test shadowJar
+python3 ../arc-core/scripts/verify_consumer_architecture.py .
+```
+
+The disposable MySQL integration suite is intentionally CI-only and runs in
+the repository's `mysql-integration` GitHub Actions job.
+
+The production artifact is `build/libs/ArcBuilder-1.0.0.jar`. From the ops
+repository it is deployed independently with:
+
+```bash
+./scripts/mc arcbuilder classic_survival
+```

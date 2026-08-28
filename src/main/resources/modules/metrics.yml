@@ -1,0 +1,11 @@
+# ArcBuilder has its own optional endpoint. Keep it disabled until a unique
+# production port is assigned; structured health remains available in logs.
+enabled: false
+bind-host: "127.0.0.1"
+bind-port: 9954
+sample-interval-seconds: 5
+heavy-sample-interval-seconds: 60
+include-jvm: true
+include-system: true
+include-disk: true
+include-platform-heavy: false

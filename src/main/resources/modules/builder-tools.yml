@@ -1,0 +1,978 @@
+# ARC Builder Tools. Runtime mirrors opt in explicitly; disabled elsewhere by default.
+enabled: false
+allowed-worlds: []
+default-locale: ru
+
+storage:
+  # Runtime may point this to the existing shared catalogue during migration.
+  schematics-root: schematics
+
+limits:
+  max-changes: 4096
+  max-clipboard-blocks: 4096
+  max-scan-volume: 8192
+  absolute-max-axis: 48
+  blocks-per-tick: 16
+  base-hourly-changes: 20000
+  maximum-range: 64
+
+timers:
+  plan-ttl: 30s
+  clipboard-ttl: 15m
+  undo-ttl: 30m
+  journal-retention: 2h
+
+preview:
+  # Refresh twice per second, matching the persistent feel of the old Denizen outline.
+  period-ticks: 10
+  radius: 32
+  outline-spacing: 0.75
+  max-selection-particles: 512
+  max-plan-particles: 180
+
+# Read-only estimates and explicit procurement through EconomyShopGUI Premium.
+# A normal /builder confirm never spends money.
+shop:
+  enabled: true
+  max-quoted-materials: 64
+  max-auto-buy-items: 4096
+  max-auto-buy-price: '250000.00'
+
+# Player-authored build books: free drafts, explicit paid activation and paid copies.
+# Shop prices are read-only; the stored self-cost never rewrites EconomyShopGUI.
+book-contracts:
+  enabled: false
+  construction-markup-percent: '15.00'
+  max-issue-price: '50000000.00'
+  mysql:
+    enabled: false
+    host: 127.0.0.1
+    port: 3306
+    database: minecraft
+    username: minecraft
+    password: ''
+    ssl-mode: DISABLED
+    fail-fast: false
+    pool:
+      minimum-idle: 0
+      maximum-size: 4
+      connection-timeout-ms: 5000
+      socket-timeout-ms: 15000
+      validation-timeout-ms: 3000
+      max-lifetime-ms: 1700000
+
+safety:
+  require-coreprotect: true
+  # Filling and pasting may replace only non-valuable vegetation/air.
+  replaceable-materials:
+    - AIR
+    - CAVE_AIR
+    - VOID_AIR
+    - SHORT_GRASS
+    - TALL_GRASS
+    - FERN
+    - LARGE_FERN
+    - DEAD_BUSH
+    - VINE
+    - GLOW_LICHEN
+    - SNOW
+
+locales:
+  ru:
+    prefix: "<#92bed8>◇ "
+    help:
+      - "<prefix><#e6fff3>Инструменты строителя"
+      - "<#8c8c8c>  • <#92bed8>/builder wand <#e6fff3>— выделить область"
+      - "<#8c8c8c>  • <#92bed8>/builder fill [блок] <#e6fff3>— заполнить пустоты"
+      - "<#8c8c8c>  • <#92bed8>/builder copy <#e6fff3>и <#92bed8>/builder paste <#e6fff3>— чертёж"
+      - "<#8c8c8c>  • <#92bed8>/builder book draft [имя] <#e6fff3>— бесплатный черновик"
+      - "<#8c8c8c>  • <#92bed8>/builder book activate <#e6fff3>— рассчитать активацию"
+      - "<#8c8c8c>  • <#92bed8>/builder book copy <#e6fff3>— платная копия"
+      - "<#8c8c8c>  • <#92bed8>/builder book sell [цена] <#e6fff3>— продать книгу"
+      - "<#8c8c8c>  • <#92bed8>/builder book <#e6fff3>— инструкция и этап"
+      - "<#8c8c8c>  • <#92bed8>/builder clear <#e6fff3>— убрать выделение и его частицы"
+      - "<#8c8c8c>  • <#92bed8>/builder deconstruct <#e6fff3>— разобрать область"
+      - "<#8c8c8c>  • <#92bed8>/builder crown <#e6fff3>— создать крону"
+      - "<#8c8c8c>  • <#92bed8>/builder confirm <#e6fff3>— применить показанный план"
+      - "<#8c8c8c>  • <#92bed8>/builder confirm buy <#e6fff3>— докупить недостающее"
+      - "<#8c8c8c>  • <#92bed8>/builder undo <#e6fff3>— подготовить отмену"
+    errors:
+      disabled: "<prefix><#ff9f0f>Строительные инструменты — только на survival."
+      player-only: "<prefix><#c42323>Команда доступна только игрокам."
+      no-permission: "<prefix><#c42323>У вас нет доступа к этому инструменту."
+      game-mode: |-
+        <prefix><#c42323>Режим недоступен для инструментов строителя.
+        <#8c8c8c>  • <#e6fff3>Нужен режим выживания или творчества.
+      game-mode-changed: |-
+        <prefix><#ff9f0f>Режим игры изменился после предпросмотра.
+        <#8c8c8c>  • <#e6fff3>Повторите план — расход зависит от режима.
+      world-not-allowed: "<prefix><#ff9f0f>В этом мире инструменты строителя отключены."
+      selection-missing: |-
+        <prefix><#ff9f0f>Область ещё не выделена.
+        <#8c8c8c>  • <#e6fff3>Возьмите инструмент: <#92bed8>/builder wand
+      selection-too-large: "<prefix><#c42323>Область превышает ваш безопасный лимит."
+      plan-failed: |-
+        <prefix><#c42323>Не удалось подготовить безопасный план.
+        <#8c8c8c>  • <#969696>Ничего не изменено; попробуйте снова.
+      empty-copy: |-
+        <prefix><#ff9f0f>В выделении нет блоков для чертежа.
+        <#8c8c8c>  • <#e6fff3>Воздух и заменяемые растения не копируются.
+      hourly-limit: |-
+        <prefix><#ff9f0f>Достигнут безопасный лимит изменений за час.
+        <#8c8c8c>  • <#e6fff3>Подождите немного или уменьшите область.
+      chunk-unloaded: |-
+        <prefix><#ff9f0f>Часть области сейчас не загружена.
+        <#8c8c8c>  • <#e6fff3>Подойдите к постройке и повторите действие.
+      too-far: |-
+        <prefix><#ff9f0f>Область находится слишком далеко.
+        <#8c8c8c>  • <#e6fff3>Подойдите ближе и повторите действие.
+      nothing-to-change: |-
+        <prefix><#ff9f0f>Здесь нечего изменять.
+        <#8c8c8c>  • <#e6fff3>Проверьте выделение, материал и текущие блоки.
+      busy: "<prefix><#ff9f0f>Другая операция здесь ещё не завершена."
+      expired: |-
+        <prefix><#ff9f0f>Предпросмотр устарел.
+        <#8c8c8c>  • <#e6fff3>Создайте план ещё раз; мир не изменён.
+      inventory: |-
+        <prefix><#c42323>Операцию пока нельзя выполнить.
+        <#8c8c8c>  • <#e6fff3>Проверьте материалы и свободное место.
+        <#8c8c8c>  • <#e6fff3>Убедитесь, что инструмент достаточно прочный.
+      protection: |-
+        <prefix><#c42323>Строительство здесь запрещено.
+        <#8c8c8c>  На чужой территории нужны права Lands.
+      material: |-
+        <prefix><#c42323>Этот материал нельзя использовать.
+        <#8c8c8c>  • <#e6fff3>Для кроны выберите обычную листву.
+      crown-setting: "<prefix><#c42323>Неверный параметр. <click:run_command:'/builder crown help'><#92bed8>/builder crown help</click>"
+      tool: |-
+        <prefix><#c42323>Для демонтажа нужен подходящий инструмент.
+        <#8c8c8c>  • <#e6fff3>Держите его в основной руке.
+        <#8c8c8c>  • <#e6fff3>Прочности должно хватить на весь план.
+      recovering: |-
+        <prefix><#ff9f0f>Завершается безопасное восстановление.
+        <#8c8c8c>  • <#e6fff3>Попробуйте чуть позже.
+      undo-missing: "<prefix><#ff9f0f>Нет завершённой операции для отката."
+      shop-unavailable: |-
+        <prefix><#ff9f0f>Админшоп сейчас недоступен.
+        <#8c8c8c>  • <#e6fff3>Принесите недостающие материалы.
+      shop-not-supported: "<prefix><#ff9f0f>Докупка доступна только для fill, paste и crown."
+      shop-material-unavailable: |-
+        <prefix><#ff9f0f>Админшоп не продаёт часть материалов.
+        <#8c8c8c>  • <#e6fff3>Добавьте их вручную.
+      shop-limit: |-
+        <prefix><#c42323>Превышен лимит покупки.
+        <#8c8c8c>  • <#e6fff3><items> шт. <#8c8c8c>• <#e6fff3><price>
+      shop-insufficient-funds: "<prefix><#ff9f0f>Нужно <#92bed8><price> <#8c8c8c>• <#e6fff3>на балансе: <#92bed8><balance>"
+      shop-estimate-changed: "<prefix><#ff9f0f>Состав покупки изменился. Создайте план ещё раз."
+      shop-purchase-failed: |-
+        <prefix><#c42323>Материал не куплен.
+        <#8c8c8c>  • <#e6fff3><material>
+      shop-purchase-ambiguous: |-
+        <prefix><#c42323>Админшоп не подтвердил покупку.
+        <#8c8c8c>  • <#e6fff3>Материал: <#92bed8><material>
+        <#8c8c8c>  • <#969696>Мир не изменён; выданные предметы уже у вас.
+    selection:
+      first: |-
+        <prefix><#2bba43>Точка 1 <#8c8c8c>• <#92bed8><x> <y> <z>
+        <#8c8c8c>  ПКМ — выбрать точку 2
+      second: |-
+        <prefix><#2bba43>Точка 2 <#8c8c8c>• <#92bed8><x> <y> <z>
+        <#8c8c8c>  ЛКМ — выбрать точку 1
+      complete: |-
+        <#8c8c8c>  Область <#92bed8><x>×<y>×<z> <#8c8c8c>• <#e6fff3><volume> блоков
+        <#8c8c8c>  <click:run_command:'/builder copy'><#92bed8>[Скопировать]</click> <#8c8c8c>• <click:run_command:'/builder clear'><#969696>[Сбросить]</click>
+      cleared: |-
+        <prefix><#969696>Выделение очищено; частицы скрыты.
+        <#8c8c8c>  • <#969696>Сохранённый чертёж не удалён.
+      world-reset: |-
+        <prefix><#ff9f0f>Точки из другого мира очищены.
+        <#8c8c8c>  • <#e6fff3>Выберите обе точки заново.
+    wand:
+      name: "<#92bed8><bold>Инструмент строителя"
+      lore:
+        - "<#e6fff3>ЛКМ по блоку — первая точка."
+        - "<#e6fff3>ПКМ по блоку — вторая точка."
+        - "<#969696>Контур виден постоянно до /builder clear."
+        - "<#969696>Размер области зависит от ваших прав."
+        - "<reset>"
+        - "<#8c8c8c>• <#92bed8>/builder <#e6fff3>— команды строителя."
+      received: |-
+        <prefix><#2bba43>Инструмент строителя готов.
+        <#8c8c8c>  • <#e6fff3>ЛКМ — первая точка; ПКМ — вторая.
+      inventory-full: "<prefix><#ff9f0f>Освободите слот для инструмента строителя."
+      material-required: "<prefix><#ff9f0f>Держите обычный осколок эха в основной руке."
+    crown-brush:
+      name: "<#92bed8><bold>Кисть крон"
+      lore:
+        - "<#e6fff3>ЛКМ по грани — показать крону."
+        - "<#e6fff3>ПКМ — построить показанный вариант."
+        - "<#969696>В выживании листва берётся из инвентаря."
+        - "<#969696>В творческом режиме материалы не расходуются."
+        - "<reset>"
+        - "<#8c8c8c>• <#92bed8>/builder crown help <#e6fff3>— настройки."
+      received: |-
+        <prefix><#2bba43>Кисть крон готова.
+        <#8c8c8c>  • <#e6fff3>ЛКМ по грани — предпросмотр; ПКМ — построить.
+      inventory-full: "<prefix><#ff9f0f>Освободите один слот для кисти крон."
+      material-required: "<prefix><#ff9f0f>Держите обычную кисть в основной руке."
+    crown:
+      same-face: "<prefix><#ff9f0f>Подтвердите ПКМ по той же грани."
+      settings-updated: |-
+        <prefix><#2bba43>Настройка кроны изменена.
+        <#8c8c8c>  • <#e6fff3><setting>: <#92bed8><value>
+      palette-updated: "<prefix><#2bba43>Палитра сохранена: <#92bed8><count> <#e6fff3>видов листвы."
+      palette-row: "<#8c8c8c>    • <#e6fff3><material>: <#92bed8><weight>"
+      labels:
+        settings:
+          shape: "Форма"
+          radius: "Радиус"
+          density: "Густота"
+          noise: "Край"
+        shape:
+          natural: "естественная"
+          round: "округлая"
+          wide: "раскидистая"
+          tall: "вытянутая"
+        density:
+          airy: "воздушная"
+          natural: "естественная"
+          dense: "густая"
+        noise:
+          smooth: "мягкий"
+          natural: "естественный"
+          wild: "сильный"
+      help:
+        - "<prefix><#e6fff3><bold>Настройка кроны"
+        - "<#8c8c8c>  • <click:run_command:'/builder crown wand'><#92bed8>/builder crown wand</click> <#e6fff3>— подготовить кисть."
+        - "<#8c8c8c>  • <click:suggest_command:'/builder crown palette oak_leaves,birch_leaves'><#92bed8>/builder crown palette [листва]</click>"
+        - "<#8c8c8c>  • <#92bed8>/builder crown shape natural|round|wide|tall"
+        - "<#8c8c8c>  • <#92bed8>/builder crown radius 3–10 <#e6fff3>— размер кроны."
+        - "<#8c8c8c>  • <#92bed8>/builder crown density airy|natural|dense"
+        - "<#8c8c8c>  • <#92bed8>/builder crown noise smooth|natural|wild"
+        - "<#8c8c8c>  • <click:run_command:'/builder crown reroll'><#92bed8>/builder crown reroll</click> <#e6fff3>— показать другой вариант."
+        - "<#8c8c8c>  • <click:run_command:'/builder crown place'><#92bed8>/builder crown place</click> <#e6fff3>— построить вариант."
+        - "<#8c8c8c>  • <#969696>В выживании листва берётся из инвентаря."
+        - "<#8c8c8c>  • <#969696>В творческом режиме материалы не расходуются."
+      status:
+        - "<prefix><#e6fff3><bold>Текущая крона"
+        - "<#8c8c8c>  • <#e6fff3>Форма: <#92bed8><shape> <#8c8c8c>• <#e6fff3>радиус: <#92bed8><radius>"
+        - "<#8c8c8c>  • <#e6fff3>Густота: <#92bed8><density> <#8c8c8c>• <#e6fff3>край: <#92bed8><noise>"
+        - "<#8c8c8c>  • <#e6fff3>Палитра:"
+    clipboard:
+      saved: |-
+        <prefix><#2bba43>Чертёж <#8c8c8c>• <#e6fff3><count> блоков
+        <#8c8c8c>  Пропущено безопасно: <#969696><skipped>
+        <#8c8c8c>  <click:run_command:'/builder paste'><#92bed8>[Вставить здесь]</click> <#8c8c8c>• <click:suggest_command:'/builder book draft '><#e6fff3>[Создать книгу]</click>
+    book:
+      draft-saving: "<prefix><#e6fff3>Сохраняем чертёж…"
+      draft-recovery-starting: "<prefix><#e6fff3>Проверяем незавершённые черновики после перезапуска…"
+      draft-pending: |-
+        <prefix><#ff9f0f>Сохранённый черновик ожидает безопасной выдачи.
+        <#8c8c8c>  • <#e6fff3>Возьмите обычную книгу в основную руку.
+        <#8c8c8c>  • <click:run_command:'/builder book draft'><#92bed8>/builder book draft</click> <#e6fff3>— завершить выдачу; выделять заново не нужно.
+      draft-recovering: |-
+        <prefix><#ff9f0f>Завершаем безопасную запись черновика.
+        <#8c8c8c>  • <#e6fff3>Не перемещайте книгу; проверка повторится автоматически.
+      draft-recovery-failed: |-
+        <prefix><#ff9f0f>Незавершённое сохранение не содержало готового чертежа.
+        <#8c8c8c>  • <#e6fff3>Скопируйте область ещё раз — лимит не занят.
+      guide:
+        - "<prefix><#e6fff3><bold>Как создать книгу строительства"
+        - "<#8c8c8c>  1. <click:run_command:'/builder wand'><#92bed8>/builder wand</click> <#e6fff3>— получить селектор."
+        - "<#8c8c8c>     <#e6fff3>ЛКМ и ПКМ — два угла. Контур виден постоянно."
+        - "<#8c8c8c>  2. <click:run_command:'/builder copy'><#92bed8>/builder copy</click> <#e6fff3>— сохранить чертёж на 15 минут."
+        - "<#8c8c8c>  3. <#e6fff3>Возьмите обычную книгу."
+        - "<#8c8c8c>     <click:suggest_command:'/builder book draft '><#92bed8>/builder book draft [имя]</click> <#e6fff3>— бесплатный черновик."
+        - "<#8c8c8c>  4. <#e6fff3>ПКМ по земле — превью."
+        - "<#8c8c8c>     <#e6fff3>ПКМ в воздух или Shift + ПКМ — меню положения."
+        - "<#8c8c8c>     <#969696>Черновик — только предпросмотр; он не строит."
+        - "<#8c8c8c>  5. <click:run_command:'/builder book activate'><#92bed8>/builder book activate</click> <#e6fff3>— смета без оплаты."
+        - "<#8c8c8c>  6. <click:run_command:'/builder book confirm'><#92bed8>/builder book confirm</click> <#e6fff3>— оплатить."
+        - "<#8c8c8c>  7. <click:run_command:'/builder book copy'><#92bed8>/builder book copy</click> <#e6fff3>— копия по себестоимости."
+        - "<#8c8c8c>     <click:suggest_command:'/builder book sell '><#92bed8>/builder book sell [цена]</click> <#e6fff3>— продажа."
+        - "<#8c8c8c>  • <click:run_command:'/builder book status'><#92bed8>/builder book status</click> <#e6fff3>— ваш текущий этап."
+      status:
+        start: |-
+          <prefix><#ff9f0f>Этап 1/7: сначала выделите будущую постройку.
+          <#8c8c8c>  • <click:run_command:'/builder wand'><#92bed8>/builder wand</click> <#e6fff3>— селектор.
+          <#8c8c8c>  • <#e6fff3>ЛКМ и ПКМ — две точки.
+        first-point: |-
+          <prefix><#ff9f0f>Этап 1/7: первая точка выбрана.
+          <#8c8c8c>  • <#e6fff3>Координаты: <#92bed8><x>, <y>, <z>
+          <#8c8c8c>  • <#e6fff3>Отметьте вторую точку <#92bed8>ПКМ<#e6fff3>.
+        second-point: |-
+          <prefix><#ff9f0f>Этап 1/7: вторая точка выбрана.
+          <#8c8c8c>  • <#e6fff3>Координаты: <#92bed8><x>, <y>, <z>
+          <#8c8c8c>  • <#e6fff3>Отметьте первую точку <#92bed8>ЛКМ<#e6fff3>.
+        selection: |-
+          <prefix><#2bba43>Этап 2/7: область выделена.
+          <#8c8c8c>  • <#e6fff3>Размер: <#92bed8><x> × <y> × <z> <#8c8c8c>• <#e6fff3><volume> блоков
+          <#8c8c8c>  • <click:run_command:'/builder copy'><#92bed8>/builder copy</click> <#e6fff3>— сохранить чертёж.
+        clipboard: |-
+          <prefix><#2bba43>Этап 3/7: чертёж готов — <#92bed8><count> блоков.
+          <#8c8c8c>  • <#e6fff3>Возьмите обычную книгу.
+          <#8c8c8c>  • <click:suggest_command:'/builder book draft '><#92bed8>/builder book draft [имя]</click> <#e6fff3>— создать черновик.
+        draft: |-
+          <prefix><#2bba43>Этап 4/7: бесплатный черновик готов.
+          <#8c8c8c>  • <#e6fff3>Название: <#92bed8><name>
+          <#8c8c8c>  • <#e6fff3>ПКМ по земле — превью.
+          <#8c8c8c>  • <#e6fff3>ПКМ в воздух — настройка положения.
+        draft-recovery: |-
+          <prefix><#ff9f0f>Черновик сохранён и ожидает выдачи.
+          <#8c8c8c>  • <#e6fff3>Возьмите обычную книгу в основную руку.
+          <#8c8c8c>  • <click:run_command:'/builder book draft'><#92bed8>/builder book draft</click> <#e6fff3>— продолжить с сохранённого шага.
+        preview: |-
+          <prefix><#2bba43>Этап 5/7: превью открыто.
+          <#8c8c8c>  • <#e6fff3>Контур обновляется постоянно.
+          <#8c8c8c>  • <click:run_command:'/builder book activate'><#92bed8>/builder book activate</click> <#e6fff3>— рассчитать смету.
+        quote: |-
+          <prefix><#ff9f0f>Этап 6/7: смета готова — <#2bba43><price><#ff9f0f>.
+          <#8c8c8c>  • <click:run_command:'/builder book confirm'><#92bed8>/builder book confirm</click> <#e6fff3>— оплатить; осталось <#92bed8><seconds> с<#e6fff3>.
+        delivery: |-
+          <prefix><#ff9f0f>Этап 7/7: реестр проверяет оплату.
+          <#8c8c8c>  • <#e6fff3>Не перемещайте книгу.
+          <#8c8c8c>  • <#e6fff3>Выдача продолжится автоматически.
+        checking: "<prefix><#e6fff3>Проверяю UUID, владельца и поколение книги…"
+        changed: |-
+          <prefix><#ff9f0f>Книга в руке изменилась во время проверки.
+          <#8c8c8c>  • <click:run_command:'/builder book status'><#92bed8>/builder book status</click> <#e6fff3>— проверить текущую книгу.
+        active: |-
+          <prefix><#2bba43>Книга активна и зарегистрирована.
+          <#8c8c8c>  • <#e6fff3>Название: <#92bed8><name>
+          <#8c8c8c>  • <#e6fff3>Себестоимость копии: <#92bed8><price>
+          <#8c8c8c>  • <#e6fff3>ПКМ по земле — превью.
+          <#8c8c8c>  • <click:run_command:'/builder book copy'><#92bed8>/builder book copy</click> <#e6fff3>— копия.
+          <#8c8c8c>  • <click:suggest_command:'/builder book sell '><#92bed8>/builder book sell [цена]</click> <#e6fff3>— продажа.
+      draft-created: |-
+        <prefix><#2bba43>Бесплатный черновик готов.
+        <#8c8c8c>  • <#e6fff3>Название: <#92bed8><name>
+        <#8c8c8c>  • <#e6fff3>Блоков: <#92bed8><count> <#8c8c8c>• <#969696>денег пока не списано
+        <#8c8c8c>  • <#e6fff3>ПКМ по земле — превью.
+        <#8c8c8c>  • <#e6fff3>ПКМ в воздух или Shift + ПКМ — меню положения.
+        <#8c8c8c>  • <#e6fff3>После проверки: <click:run_command:'/builder book activate'><#92bed8>/builder book activate</click>
+      draft-recovered: |-
+        <prefix><#2bba43>Сохранённый черновик восстановлен.
+        <#8c8c8c>  • <#e6fff3>Название: <#92bed8><name>
+        <#8c8c8c>  • <#e6fff3>Блоков: <#92bed8><count> <#8c8c8c>• <#969696>оплаты не было
+        <#8c8c8c>  • <#e6fff3>ПКМ по земле — проверить превью.
+      material-required: "<prefix><#ff9f0f>Держите обычную книгу в основной руке."
+      inventory-full: "<prefix><#ff9f0f>Освободите один слот для книги строительства."
+      invalid-name: "<prefix><#c42323>Название: от 1 до 48 обычных символов."
+      limit: "<prefix><#ff9f0f>Достигнут лимит постоянных чертежей."
+      failed: |-
+        <prefix><#c42323>Книгу не удалось сохранить.
+        <#8c8c8c>  • <#969696>Мир и инвентарь не изменены.
+      invalid: "<prefix><#c42323>Эта книга повреждена или её чертёж недоступен."
+      missing: "<prefix><#ff9f0f>Положите нужную книгу в инвентарь."
+      draft-required: "<prefix><#ff9f0f>Держите бесплатный черновик в основной руке."
+      preview-required: |-
+        <prefix><#ff9f0f>Сначала нажмите ПКМ с книгой.
+      active-required: "<prefix><#ff9f0f>Держите активную книгу в основной руке."
+      creator-only: "<prefix><#ff9f0f>Первую активацию подтверждает автор."
+      unactivated: |-
+        <prefix><#ff9f0f>Это только черновик — по нему нельзя строить.
+        <#8c8c8c>  • <#92bed8>/builder book activate <#e6fff3>— рассчитать смету.
+      duplicate: |-
+        <prefix><#c42323>Этот UUID уже занят или потрачен.
+        <#8c8c8c>  • <#969696>Действие разрешено только одному экземпляру.
+      stale: |-
+        <prefix><#c42323>Эта физическая копия книги больше не действует.
+        <#8c8c8c>  • <#969696>После продажи запись книги обновляется.
+        <#8c8c8c>  • <#92bed8>Передавайте книги через /builder book sell 25000.
+      source-changed: "<prefix><#ff9f0f>Книга изменилась. Рассчитайте цену снова."
+      contracts-disabled: "<prefix><#ff9f0f>Активация книг здесь отключена."
+      registry-starting: "<prefix><#ff9f0f>Реестр запускается. Попробуйте чуть позже."
+      registry-unavailable: |-
+        <prefix><#c42323>Реестр книг временно недоступен.
+        <#8c8c8c>  • <#969696>Новые деньги не списаны.
+      shop-unavailable: "<prefix><#ff9f0f>Цены админшопа сейчас недоступны."
+      material-unavailable: |-
+        <prefix><#ff9f0f>Часть материалов отсутствует в админшопе.
+        <#8c8c8c>  • <#e6fff3>Нет: <#92bed8><materials>
+      price-limit: "<prefix><#c42323>Смета превышает безопасный лимит книги."
+      quote-kind:
+        activation: "Активация"
+        copy: "Копия"
+      quote: |-
+        <prefix><#ffb142><kind> <#92bed8>«<name>»
+        <#8c8c8c>  Материалы: <#e6fff3><materials>
+        <#8c8c8c>  Работа: <#e6fff3><labor> <#8c8c8c>• Итого: <#2bba43><price>
+        <#8c8c8c>  <click:run_command:'/builder book confirm'><#2bba43>[Оплатить]</click> <#8c8c8c>  <click:run_command:'/builder book cancel'><#969696>[Отмена]</click>
+      preview-opened: |-
+        <prefix><#92bed8>«<name>» <#8c8c8c>• <state>
+        <#8c8c8c>  ПКМ — дальше <#8c8c8c>• Shift+ПКМ — положение
+      state:
+        draft: "<#ffb142>черновик"
+        active: "<#2bba43>активна"
+      quote-expired: "<prefix><#ff9f0f>Смета устарела. Запустите activate или copy."
+      quote-cancelled: "<prefix><#969696>Смета отменена. Деньги не списаны."
+      economy-unavailable: "<prefix><#c42323>Экономика недоступна. Деньги не списаны."
+      insufficient-funds: "<prefix><#ff9f0f>Не хватает денег. Черновик сохранён."
+      payment-failed: "<prefix><#c42323>Платёж отклонён. Книга не активирована."
+      refunded: |-
+        <prefix><#ff9f0f>Книгу не удалось выпустить.
+        <#8c8c8c>  • <#e6fff3>Вся сумма возвращена.
+      manual-review: |-
+        <prefix><#c42323>Операция остановлена для проверки.
+        <#8c8c8c>  • <#e6fff3>Не перемещайте книгу.
+        <#8c8c8c>  • <#969696>Повторного списания не будет.
+      delivery-space: |-
+        <prefix><#ff9f0f>Оплаченная книга ожидает свободный слот.
+        <#8c8c8c>  • <#e6fff3>Освободите место — выдача продолжится.
+      delivery-pending: |-
+        <prefix><#ff9f0f>Реестр подтверждает выдачу книги.
+        <#8c8c8c>  • <#e6fff3>Инвентарь временно защищён.
+      delivery-recovered: "<prefix><#2bba43>Оплаченная книга восстановлена и активна."
+      activated: |-
+        <prefix><#2bba43>Книга активна и зарегистрирована.
+        <#8c8c8c>  • <#e6fff3>Каждый экземпляр — одноразовый.
+        <#8c8c8c>  • <#e6fff3>Копия выпускается по той же себестоимости.
+        <#8c8c8c>  • <click:suggest_command:'/builder book sell '><#92bed8>/builder book sell [цена]</click> <#e6fff3>— продажа.
+      activated-preview: |-
+        <prefix><#2bba43>Книга активна; открытое превью обновлено.
+        <#8c8c8c>  • <#e6fff3>Повторите ПКМ по опорному блоку.
+        <#8c8c8c>  • <#969696>Сначала откроется окно подтверждения.
+      copied: |-
+        <prefix><#2bba43>Новый экземпляр зарегистрирован.
+        <#8c8c8c>  • <#e6fff3>Исходная книга сохранена.
+        <#8c8c8c>  • <#e6fff3>У копии свой одноразовый UUID.
+        <#8c8c8c>  • <click:suggest_command:'/builder book sell '><#92bed8>/builder book sell [цена]</click> <#e6fff3>— продажа.
+      auction-price: |-
+        <prefix><#ff9f0f>Укажите цену продажи.
+        <#8c8c8c>  • <click:suggest_command:'/builder book sell '><#92bed8>/builder book sell [цена]</click>
+      auction-unavailable: "<prefix><#c42323>Аукцион книг недоступен. Книга осталась у вас."
+      auction-locked: |-
+        <prefix><#ff9f0f>Этот экземпляр сейчас закреплён за аукционом.
+        <#8c8c8c>  • <#e6fff3>Заберите книгу из завершённых лотов.
+      auction-use-safe-command: |-
+        <prefix><#ff9f0f>Для книг есть защищённая продажа.
+        <#8c8c8c>  • <click:suggest_command:'/builder book sell '><#92bed8>/builder book sell [цена]</click> <#e6fff3>— цена остаётся вашей.
+      auction-listed: |-
+        <prefix><#2bba43>Книга выставлена за <#92bed8><price><#2bba43>.
+        <#8c8c8c>  • <#969696>UUID заблокирован до выдачи книги.
+        <#8c8c8c>  • <#e6fff3>После выдачи книга активируется у получателя.
+      auction-listed-late: |-
+        <prefix><#2bba43>Аукцион подтвердил лот после задержки.
+        <#8c8c8c>  • <#e6fff3>Книга уже находится в вашем списке продаж.
+      auction-rejected: |-
+        <prefix><#ff9f0f>Лот не создан; книга возвращена.
+        <#8c8c8c>  • <#e6fff3>Проверьте цену, налог и лимит лотов.
+      auction-review: |-
+        <prefix><#c42323>Состояние лота проверяется безопасно.
+        <#8c8c8c>  • <#e6fff3>Не перемещайте книгу.
+        <#8c8c8c>  • <#e6fff3>Не повторяйте продажу.
+        <#8c8c8c>  • <#969696>UUID остаётся заблокирован.
+      auction-returned: "<prefix><#2bba43>Возвращённая с аукциона книга снова активна."
+      auction-received: "<prefix><#2bba43>Книга получена с аукциона и снова активна."
+    plan:
+      ready: |-
+        <prefix><#2bba43><kind> <#8c8c8c>• <#e6fff3><count> блоков
+        <#8c8c8c>  Расход: <#92bed8><cost>
+        <#8c8c8c>  Возврат: <#92bed8><reward>
+        <#8c8c8c>  <click:run_command:'/builder confirm'><#2bba43>[Построить]</click> <#8c8c8c>  <click:run_command:'/builder cancel'><#969696>[Отмена]</click>
+      skipped: "<#8c8c8c>  Пропущено безопасно: <#969696><count>"
+      market:
+        - "<#8c8c8c>  Смета <#92bed8><full_price> <#8c8c8c>• докупить <#e6fff3><missing_price>"
+        - "<#8c8c8c>  <click:run_command:'/builder confirm buy'><#92bed8>[Купить и построить]</click>"
+      market-item: "<#8c8c8c>    • <#e6fff3><amount>× <material>"
+      market-unavailable: "<prefix><#ff9f0f>В админшопе нет: <#92bed8><material>"
+      market-more: "<#8c8c8c>    • <#969696>Ещё материалов: <count>"
+      cancelled: |-
+        <prefix><#ff9f0f>Предпросмотр отменён.
+        <#8c8c8c>  • <#969696>Мир и инвентарь не изменены.
+    shop:
+      purchased: "<prefix><#2bba43>Куплено: <#92bed8><items> шт. <#8c8c8c>• <#e6fff3>стоимость: <#92bed8><price>"
+      status:
+        success: "покупка подтверждена"
+        item-not-found: "товар не найден"
+        item-error: "ошибка товара"
+        not-buyable: "товар нельзя купить"
+        no-permissions: "нет доступа к товару"
+        requirements-failed: "условия покупки не выполнены"
+        insufficient-funds: "недостаточно средств"
+        no-inventory-space: "нет места в инвентаре"
+        transaction-cancelled: "покупка отменена"
+        below-minimum: "меньше минимального количества"
+        above-maximum: "больше максимального количества"
+        out-of-stock: "товар закончился"
+        failed: "магазин отклонил покупку"
+        ambiguous: "магазин не подтвердил результат"
+        delivery-mismatch: "выдано не то количество"
+      purchase-detail:
+        - "<#8c8c8c>  • <#e6fff3>Статус: <#92bed8><status>"
+        - "<#8c8c8c>  • <#e6fff3>Уже куплено: <#92bed8><purchased>"
+      world-untouched: |-
+        <prefix><#ff9f0f>Строительство не началось.
+        <#8c8c8c>  • <#e6fff3>Материалы уже у вас; создайте план снова.
+    operation:
+      started: |-
+        <prefix><#ff9f0f>Строительство начато.
+        <#8c8c8c>  • <#e6fff3>Блоков: <#92bed8><count> <#8c8c8c>• <#969696>инвентарь временно защищён
+      progress: "<#e6fff3><kind>: <#2bba43><count><#8c8c8c>/<#92bed8><total>"
+      completed: |-
+        <prefix><#2bba43>Операция завершена: <#92bed8><kind>
+        <#8c8c8c>  • <#e6fff3>Изменено блоков: <#2bba43><count>
+      rolled-back: |-
+        <prefix><#c42323>Операция отменена и полностью восстановлена.
+        <#8c8c8c>  • <#969696>Мир и инвентарь сохранены.
+    items:
+      none: "нет"
+      summary: "предметов: <items> • видов: <types>"
+    status:
+      selection-first: |-
+        <prefix><#ff9f0f>Выделение не завершено.
+        <#8c8c8c>  • <#e6fff3>Первая точка: <#92bed8><x>, <y>, <z>
+        <#8c8c8c>  • <#e6fff3>Отметьте вторую точку <#92bed8>ПКМ<#e6fff3>.
+      selection-second: |-
+        <prefix><#ff9f0f>Выделение не завершено.
+        <#8c8c8c>  • <#e6fff3>Вторая точка: <#92bed8><x>, <y>, <z>
+        <#8c8c8c>  • <#e6fff3>Отметьте первую точку <#92bed8>ЛКМ<#e6fff3>.
+      selection: |-
+        <prefix><#e6fff3>Выделено: <#92bed8><x> × <y> × <z>
+        <#8c8c8c>  • <#e6fff3>Объём: <#92bed8><volume>
+      plan: "<prefix><#e6fff3><kind>: <#92bed8><count>/<total> <#e6fff3>блоков."
+      idle: "<prefix><#e6fff3>Нет выделения. <#8c8c8c>• <#92bed8>/builder wand"
+    kinds:
+      fill: "заполнение"
+      paste: "вставка чертежа"
+      build_book: "постройка по книге"
+      deconstruct: "демонтаж"
+      crown: "крона"
+      undo: "отмена"
+  en:
+    prefix: "<#92bed8>◇ "
+    help:
+      - "<prefix><white>/builder wand <gray>— prepare the selector"
+      - "<prefix><white>/builder fill [block] <gray>— fill using your materials"
+      - "<prefix><white>/builder copy <gray>and <white>/builder paste <gray>— temporary plan"
+      - "<prefix><white>/builder book draft [name] <gray>— free draft"
+      - "<prefix><white>/builder book activate <gray>— quote draft activation"
+      - "<prefix><white>/builder book sell [price] <gray>— list an active book"
+      - "<prefix><white>/builder book copy <gray>— quote a paid registered copy"
+      - "<prefix><white>/builder book <gray>— guided workflow and current step"
+      - "<prefix><white>/builder clear <gray>— clear selection and particles"
+      - "<prefix><white>/builder deconstruct <gray>— dismantle the area"
+      - "<prefix><white>/builder crown [leaves] [3–10] <gray>— leaf crown"
+      - "<prefix><white>/builder confirm <gray>— build with materials you own"
+      - "<prefix><white>/builder confirm buy <gray>— buy and build"
+      - "<prefix><white>/builder undo <gray>— revert the latest operation"
+    errors:
+      disabled: "<prefix><yellow>Builder tools are available only on survival servers."
+      player-only: "<prefix><red>This command is available only to players."
+      no-permission: "<prefix><red>You do not have access to this tool."
+      game-mode: |-
+        <prefix><red>This game mode is not supported.
+        <dark_gray>  • <gray>Use survival or creative mode.
+      game-mode-changed: |-
+        <prefix><yellow>Your game mode changed after preview.
+        <dark_gray>  • <gray>Create the plan again.
+      world-not-allowed: "<prefix><yellow>Builder tools are disabled in this world."
+      selection-missing: |-
+        <prefix><yellow>The required position is not selected.
+        <dark_gray>  • <gray>Use <aqua>/builder wand<gray> first.
+      selection-too-large: "<prefix><red>The selection exceeds your safe size or block limit."
+      plan-failed: |-
+        <prefix><red>Could not prepare a safe plan.
+        <dark_gray>  • <gray>Nothing changed; try again.
+      empty-copy: |-
+        <prefix><yellow>The selection has no blocks to copy.
+        <dark_gray>  • <gray>Air and replaceable plants are excluded.
+      hourly-limit: |-
+        <prefix><yellow>Safe hourly change limit reached.
+        <dark_gray>  • <gray>Wait or select a smaller area.
+      chunk-unloaded: |-
+        <prefix><yellow>Part of the area is not loaded.
+        <dark_gray>  • <gray>Move closer and try again.
+      too-far: |-
+        <prefix><yellow>The area is too far away.
+        <dark_gray>  • <gray>Move closer and try again.
+      nothing-to-change: |-
+        <prefix><yellow>There is nothing to change.
+        <dark_gray>  • <gray>Check the area, material, and blocks.
+      busy: |-
+        <prefix><yellow>An operation is already in progress.
+        <dark_gray>  • <gray>Wait for it to finish.
+      expired: "<prefix><yellow>The plan or clipboard expired. Create it again."
+      inventory: |-
+        <prefix><red>The operation cannot start yet.
+        <dark_gray>  • <gray>Check materials, space, and tool durability.
+      protection: |-
+        <prefix><red>You cannot build here.
+        <dark_gray>  Build access is required inside another Land.
+      material: |-
+        <prefix><red>That material is not supported.
+        <dark_gray>  • <gray>Crowns require ordinary leaves.
+      crown-setting: "<prefix><red>Invalid setting. See <aqua>/builder crown help</aqua>."
+      tool: |-
+        <prefix><red>A suitable tool is required.
+        <dark_gray>  • <gray>Hold it with enough durability.
+      recovering: |-
+        <prefix><yellow>Safe recovery is still finishing.
+        <dark_gray>  • <gray>Try again shortly.
+      undo-missing: "<prefix><yellow>There is no completed operation available to undo."
+      shop-unavailable: "<prefix><yellow>Admin shop unavailable. Bring the materials."
+      shop-not-supported: "<prefix><yellow>Procurement: fill, paste, and crown only."
+      shop-material-unavailable: "<prefix><yellow>Some items are not sold. Add them manually."
+      shop-limit: "<prefix><red>Limit exceeded: <white><items></white> items or <white><price></white>."
+      shop-insufficient-funds: "<prefix><yellow>Need <white><price></white> • balance <white><balance></white>."
+      shop-estimate-changed: |-
+        <prefix><yellow>The purchase contents changed.
+        <dark_gray>  • <gray>Create the plan again.
+      shop-purchase-failed: "<prefix><red>Not purchased: <white><material></white>."
+      shop-purchase-ambiguous: |-
+        <prefix><red>The shop did not confirm the purchase.
+        <dark_gray>  • <gray>Material: <white><material>
+        <dark_gray>  • <gray>Nothing changed; delivered items remain yours.
+    selection:
+      first: |-
+        <prefix><green>Position 1 selected.
+        <dark_gray>  • <gray>Coordinates: <white><x> <y> <z>
+        <dark_gray>  • <gray>Right-click position 2.
+      second: |-
+        <prefix><green>Position 2 selected.
+        <dark_gray>  • <gray>Coordinates: <white><x> <y> <z>
+        <dark_gray>  • <gray>Left-click position 1 if needed.
+      complete: |-
+        <dark_gray>  • <gray>Area: <white><x>×<y>×<z></white> • <volume> blocks
+        <dark_gray>  • <gray>The outline stays visible.
+        <dark_gray>  • <click:run_command:'/builder copy'><aqua>/builder copy</aqua></click> <gray>— save it.
+      cleared: |-
+        <prefix><gray>Selection cleared; particles hidden.
+        <dark_gray>  • <gray>The saved clipboard remains.
+      world-reset: |-
+        <prefix><yellow>Points from another world were cleared.
+        <dark_gray>  • <gray>Select both points again.
+    wand:
+      name: "<aqua><bold>Builder selector"
+      lore:
+        - "<gray>Left-click a block — position 1"
+        - "<gray>Right-click a block — position 2"
+        - "<dark_gray>The outline stays visible until /builder clear"
+        - "<dark_gray>The selector never changes blocks"
+      received: "<prefix><green>Your echo shard is now the builder selector."
+      inventory-full: "<prefix><yellow>Free one slot or hold a single echo shard."
+      material-required: |-
+        <prefix><yellow>Hold a plain echo shard.
+        <dark_gray>  • <gray>ARC never creates one for free.
+    crown-brush:
+      name: "<aqua><bold>Crown brush"
+      lore:
+        - "<gray>Left-click a face to preview a crown"
+        - "<gray>Right-click to confirm the shown plan"
+        - "<dark_gray>In survival, leaves come from your inventory"
+        - "<dark_gray>In creative, materials are not consumed"
+        - "<reset>"
+        - "<dark_gray>• <aqua>/builder crown help <gray>— settings"
+      received: "<prefix><green>Your plain brush is now the crown brush."
+      inventory-full: "<prefix><yellow>Free one slot or hold a single brush."
+      material-required: |-
+        <prefix><yellow>Hold a plain brush in your main hand.
+        <dark_gray>  • <gray>ARC never creates one for free.
+    crown:
+      same-face: "<prefix><yellow>Confirm on the same face with right-click."
+      settings-updated: "<prefix><green><white><setting></white> is now <white><value></white>."
+      palette-updated: "<prefix><green>Palette updated: <white><count></white> leaf types."
+      palette-row: "<dark_gray>    • <gray><material>: <aqua><weight>"
+      labels:
+        settings:
+          shape: "Shape"
+          radius: "Radius"
+          density: "Density"
+          noise: "Edge"
+        shape:
+          natural: "natural"
+          round: "round"
+          wide: "wide"
+          tall: "tall"
+        density:
+          airy: "airy"
+          natural: "natural"
+          dense: "dense"
+        noise:
+          smooth: "smooth"
+          natural: "natural"
+          wild: "wild"
+      help:
+        - "<prefix><white><bold>Crown settings"
+        - "<dark_gray>  • <aqua>/builder crown wand <gray>— bind a plain brush"
+        - "<dark_gray>  • <aqua>/builder crown palette oak_leaves,birch_leaves"
+        - "<dark_gray>  • <aqua>/builder crown shape natural|round|wide|tall"
+        - "<dark_gray>  • <aqua>/builder crown radius 3–10 <gray>— crown size"
+        - "<dark_gray>  • <aqua>/builder crown density airy|natural|dense"
+        - "<dark_gray>  • <aqua>/builder crown noise smooth|natural|wild"
+        - "<dark_gray>  • <aqua>/builder crown reroll <gray>— new variant"
+        - "<dark_gray>  • <aqua>/builder crown place <gray>— confirm"
+        - "<dark_gray>  • <gray>In survival, leaves come from your inventory."
+        - "<dark_gray>  • <gray>In creative, materials are not consumed."
+      status:
+        - "<prefix><white>Crown settings:"
+        - "<dark_gray>  • <gray>Shape: <aqua><shape></aqua>; radius: <aqua><radius></aqua>"
+        - "<dark_gray>  • <gray>Density: <aqua><density></aqua>; edge: <aqua><noise></aqua>"
+        - "<dark_gray>  • <gray>Palette:"
+    clipboard:
+      saved: |-
+        <prefix><green>Blueprint <dark_gray>• <white><count> blocks
+        <dark_gray>  Skipped safely: <gray><skipped>
+        <dark_gray>  <click:run_command:'/builder paste'><aqua>[Paste here]</aqua></click> <dark_gray>• <click:suggest_command:'/builder book draft '><white>[Create book]</white></click>
+    book:
+      draft-saving: "<prefix><gray>Saving the blueprint…"
+      draft-recovery-starting: "<prefix><gray>Checking unfinished drafts after restart…"
+      draft-pending: |-
+        <prefix><yellow>Your saved draft is waiting for safe delivery.
+        <dark_gray>  • <gray>Hold a plain book in your main hand.
+        <dark_gray>  • <click:run_command:'/builder book draft'><aqua>/builder book draft</aqua></click> <gray>— finish delivery; no reselection needed.
+      draft-recovering: |-
+        <prefix><yellow>Finishing the durable draft record.
+        <dark_gray>  • <gray>Do not move the book; recovery retries automatically.
+      draft-recovery-failed: |-
+        <prefix><yellow>The interrupted save had no complete blueprint.
+        <dark_gray>  • <gray>Copy the area again; it did not consume your limit.
+      guide:
+        - "<prefix><white><bold>Build-book guide"
+        - "<dark_gray>  1. <aqua>/builder wand <gray>— get the selector."
+        - "<dark_gray>     <gray>Mark two corners; the outline stays visible."
+        - "<dark_gray>  2. <aqua>/builder copy <gray>— save it for 15 minutes."
+        - "<dark_gray>  3. <gray>Hold a plain book."
+        - "<dark_gray>     <aqua>/builder book draft [name] <gray>— free draft."
+        - "<dark_gray>  4. <gray>Right-click ground — preview."
+        - "<dark_gray>     <gray>Right-click air — rotate or offset."
+        - "<dark_gray>  5. <aqua>/builder book activate <gray>— quote, no charge."
+        - "<dark_gray>  6. <aqua>/builder book confirm <gray>— pay and activate."
+        - "<dark_gray>  7. <aqua>/builder book copy <gray>— copy at stored cost."
+        - "<dark_gray>     <aqua>/builder book sell [price] <gray>— sell."
+        - "<dark_gray>  • <aqua>/builder book status <gray>— your current step."
+      status:
+        start: |-
+          <prefix><yellow>Step 1/7: select the build area.
+          <dark_gray>  • <aqua>/builder wand <gray>— selector.
+          <dark_gray>  • <gray>Left/right-click the two corners.
+        first-point: |-
+          <prefix><yellow>Step 1/7: the first point is selected.
+          <dark_gray>  • <gray>Coordinates: <white><x>, <y>, <z>
+          <dark_gray>  • <gray>Select the second point with right-click.
+        second-point: |-
+          <prefix><yellow>Step 1/7: the second point is selected.
+          <dark_gray>  • <gray>Coordinates: <white><x>, <y>, <z>
+          <dark_gray>  • <gray>Select the first point with left-click.
+        selection: |-
+          <prefix><green>Step 2/7: area selected.
+          <dark_gray>  • <gray>Size: <white><x>×<y>×<z></white> • <volume> blocks
+          <dark_gray>  • <aqua>/builder copy <gray>— save it.
+        clipboard: |-
+          <prefix><green>Step 3/7: <white><count></white> blocks copied.
+          <dark_gray>  • <gray>Hold a plain book.
+          <dark_gray>  • <aqua>/builder book draft [name] <gray>— create draft.
+        draft: |-
+          <prefix><green>Step 4/7: free draft ready.
+          <dark_gray>  • <gray>Name: <white><name>
+          <dark_gray>  • <gray>Right-click ground — preview.
+          <dark_gray>  • <gray>Right-click air — edit position.
+        draft-recovery: |-
+          <prefix><yellow>Your blueprint is saved and waiting for draft delivery.
+          <dark_gray>  • <gray>Hold a plain book in your main hand.
+          <dark_gray>  • <click:run_command:'/builder book draft'><aqua>/builder book draft</aqua></click> <gray>— resume the saved step.
+        preview: |-
+          <prefix><green>Step 5/7: preview is open.
+          <dark_gray>  • <gray>The outline updates continuously.
+          <dark_gray>  • <aqua>/builder book activate <gray>— calculate quote.
+        quote: |-
+          <prefix><yellow>Step 6/7: quote <green><price></green>.
+          <dark_gray>  • <aqua>/builder book confirm <gray>— pay within <seconds>s.
+        delivery: |-
+          <prefix><yellow>Step 7/7: verifying payment.
+          <dark_gray>  • <gray>Do not move the book.
+          <dark_gray>  • <gray>Delivery resumes automatically.
+        checking: "<prefix><gray>Checking the book UUID, owner, and generation…"
+        changed: |-
+          <prefix><yellow>The held book changed during verification.
+          <dark_gray>  • <aqua>/builder book status <gray>— check the current book.
+        active: |-
+          <prefix><green>The book is active and registered.
+          <dark_gray>  • <gray>Name: <white><name>
+          <dark_gray>  • <gray>Copy at stored cost: <white><price>
+          <dark_gray>  • <aqua>/builder book copy <gray>— copy.
+          <dark_gray>  • <aqua>/builder book sell [price] <gray>— sell.
+      draft-created: |-
+        <prefix><green>Free draft created.
+        <dark_gray>  • <gray>Name: <white><name>
+        <dark_gray>  • <gray><count> blocks • no charge
+        <dark_gray>  • <gray>Preview and adjust it.
+        <dark_gray>  • <aqua>/builder book activate <gray>— calculate quote.
+      draft-recovered: |-
+        <prefix><green>Saved draft recovered.
+        <dark_gray>  • <gray>Name: <white><name>
+        <dark_gray>  • <gray><count> blocks • no charge
+        <dark_gray>  • <gray>Right-click ground to inspect its preview.
+      material-required: "<prefix><yellow>Hold a plain book in your main hand."
+      inventory-full: "<prefix><yellow>Free one slot or hold a single plain book."
+      invalid-name: "<prefix><red>Use 1–48 ordinary characters for the name."
+      limit: |-
+        <prefix><yellow>Permanent-blueprint limit reached.
+        <dark_gray>  • <gray>You may bind the same copied design again.
+      failed: |-
+        <prefix><red>The book could not be saved.
+        <dark_gray>  • <gray>The world and inventory are unchanged.
+      invalid: "<prefix><red>This player build book is damaged or unavailable."
+      missing: "<prefix><yellow>Keep the preview book in your inventory."
+      draft-required: "<prefix><yellow>Hold a free build-book draft in your main hand."
+      preview-required: |-
+        <prefix><yellow>Right-click once with this book first.
+      active-required: "<prefix><yellow>Hold a registered build book in your main hand."
+      creator-only: "<prefix><yellow>The draft author must approve its first activation."
+      unactivated: |-
+        <prefix><yellow>This draft is preview-only.
+        <dark_gray>  • <aqua>/builder book activate <gray>— calculate quote.
+      duplicate: |-
+        <prefix><red>This UUID is reserved or already spent.
+        <dark_gray>  • <gray>Only one physical instance may act.
+      stale: |-
+        <prefix><red>This physical copy is no longer authoritative.
+        <dark_gray>  • <gray>Each sale updates its owner and generation.
+        <dark_gray>  • <aqua>Transfer books through /builder book sell 25000.
+      source-changed: "<prefix><yellow>The book changed. Request a new quote."
+      contracts-disabled: "<prefix><yellow>Player book activation is disabled on this server."
+      registry-starting: "<prefix><yellow>The registry is starting. Try again shortly."
+      registry-unavailable: |-
+        <prefix><red>The book registry is unavailable.
+        <dark_gray>  • <gray>No new charge was made.
+      shop-unavailable: "<prefix><yellow>Could not read material prices from the admin shop."
+      material-unavailable: |-
+        <prefix><yellow>Some materials are not sold by the admin shop.
+        <dark_gray>  • <gray>Missing: <white><materials>
+      price-limit: "<prefix><red>The estimate exceeds the safe book-price limit."
+      quote-kind:
+        activation: "Activation"
+        copy: "Copy"
+      quote: |-
+        <prefix><gold><kind> <aqua>“<name>”
+        <dark_gray>  Materials: <white><materials>
+        <dark_gray>  Work: <white><labor> <dark_gray>• Total: <green><price>
+        <dark_gray>  <click:run_command:'/builder book confirm'><green>[Pay]</click>  <click:run_command:'/builder book cancel'><gray>[Cancel]</click>
+      preview-opened: |-
+        <prefix><aqua>“<name>” <dark_gray>• <state>
+        <dark_gray>  Right-click — next <dark_gray>• Shift+right-click — move
+      state:
+        draft: "<gold>draft"
+        active: "<green>active"
+      quote-expired: "<prefix><yellow>Quote expired. Run activate or copy again."
+      quote-cancelled: "<prefix><gray>Quote cancelled. No money was charged."
+      economy-unavailable: "<prefix><red>The economy is unavailable. No money was charged."
+      insufficient-funds: "<prefix><yellow>Not enough money. Your draft is unchanged."
+      payment-failed: "<prefix><red>Payment rejected. The book is unchanged."
+      refunded: |-
+        <prefix><yellow>The instance could not be issued.
+        <dark_gray>  • <gray>The full amount was refunded.
+      manual-review: |-
+        <prefix><red>The operation stopped for review.
+        <dark_gray>  • <gray>Do not move the book.
+        <dark_gray>  • <gray>ARC will not charge it again.
+      delivery-space: |-
+        <prefix><yellow>Your paid book needs one free slot.
+        <dark_gray>  • <gray>Free space; delivery will resume.
+      delivery-pending: |-
+        <prefix><yellow>The registry is confirming delivery.
+        <dark_gray>  • <gray>Your inventory is temporarily protected.
+      delivery-recovered: "<prefix><green>Your paid book is recovered and active."
+      activated: |-
+        <prefix><green>The build book is active and registered.
+        <dark_gray>  • <gray>Each instance is single-use.
+        <dark_gray>  • <gray>Copies use the same stored cost.
+      activated-preview: |-
+        <prefix><green>The book is active; the open preview was refreshed.
+        <dark_gray>  • <gray>Right-click the anchor block again.
+        <dark_gray>  • <gray>A final confirmation opens before building.
+      copied: |-
+        <prefix><green>A new instance is registered.
+        <dark_gray>  • <gray>The source remains yours.
+        <dark_gray>  • <gray>The copy has its own one-use UUID.
+      auction-price: "<prefix><yellow>Enter a sale price: <aqua>/builder book sell [price]</aqua>."
+      auction-unavailable: "<prefix><red>Auction unavailable; your book is unchanged."
+      auction-locked: |-
+        <prefix><yellow>This book is reserved by the auction.
+        <dark_gray>  • <gray>Claim it from sold or expired listings first.
+      auction-use-safe-command: |-
+        <prefix><yellow>Build books use a protected sale route.
+        <dark_gray>  • <aqua>/builder book sell [price]
+      auction-listed: |-
+        <prefix><green>Book listed for <white><price></white>.
+        <dark_gray>  • <gray>Its UUID stays locked until delivery or return.
+      auction-listed-late: "<prefix><green>Delayed listing confirmed; the book is on sale."
+      auction-rejected: |-
+        <prefix><yellow>Listing rejected; your book was returned.
+        <dark_gray>  • <gray>Check the price, tax, and listing limit.
+      auction-review: |-
+        <prefix><red>The listing is under safe review.
+        <dark_gray>  • <gray>Do not move or retry; its UUID stays locked.
+      auction-returned: "<prefix><green>The returned auction book is active again."
+      auction-received: "<prefix><green>The auction book was received and is active again."
+    plan:
+      ready: |-
+        <prefix><green><kind> <dark_gray>• <white><count> blocks
+        <dark_gray>  Cost: <white><cost>
+        <dark_gray>  Return: <white><reward>
+        <dark_gray>  <click:run_command:'/builder confirm'><green>[Build]</click>  <click:run_command:'/builder cancel'><gray>[Cancel]</click>
+      skipped: "<dark_gray>  Skipped safely: <gray><count>"
+      market:
+        - "<dark_gray>  Estimate <white><full_price> <dark_gray>• missing <gray><missing_price>"
+        - "<dark_gray>  <click:run_command:'/builder confirm buy'><aqua>[Buy and build]</aqua></click>"
+      market-item: "<dark_gray>    • <gray>Need <white><amount>×<material></white>"
+      market-unavailable: "<prefix><yellow>Shop: unavailable <white><material></white>."
+      market-more: "<prefix><gray>More lines: <white><count></white>."
+      cancelled: |-
+        <prefix><gray>Preview cancelled.
+        <dark_gray>  • <gray>The world and inventory are unchanged.
+    shop:
+      purchased: "<prefix><green>Bought <white><items></white> items • <white><price></white>."
+      status:
+        success: "purchase confirmed"
+        item-not-found: "item not found"
+        item-error: "item error"
+        not-buyable: "item cannot be bought"
+        no-permissions: "item is not available to you"
+        requirements-failed: "purchase requirements were not met"
+        insufficient-funds: "insufficient funds"
+        no-inventory-space: "inventory is full"
+        transaction-cancelled: "purchase cancelled"
+        below-minimum: "below the minimum amount"
+        above-maximum: "above the maximum amount"
+        out-of-stock: "item is out of stock"
+        failed: "shop rejected the purchase"
+        ambiguous: "shop did not confirm the outcome"
+        delivery-mismatch: "delivered amount did not match"
+      purchase-detail:
+        - "<prefix><gray>Reason: <white><status></white>."
+        - "<prefix><gray>Bought earlier: <white><purchased></white>."
+      world-untouched: "<prefix><gray>Bought items stay yours; world unchanged."
+    operation:
+      started: |-
+        <prefix><yellow>Construction started: <white><count> blocks
+        <dark_gray>  • <gray>Your inventory is briefly protected.
+      progress: "<gray><kind>: <green><count><dark_gray>/<aqua><total>"
+      completed: "<prefix><green><white><kind></white> completed: <white><count></white> blocks."
+      rolled-back: |-
+        <prefix><red>The operation was rolled back and restored.
+        <dark_gray>  • <gray>The world and inventory are safe.
+    items:
+      none: "none"
+      summary: "items: <items> • types: <types>"
+    status:
+      selection-first: |-
+        <prefix><yellow>The selection is incomplete.
+        <dark_gray>  • <gray>First point: <white><x>, <y>, <z>
+        <dark_gray>  • <gray>Select the second point with right-click.
+      selection-second: |-
+        <prefix><yellow>The selection is incomplete.
+        <dark_gray>  • <gray>Second point: <white><x>, <y>, <z>
+        <dark_gray>  • <gray>Select the first point with left-click.
+      selection: |-
+        <prefix><gray>Selected: <white><x>×<y>×<z>
+        <dark_gray>  • <gray>Volume: <white><volume> <dark_gray>• <gray>no plan ready
+      plan: "<prefix><yellow><white><kind></white> plan: <white><count>/<total></white> blocks."
+      idle: "<prefix><gray>No selection or active plan. Start with <white>/builder wand</white>."
+    kinds:
+      fill: "fill"
+      paste: "blueprint paste"
+      build_book: "book construction"
+      deconstruct: "deconstruction"
+      crown: "crown"
+      undo: "undo"

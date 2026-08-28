@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arcbuilder-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Verify arc-core consumer architecture
+        uses: alexey-va/arc-core/.github/actions/verify-consumer@591352f85a4dfc4ef06815a6439d2f2979c5f638
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests and production JAR
+        run: ./gradlew --no-daemon test shadowJar
+      - name: Verify production artifact
+        run: |
+          jar_path="build/libs/ArcBuilder-1.0.0.jar"
+          test -s "$jar_path"
+          jar tf "$jar_path" | grep -Fx plugin.yml
+          jar tf "$jar_path" | grep -Fq 'kotlin/collections/CollectionsKt.class'
+          ! jar tf "$jar_path" | grep -Eq '^(org/bukkit|io/papermc|com/sk89q)/'
+          unzip -p "$jar_path" plugin.yml | grep -Fx 'name: ArcBuilder'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArcBuilder-${{ github.sha }}
+          path: build/libs/ArcBuilder-1.0.0.jar
+          if-no-files-found: error
+
+  mysql-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Verify arc-core consumer architecture
+        uses: alexey-va/arc-core/.github/actions/verify-consumer@591352f85a4dfc4ef06815a6439d2f2979c5f638
+      - uses: gradle/actions/setup-gradle@v4
+      - name: MySQL migrations, contention, recovery, and anti-duplication
+        run: ./gradlew --no-daemon integrationTest

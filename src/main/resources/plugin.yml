@@ -1,0 +1,73 @@
+name: ArcBuilder
+version: '${version}'
+main: ru.ruscrafting.builder.paper.ArcBuilderPlugin
+api-version: '1.21.11'
+authors: [RusCrafting]
+description: Survival-friendly builder tools and construction books
+softdepend:
+  - Lands
+  - Slimefun
+  - ItemsAdder
+  - EconomyShopGUI-Premium
+  - zAuctionHouse
+  - zAuctionHouseV3
+  - Vault
+  - RedisEconomy
+  - WorldEdit
+commands:
+  builder:
+    description: Survival-friendly builder tools
+    usage: /builder [help|wand|fill|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status]
+permissions:
+  arc.builder.tools.use:
+    description: Use survival-friendly ArcBuilder tools
+    default: false
+    children:
+      arc.builder.tools.fill: true
+      arc.builder.tools.copy: true
+      arc.builder.tools.paste: true
+      arc.builder.tools.deconstruct: true
+      arc.builder.tools.crown: true
+      arc.build.book.create: true
+  arc.builder.tools.fill:
+    default: false
+  arc.builder.tools.copy:
+    default: false
+  arc.builder.tools.paste:
+    default: false
+  arc.builder.tools.deconstruct:
+    default: false
+  arc.builder.tools.crown:
+    default: false
+  arc.builder.tools.selection.size.20:
+    default: false
+  arc.builder.tools.selection.size.40:
+    default: false
+  arc.builder.tools.selection.size.60:
+    default: false
+  arc.builder.tools.selection.size.80:
+    default: false
+  arc.builder.tools.selection.size.100:
+    default: false
+  arc.builder.tools.hourly.20000:
+    default: false
+  arc.builder.tools.hourly.50000:
+    default: false
+  arc.builder.tools.hourly.100000:
+    default: false
+  arc.builder.tools.hourly.150000:
+    default: false
+  arc.builder.tools.hourly.200000:
+    default: false
+  arc.build.book.create:
+    default: false
+    children:
+      arc.build.book.edit: true
+      arc.build.book.sell: true
+      arc.build.book.use: true
+  arc.build.book.edit:
+    default: false
+  arc.build.book.sell:
+    default: false
+  arc.build.book.use:
+    default: false
