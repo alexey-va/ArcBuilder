@@ -54,6 +54,11 @@ import java.util.concurrent.atomic.AtomicReference
 internal class BuilderToolsRuntime(
     private val plugin: JavaPlugin,
     private val config: BuilderToolsConfig,
+    private val displayRenderer: BuilderDisplayRenderer = BuilderBlockDisplayRenderer(
+        plugin,
+        config.previewMaxPlanParticles,
+    ),
+    blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
@@ -68,7 +73,6 @@ internal class BuilderToolsRuntime(
     }
     private val debugLine = StructuredDebugLine("ARC_BUILDER_TOOLS")
     private val wandKey = org.bukkit.NamespacedKey(plugin, "builder_selector")
-    private val displayRenderer = BuilderBlockDisplayRenderer(plugin, config.previewMaxPlanParticles)
     private val selections = BuilderSelectionController(
         previewRadius = config.previewRadius,
         previewSpacing = config.previewSpacing,
@@ -105,6 +109,7 @@ internal class BuilderToolsRuntime(
         selections = selections,
         maximumBlocks = config.maxClipboardBlocks,
         clipboardTtl = config.clipboardTtl,
+        blockDataRotation = blockDataRotation,
         host = object : BuilderClipboardHost {
             override fun ensureCopyPermission(player: Player) = ensureFeaturePermission(player, BuilderFeature.COPY)
 

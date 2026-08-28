@@ -4,12 +4,22 @@ import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.Block
+import org.bukkit.block.data.BlockData
 import org.bukkit.block.data.type.Leaves
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import java.time.Duration
 import java.util.UUID
 import ru.arc.util.BlockUtils.rotateBlockData
+
+/** Exact Paper block-state rotation boundary; MockBukkit does not implement BlockData.rotate. */
+internal fun interface BuilderBlockDataRotation {
+    fun rotate(data: BlockData, degrees: Int): BlockData
+}
+
+internal object PaperBuilderBlockDataRotation : BuilderBlockDataRotation {
+    override fun rotate(data: BlockData, degrees: Int) = rotateBlockData(data, degrees)
+}
 
 /** Generic protection and plan boundary consumed by the copy/paste lifecycle. */
 internal interface BuilderClipboardHost {
@@ -44,6 +54,7 @@ internal class BuilderClipboardController(
     clipboardTtl: Duration,
     private val host: BuilderClipboardHost,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
 ) : AutoCloseable {
     private val ttlMillis = clipboardTtl.toMillis()
     private val clipboards = mutableMapOf<UUID, BuilderClipboard>()
@@ -129,7 +140,7 @@ internal class BuilderClipboardController(
                 z = Math.addExact(anchor.z, rotatedZ),
             ).validated()
             val block = world.getBlockAt(position.x, position.y, position.z)
-            val after = rotateBlockData(Bukkit.createBlockData(copied.blockData), rotation)
+            val after = blockDataRotation.rotate(Bukkit.createBlockData(copied.blockData), rotation)
             if (!safety.isSafePlacement(after)) {
                 skippedUnsafe += 1
                 return@mapNotNull null

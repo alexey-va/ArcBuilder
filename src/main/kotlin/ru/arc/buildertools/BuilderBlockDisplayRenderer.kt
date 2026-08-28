@@ -18,11 +18,26 @@ import ru.arc.autobuild.ConstructionSite
 import ru.arc.util.BlockUtils.rotateBlockData
 import java.util.UUID
 
+/**
+ * Preview lifecycle boundary owned by the runtime.
+ *
+ * The Paper implementation below keeps native displays player-only. Platform
+ * tests replace this boundary because MockBukkit 4.110 does not implement
+ * [Entity.setVisibleByDefault].
+ */
+internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseable {
+    fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?)
+    fun clearSelection(playerId: UUID)
+    fun plan(player: Player, plan: BuilderPlan)
+    fun clearPlan(playerId: UUID)
+    fun clearPlayer(playerId: UUID)
+}
+
 /** Player-only native BlockDisplay scenes; no packets, fake blocks, or particles. */
 internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
     private val maxPlanDisplays: Int,
-) : BuildBookPreviewBridge, AutoCloseable {
+) : BuilderDisplayRenderer {
     private enum class Layer { SELECTION, PLAN, BOOK }
 
     private data class DisplaySpec(
@@ -46,7 +61,7 @@ internal class BuilderBlockDisplayRenderer(
         require(maxPlanDisplays in 32..512)
     }
 
-    fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?) {
+    override fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?) {
         val specs = buildList {
             selection?.let { addAll(bounds(it, Material.CYAN_STAINED_GLASS, Color.AQUA)) }
             points.first?.takeIf { it.worldId == player.world.uid }?.let {
@@ -59,9 +74,9 @@ internal class BuilderBlockDisplayRenderer(
         replace(player, Layer.SELECTION, specs)
     }
 
-    fun clearSelection(playerId: UUID) = remove(playerId, Layer.SELECTION)
+    override fun clearSelection(playerId: UUID) = remove(playerId, Layer.SELECTION)
 
-    fun plan(player: Player, plan: BuilderPlan) {
+    override fun plan(player: Player, plan: BuilderPlan) {
         if (plan.changes.firstOrNull()?.position?.worldId != player.world.uid) {
             remove(player.uniqueId, Layer.PLAN)
             return
@@ -99,7 +114,7 @@ internal class BuilderBlockDisplayRenderer(
         replace(player, Layer.PLAN, specs)
     }
 
-    fun clearPlan(playerId: UUID) = remove(playerId, Layer.PLAN)
+    override fun clearPlan(playerId: UUID) = remove(playerId, Layer.PLAN)
 
     override fun open(site: ConstructionSite) = renderBook(site)
     override fun refresh(site: ConstructionSite) = renderBook(site)
@@ -217,7 +232,7 @@ internal class BuilderBlockDisplayRenderer(
         scenes.remove(playerId to layer)?.entities?.forEach(Entity::remove)
     }
 
-    fun clearPlayer(playerId: UUID) = Layer.entries.forEach { remove(playerId, it) }
+    override fun clearPlayer(playerId: UUID) = Layer.entries.forEach { remove(playerId, it) }
 
     override fun close() {
         scenes.values.flatMap(Scene::entities).forEach(Entity::remove)

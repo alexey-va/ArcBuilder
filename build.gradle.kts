@@ -59,6 +59,7 @@ dependencies {
     testImplementation("io.mockk:mockk:1.14.7")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.1.2")
+    testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
         exclude(group = "org.bukkit", module = "bukkit")
     }
