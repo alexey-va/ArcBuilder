@@ -56,6 +56,18 @@ class BuilderToolsExperienceTest : FunSpec({
         }
     }
 
+    test("paste completion offers another paste only while the clipboard is retained") {
+        BuilderOperationCompletion.repeatPaste(BuilderPlanKind.PASTE, hasClipboard = true) shouldBe true
+        BuilderOperationCompletion.repeatPaste(BuilderPlanKind.PASTE, hasClipboard = false) shouldBe false
+        BuilderOperationCompletion.repeatPaste(BuilderPlanKind.FILL, hasClipboard = true) shouldBe false
+
+        val config = Config(Files.createTempDirectory("arc-builder-repeat-paste-"), "modules/builder-tools.yml")
+        listOf("ru", "en").forEach { locale ->
+            config.string("locales.$locale.operation.paste-again") shouldContain
+                "<click:run_command:'/builder paste'>"
+        }
+    }
+
     test("bundled operation action bars stay compact and identity-free") {
         val config = Config(Files.createTempDirectory("arc-builder-progress-"), "modules/builder-tools.yml")
 

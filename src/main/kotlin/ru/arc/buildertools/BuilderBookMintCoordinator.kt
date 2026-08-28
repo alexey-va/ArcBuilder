@@ -15,7 +15,7 @@ internal sealed interface BuilderBookMintResult {
 }
 
 /**
- * Crash-safe paid mint state machine. Public entry points are called on the
+ * Crash-safe mint state machine. Public entry points are called on the
  * Paper thread; registry completions return through [runSync] before touching
  * the wallet or invoking the callback. Provider mutations are attempted at
  * most once and an unprovable outcome is quarantined for restart recovery.
@@ -32,7 +32,9 @@ internal class BuilderBookMintCoordinator(
     fun mint(intent: BuilderBookMint, callback: (BuilderBookMintResult) -> Unit) {
         val checked = intent.validated()
         require(checked.status == BuilderBookMintStatus.PREPARED) { "Builder-book mint intent must be PREPARED" }
-        if (!wallet.available) return callback(BuilderBookMintResult.EconomyUnavailable)
+        if (checked.blueprint.issuePriceMinor > 0L && !wallet.available) {
+            return callback(BuilderBookMintResult.EconomyUnavailable)
+        }
         if (!activePlayers.add(checked.playerId)) return callback(BuilderBookMintResult.Busy)
         registry.hasOpenMint(checked.playerId).whenComplete { open, openFailure ->
             runSync {
@@ -83,6 +85,23 @@ internal class BuilderBookMintCoordinator(
     }
 
     private fun beginWithdrawal(intent: BuilderBookMint, callback: (BuilderBookMintResult) -> Unit) {
+        if (intent.blueprint.issuePriceMinor == 0L) {
+            val included = intent.copy(
+                status = BuilderBookMintStatus.FUNDS_WITHDRAWN,
+                updatedAtMillis = nextTime(intent.updatedAtMillis),
+                evidence = "no_shop_materials",
+            ).validated()
+            registry.transitionMint(intent, included).whenComplete { durable, transitionFailure ->
+                runSync {
+                    if (transitionFailure != null || durable == null) {
+                        finish(intent.playerId, callback, BuilderBookMintResult.RegistryUnavailable)
+                    } else {
+                        issue(durable, callback)
+                    }
+                }
+            }
+            return
+        }
         val balanceBefore = wallet.balanceMinor(intent.playerId)
         if (balanceBefore == null) {
             return transitionTerminal(
@@ -189,6 +208,10 @@ internal class BuilderBookMintCoordinator(
     }
 
     private fun refund(record: BuilderBookMint, callback: (BuilderBookMintResult) -> Unit) {
+        if (record.blueprint.issuePriceMinor == 0L) {
+            refundWithoutPayment(record, callback)
+            return
+        }
         val before = wallet.balanceMinor(record.playerId)
         if (before == null) return quarantine(record, "refund_balance_unavailable", callback)
         val started = record.copy(
@@ -281,6 +304,10 @@ internal class BuilderBookMintCoordinator(
     }
 
     private fun reconcileRefund(record: BuilderBookMint, callback: (BuilderBookMintResult) -> Unit) {
+        if (record.blueprint.issuePriceMinor == 0L) {
+            completeRefundWithoutPayment(record, callback)
+            return
+        }
         val before = record.refundBalanceBeforeMinor ?: return quarantine(record, "refund_missing_before_balance", callback)
         val amount = record.blueprint.issuePriceMinor
         wallet.findTransaction(record.playerId, amount, refundReason(record.transactionId), record.createdAtMillis)
@@ -340,6 +367,40 @@ internal class BuilderBookMintCoordinator(
                     }
                 }
             }
+    }
+
+    private fun refundWithoutPayment(record: BuilderBookMint, callback: (BuilderBookMintResult) -> Unit) {
+        val started = record.copy(
+            status = BuilderBookMintStatus.REFUND_STARTED,
+            updatedAtMillis = nextTime(record.updatedAtMillis),
+            evidence = "no_payment_to_refund",
+        ).validated()
+        registry.transitionMint(record, started).whenComplete { durable, transitionFailure ->
+            runSync {
+                if (transitionFailure != null || durable == null) {
+                    quarantine(record, "zero_refund_journal_unavailable", callback)
+                } else {
+                    completeRefundWithoutPayment(durable, callback)
+                }
+            }
+        }
+    }
+
+    private fun completeRefundWithoutPayment(record: BuilderBookMint, callback: (BuilderBookMintResult) -> Unit) {
+        val refunded = record.copy(
+            status = BuilderBookMintStatus.REFUNDED,
+            updatedAtMillis = nextTime(record.updatedAtMillis),
+            evidence = "no_payment_to_refund",
+        ).validated()
+        registry.transitionMint(record, refunded).whenComplete { durable, _ ->
+            runSync {
+                finish(
+                    record.playerId,
+                    callback,
+                    if (durable != null) BuilderBookMintResult.Refunded else BuilderBookMintResult.ManualReview,
+                )
+            }
+        }
     }
 
     private fun quarantineUnknown(started: BuilderBookMint, callback: (BuilderBookMintResult) -> Unit) {

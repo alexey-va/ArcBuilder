@@ -130,6 +130,7 @@ internal class BuilderBookSqlRegistry(
             statement.setInt(index++, checked.blueprint.blockCount)
             statement.setInt(index++, checked.blueprint.materialTypes)
             statement.setInt(index++, checked.blueprint.materialItems)
+            statement.setString(index++, ru.arc.autobuild.BuildBookMaterialRequirements.encode(checked.blueprint.playerMaterials))
             statement.setLong(index++, checked.blueprint.materialCostMinor)
             statement.setLong(index++, checked.blueprint.constructionFeeMinor)
             statement.setLong(index++, checked.blueprint.issuePriceMinor)
@@ -709,6 +710,7 @@ internal class BuilderBookSqlRegistry(
             statement.setInt(index++, blueprint.blockCount)
             statement.setInt(index++, blueprint.materialTypes)
             statement.setInt(index++, blueprint.materialItems)
+            statement.setString(index++, ru.arc.autobuild.BuildBookMaterialRequirements.encode(blueprint.playerMaterials))
             statement.setLong(index++, blueprint.materialCostMinor)
             statement.setLong(index++, blueprint.constructionFeeMinor)
             statement.setLong(index++, blueprint.issuePriceMinor)
@@ -802,6 +804,7 @@ internal class BuilderBookSqlRegistry(
         blockCount = getInt("${prefix}block_count"),
         materialTypes = getInt("${prefix}material_types"),
         materialItems = getInt("${prefix}material_items"),
+        playerMaterials = ru.arc.autobuild.BuildBookMaterialRequirements.decode(getString("${prefix}player_materials")),
         materialCostMinor = getLong("${prefix}material_cost_minor"),
         constructionFeeMinor = getLong("${prefix}construction_fee_minor"),
         issuePriceMinor = getLong("${prefix}issue_price_minor"),
@@ -843,6 +846,7 @@ internal class BuilderBookSqlRegistry(
             blockCount = getInt("block_count"),
             materialTypes = getInt("material_types"),
             materialItems = getInt("material_items"),
+            playerMaterials = ru.arc.autobuild.BuildBookMaterialRequirements.decode(getString("player_materials")),
             materialCostMinor = getLong("material_cost_minor"),
             constructionFeeMinor = getLong("construction_fee_minor"),
             issuePriceMinor = getLong("issue_price_minor"),
@@ -886,7 +890,7 @@ internal class BuilderBookSqlRegistry(
 
     companion object {
         const val MIGRATION_NAMESPACE = "arc_builder_books"
-        const val CURRENT_SCHEMA_VERSION = 5
+        const val CURRENT_SCHEMA_VERSION = 6
 
         val MIGRATIONS = listOf(
             SqlMigration(
@@ -1050,6 +1054,23 @@ internal class BuilderBookSqlRegistry(
                     )
                 },
             ),
+            SqlMigration(
+                version = 6,
+                description = "Persist player-supplied materials for partially priced builder books",
+                statements = buildList {
+                    listOf("arc_builder_book_blueprints", "arc_builder_book_mints").forEach { table ->
+                        addAll(
+                            addColumnIfMissing(
+                                table = table,
+                                column = "player_materials",
+                                definition = "player_materials TEXT NULL AFTER material_items",
+                            ),
+                        )
+                        add("UPDATE $table SET player_materials = '' WHERE player_materials IS NULL")
+                        add("ALTER TABLE $table MODIFY player_materials TEXT NOT NULL")
+                    }
+                },
+            ),
         )
 
         /**
@@ -1093,9 +1114,9 @@ internal class BuilderBookSqlRegistry(
                 "source_instance_uuid, source_instance_generation, " +
                 "delivery_rotation, delivery_offset_x, delivery_offset_y, delivery_offset_z, " +
                 "creator_uuid, creator_name, title, building_id, content_sha256, schematic_sha256, source_rotation, block_count, " +
-                "material_types, material_items, material_cost_minor, construction_fee_minor, issue_price_minor, " +
+                "material_types, material_items, player_materials, material_cost_minor, construction_fee_minor, issue_price_minor, " +
                 "blueprint_created_at_ms, status, open_player_uuid, created_at_ms, updated_at_ms) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
         private const val UPDATE_MINT =
             "UPDATE arc_builder_book_mints SET status = ?, open_player_uuid = ?, updated_at_ms = ?, balance_before_minor = ?, " +
@@ -1104,8 +1125,8 @@ internal class BuilderBookSqlRegistry(
 
         private const val INSERT_BLUEPRINT =
             "INSERT INTO arc_builder_book_blueprints (blueprint_uuid, creator_uuid, creator_name, title, building_id, " +
-                "content_sha256, schematic_sha256, source_rotation, block_count, material_types, material_items, material_cost_minor, " +
-                "construction_fee_minor, issue_price_minor, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "content_sha256, schematic_sha256, source_rotation, block_count, material_types, material_items, player_materials, material_cost_minor, " +
+                "construction_fee_minor, issue_price_minor, created_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
         private const val INSERT_INSTANCE =
             "INSERT INTO arc_builder_book_instances (instance_uuid, blueprint_uuid, transaction_uuid, minted_by_uuid, " +

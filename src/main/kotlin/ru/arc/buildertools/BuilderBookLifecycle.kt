@@ -522,12 +522,9 @@ internal class BuilderBookLifecycle(
                                 constructionFeeMinor = quoted.quote.cost.constructionFeeMinor,
                                 issuePriceMinor = quoted.quote.cost.issuePriceMinor,
                                 createdAtMillis = System.currentTimeMillis(),
+                                playerMaterials = quoted.quote.playerMaterials,
                             ).validated()
                             BuilderBookQuoteResult.ShopUnavailable -> fail("book.shop-unavailable")
-                            is BuilderBookQuoteResult.MaterialsUnavailable -> fail(
-                                "book.material-unavailable",
-                                mapOf("materials" to materialsSummary(player, quoted.materials)),
-                            )
                             BuilderBookQuoteResult.LimitExceeded -> fail("book.price-limit")
                         }
                     }
@@ -861,6 +858,7 @@ internal class BuilderBookLifecycle(
                 "materials" to moneyLabel(formatMinor(blueprint.materialCostMinor)),
                 "labor" to moneyLabel(formatMinor(blueprint.constructionFeeMinor)),
                 "price" to moneyLabel(formatMinor(blueprint.issuePriceMinor)),
+                "required" to playerMaterialsSummary(player, blueprint.playerMaterials),
                 "seconds" to messages.literal(config.planTtl.seconds),
             ),
         )
@@ -888,6 +886,7 @@ internal class BuilderBookLifecycle(
             data.schematicSha256 == blueprint.schematicSha256 &&
             data.sourceRotation == blueprint.sourceRotation &&
             data.blockCount == blueprint.blockCount &&
+            (data.draft || data.playerMaterials == blueprint.playerMaterials) &&
             (data.issuePriceMinor == null || data.issuePriceMinor == blueprint.issuePriceMinor)
 
     private fun registeredBookData(
@@ -913,6 +912,7 @@ internal class BuilderBookLifecycle(
         deliveryPending = deliveryPending,
         blockCount = blueprint.blockCount,
         cooldownSeconds = 0,
+        playerMaterials = blueprint.playerMaterials,
     ).validated()
 
     private fun inventoryBooksWithInstance(player: Player, instanceId: UUID): List<Pair<Int, BuildBookData>> =
@@ -1292,16 +1292,24 @@ internal class BuilderBookLifecycle(
         }
     }
 
-    private fun materialsSummary(player: Player, materials: List<Material>): Component {
-        val first = checkNotNull(materials.firstOrNull()) { "Unavailable builder-book materials cannot be empty" }
-        return BuilderMaterialPresentation.label(player, first).append(
-            messages.literal(if (materials.size > 1) " +${materials.size - 1}" else ""),
-        )
+    private fun playerMaterialsSummary(
+        player: Player,
+        requirements: List<ru.arc.autobuild.BuildBookMaterialRequirement>,
+    ): Component {
+        if (requirements.isEmpty()) return messages.render("book.player-materials.included", locale(player))
+        val visible = requirements.take(4)
+        val summary = visible.map { requirement ->
+            messages.literal("${requirement.amount}× ").append(
+                BuilderMaterialPresentation.label(player, requirement.material),
+            )
+        }.reduce { left, right -> left.append(messages.literal(", ")).append(right) }
+        val hidden = requirements.size - visible.size
+        return if (hidden > 0) summary.append(messages.literal(" +$hidden")) else summary
     }
 
     private fun displayTitle(title: String): Component = messages.literal(BuildBookItems.compactTitle(title, 22))
 
-    private fun formatMinor(amount: Long): String = String.format(Locale.US, "%,.2f", amount / 100.0)
+    private fun formatMinor(amount: Long): String = String.format(Locale.US, "%,.2f", BuilderMoney.decimal(amount))
 
     private fun moneyLabel(formatted: String): Component =
         BuilderCurrencyPresentation.amountWithCoin(messages.literal(formatted))

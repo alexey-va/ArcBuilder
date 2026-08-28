@@ -18,6 +18,50 @@ class BuilderBookMintCoordinatorTest : StringSpec({
         fixture.registry.records.single().status shouldBe BuilderBookMintStatus.ISSUED
     }
 
+    "zero-price mint succeeds without an available economy provider" {
+        val fixture = MintFixture().also { it.wallet.available = false }
+        val paid = fixture.intent()
+        val free = paid.copy(
+            blueprint = paid.blueprint.copy(
+                materialCostMinor = 0L,
+                constructionFeeMinor = 0L,
+                issuePriceMinor = 0L,
+            ).validated(),
+        ).validated()
+        var result: BuilderBookMintResult? = null
+
+        fixture.coordinator.mint(free) { result = it }
+
+        result shouldBe BuilderBookMintResult.Issued(fixture.registry.records.single())
+        fixture.wallet.withdrawals shouldBe 0
+        fixture.wallet.deposits shouldBe 0
+        fixture.wallet.balanceMinor shouldBe 1_000L
+        fixture.registry.records.single().status shouldBe BuilderBookMintStatus.ISSUED
+    }
+
+    "zero-price issue failure records a refund without calling the wallet" {
+        val fixture = MintFixture().also {
+            it.wallet.available = false
+            it.registry.issueFails = true
+        }
+        val paid = fixture.intent()
+        val free = paid.copy(
+            blueprint = paid.blueprint.copy(
+                materialCostMinor = 0L,
+                constructionFeeMinor = 0L,
+                issuePriceMinor = 0L,
+            ).validated(),
+        ).validated()
+        var result: BuilderBookMintResult? = null
+
+        fixture.coordinator.mint(free) { result = it }
+
+        result shouldBe BuilderBookMintResult.Refunded
+        fixture.wallet.withdrawals shouldBe 0
+        fixture.wallet.deposits shouldBe 0
+        fixture.registry.records.single().status shouldBe BuilderBookMintStatus.REFUNDED
+    }
+
     "insufficient funds cancel before any provider mutation" {
         val fixture = MintFixture().also { it.wallet.balanceMinor = 100L }
         var result: BuilderBookMintResult? = null
@@ -151,7 +195,7 @@ private class MintFixture {
 }
 
 private class FakeBookWallet : BuilderBookWallet {
-    override val available = true
+    override var available = true
     var balanceMinor = 1_000L
     var withdrawals = 0
     var deposits = 0

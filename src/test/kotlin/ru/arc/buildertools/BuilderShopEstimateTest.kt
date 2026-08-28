@@ -183,6 +183,95 @@ class BuilderShopEstimateTest : FunSpec({
             }
         }
     }
+
+    test("book quote prices shop materials and preserves unavailable materials for the player") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val player = paper.server.addPlayer("MixedBookQuote")
+            val service = FakeShopPurchaseService()
+            service.quotes[Material.STONE] = quote(Material.STONE, 4, 8.0)
+            val config = Config(Files.createTempDirectory("arc-builder-book-pricing-"), "modules/builder-tools.yml").apply {
+                setBoolean("book-contracts.enabled", true)
+                setBoolean("shop.enabled", true)
+            }
+            val now = System.currentTimeMillis()
+            val clipboard = BuilderClipboard(
+                blocks = listOf(
+                    BuilderClipboardBlock(0, 0, 0, Material.STONE.createBlockData().asString),
+                    BuilderClipboardBlock(1, 0, 0, Material.STONE.createBlockData().asString),
+                    BuilderClipboardBlock(2, 0, 0, Material.STONE.createBlockData().asString),
+                    BuilderClipboardBlock(3, 0, 0, Material.STONE.createBlockData().asString),
+                    BuilderClipboardBlock(4, 0, 0, Material.OAK_PLANKS.createBlockData().asString),
+                    BuilderClipboardBlock(5, 0, 0, Material.OAK_PLANKS.createBlockData().asString),
+                ),
+                sizeX = 6,
+                sizeY = 1,
+                sizeZ = 1,
+                createdAtMillis = now,
+                expiresAtMillis = now + 60_000L,
+            )
+
+            val result = BuilderBookPricing(BuilderToolsConfig(config), serviceProvider = { service }).quote(player, clipboard)
+                as BuilderBookQuoteResult.Ready
+
+            result.quote.includedLines.map { it.material to it.amount } shouldBe listOf(Material.STONE to 4)
+            result.quote.playerMaterials.map { it.material to it.amount } shouldBe listOf(Material.OAK_PLANKS to 2)
+            result.quote.cost shouldBe BuilderBookCost(800L, 120L, 920L)
+            result.quote.materialTypes shouldBe 2
+            result.quote.materialItems shouldBe 6
+        }
+    }
+
+    test("book quote remains valid when every material must be supplied by the player") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val player = paper.server.addPlayer("ManualBookQuote")
+            val config = Config(Files.createTempDirectory("arc-builder-book-manual-"), "modules/builder-tools.yml").apply {
+                setBoolean("book-contracts.enabled", true)
+                setBoolean("shop.enabled", true)
+            }
+            val now = System.currentTimeMillis()
+            val clipboard = BuilderClipboard(
+                blocks = listOf(BuilderClipboardBlock(0, 0, 0, Material.OAK_DOOR.createBlockData().asString)),
+                sizeX = 1,
+                sizeY = 1,
+                sizeZ = 1,
+                createdAtMillis = now,
+                expiresAtMillis = now + 60_000L,
+            )
+
+            val result = BuilderBookPricing(
+                BuilderToolsConfig(config),
+                serviceProvider = { FakeShopPurchaseService() },
+            ).quote(player, clipboard) as BuilderBookQuoteResult.Ready
+
+            result.quote.includedLines shouldBe emptyList()
+            result.quote.playerMaterials.map { it.material to it.amount } shouldBe listOf(Material.OAK_DOOR to 1)
+            result.quote.cost shouldBe BuilderBookCost(0L, 0L, 0L)
+        }
+    }
+
+    test("book quote distinguishes an unavailable product from a failing shop provider") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val player = paper.server.addPlayer("FailedBookQuote")
+            val config = Config(Files.createTempDirectory("arc-builder-book-provider-failure-"), "modules/builder-tools.yml").apply {
+                setBoolean("book-contracts.enabled", true)
+                setBoolean("shop.enabled", true)
+            }
+            val now = System.currentTimeMillis()
+            val clipboard = BuilderClipboard(
+                blocks = listOf(BuilderClipboardBlock(0, 0, 0, Material.STONE.createBlockData().asString)),
+                sizeX = 1,
+                sizeY = 1,
+                sizeZ = 1,
+                createdAtMillis = now,
+                expiresAtMillis = now + 60_000L,
+            )
+
+            BuilderBookPricing(
+                BuilderToolsConfig(config),
+                serviceProvider = { FakeShopPurchaseService(throwOnQuote = true) },
+            ).quote(player, clipboard) shouldBe BuilderBookQuoteResult.ShopUnavailable
+        }
+    }
 })
 
 private fun estimate(planId: UUID, vararg missing: BuilderShopEstimateLine) =
@@ -207,14 +296,17 @@ private fun quote(material: Material, amount: Int, price: Double) =
 private class FakeShopPurchaseService(
     private val failMaterial: Material? = null,
     private val deliverOnFailure: Boolean = false,
+    private val throwOnQuote: Boolean = false,
 ) : ShopPurchaseService {
     val quotes = mutableMapOf<Material, ShopMaterialQuote>()
     var purchaseCalls = 0
 
     override fun itemQueries(player: Player): List<String> = emptyList()
 
-    override fun quotePlainMaterial(player: Player, material: Material, amount: Int): ShopMaterialQuote? =
-        quotes[material]?.takeIf { it.amount == amount }
+    override fun quotePlainMaterial(player: Player, material: Material, amount: Int): ShopMaterialQuote? {
+        if (throwOnQuote) error("injected quote failure")
+        return quotes[material]?.takeIf { it.amount == amount }
+    }
 
     override fun purchase(player: Player, itemPath: String, amount: Int): ShopPurchaseOutcome {
         purchaseCalls++

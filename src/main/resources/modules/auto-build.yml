@@ -17,6 +17,12 @@ build-book:
     - '<#d48763>ПКМ по блоку <#8c8c8c>— перенести'
     - '<#d48763>ПКМ в воздух <#8c8c8c>— продолжить'
     - '<#d48763>Shift+ПКМ <#8c8c8c>— положение'
+  player-materials:
+    draft: '<#8c8c8c>Материалы: <#ffb142>после сметы'
+    included: '<#8c8c8c>Материалы: <#2bba43>включены в стоимость'
+    heading: '<#ffb142>Принести с собой'
+    row: '<#8c8c8c>   <#e6fff3><amount>× <material>'
+    more: '<#8c8c8c>   <#969696>И ещё <count> видов'
   received: '<white>🛠</white> <#2bba43>Книга строительства создана: <#e6fff3><building>'
   draft-preview-message: |-
 
@@ -26,6 +32,8 @@ build-book:
     max-offset: 16
     max-per-player: 24
     custom-model-data: 0
+    draft-custom-model-data: 0
+    active-custom-model-data: 0
     default-name: 'Моя постройка'
   editor:
     title: '<dark_gray>Настройка книги'

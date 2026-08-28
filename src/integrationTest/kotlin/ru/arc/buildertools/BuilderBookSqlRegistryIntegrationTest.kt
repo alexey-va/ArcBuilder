@@ -4,6 +4,8 @@ import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
+import org.bukkit.Material
+import ru.arc.autobuild.BuildBookMaterialRequirement
 import ru.arc.onetime.OneTimeUseClaim
 import ru.arc.onetime.OneTimeUseClaimResult
 import ru.arc.onetime.OneTimeUseCommitResult
@@ -331,6 +333,7 @@ private fun preparedMint(playerId: UUID = UUID.randomUUID()): BuilderBookMint {
         blockCount = 10,
         materialTypes = 2,
         materialItems = 10,
+        playerMaterials = listOf(BuildBookMaterialRequirement(Material.OAK_PLANKS, 4)),
         materialCostMinor = 100L,
         constructionFeeMinor = 15L,
         issuePriceMinor = 115L,

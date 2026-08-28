@@ -527,6 +527,21 @@ internal class BuilderToolsRuntime(
             return
         }
         val wand = styleWand(ItemStack(Material.ECHO_SHARD), player)
+        if (!BuilderGameModePolicy.usesInventory(player.gameMode)) {
+            when (BuilderOwnedToolExchange.replaceOnePlainHeld(player, Material.ECHO_SHARD, wand)) {
+                BuilderOwnedToolExchangeResult.REPLACED -> Unit
+                BuilderOwnedToolExchangeResult.WRONG_ITEM -> {
+                    if (player.inventory.itemInMainHand.type.isAir) {
+                        player.inventory.setItemInMainHand(wand)
+                    } else if (player.inventory.addItem(wand).isNotEmpty()) {
+                        throw BuilderUserFailure("wand.inventory-full")
+                    }
+                }
+                BuilderOwnedToolExchangeResult.INVENTORY_FULL -> throw BuilderUserFailure("wand.inventory-full")
+            }
+            send(player, "wand.received")
+            return
+        }
         when (BuilderOwnedToolExchange.replaceOnePlainHeld(player, Material.ECHO_SHARD, wand)) {
             BuilderOwnedToolExchangeResult.REPLACED -> Unit
             BuilderOwnedToolExchangeResult.WRONG_ITEM -> throw BuilderUserFailure("wand.material-required")
@@ -630,12 +645,11 @@ internal class BuilderToolsRuntime(
             )
         }.take(config.maxChanges + 1).toList()
         requireChanges(changes)
-        val exactBook = book.clone().also { it.amount = 1 }
         return newPlan(
             player = player,
             kind = BuilderPlanKind.BUILD_BOOK,
             changes = changes,
-            costs = BuilderItemCodec.aggregate(listOf(exactBook)),
+            costs = BuilderBookConstructionCosts.calculate(book, data, player.gameMode),
             rewards = emptyList(),
             bookBlueprintId = checkNotNull(data.blueprintId),
             bookInstanceId = checkNotNull(data.instanceId),
@@ -978,12 +992,23 @@ internal class BuilderToolsRuntime(
     private fun finalizeCommittedOperation(player: Player, operation: BuilderActiveOperation) {
         val durable = operation.record
         finishOperation(operation)
-        send(
-            player,
+        val completion = messages.render(
             "operation.completed",
-            mapOf("kind" to kindLabel(player, durable.plan.kind), "count" to messages.literal(durable.plan.changes.size)),
+            locale(player),
+            mapOf(
+                "kind" to kindLabel(player, durable.plan.kind),
+                "count" to messages.literal(durable.plan.changes.size),
+            ),
         )
-        if (durable.plan.kind == BuilderPlanKind.PASTE && clipboardController.current(player.uniqueId) != null) {
+        val hasClipboard = clipboardController.current(player.uniqueId) != null
+        player.sendMessage(
+            if (BuilderOperationCompletion.repeatPaste(durable.plan.kind, hasClipboard)) {
+                completion.append(Component.newline()).append(messages.render("operation.paste-again", locale(player)))
+            } else {
+                completion
+            },
+        )
+        if (BuilderOperationCompletion.repeatPaste(durable.plan.kind, hasClipboard)) {
             player.sendActionBar(messages.render("clipboard.retained", locale(player)))
         }
         info(debugLine.line("event" to "committed", "operation" to durable.operationId, "player" to durable.playerId, "kind" to durable.plan.kind, "blocks" to durable.plan.changes.size))

@@ -1,5 +1,7 @@
 package ru.arc.buildertools
 
+import ru.arc.autobuild.BuildBookMaterialRequirement
+import ru.arc.autobuild.BuildBookMaterialRequirements
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
@@ -61,6 +63,7 @@ internal data class BuilderBookBlueprint(
     val issuePriceMinor: Long,
     val createdAtMillis: Long,
     val sourceRotation: Int = 0,
+    val playerMaterials: List<BuildBookMaterialRequirement> = emptyList(),
 ) {
     fun validated(): BuilderBookBlueprint = apply {
         require(PLAYER_NAME.matches(creatorName)) { "Builder-book creator name is invalid" }
@@ -74,11 +77,20 @@ internal data class BuilderBookBlueprint(
         require(blockCount in 1..BuilderPlan.ABSOLUTE_MAX_CHANGES) { "Builder-book block count is invalid" }
         require(materialTypes in 1..MAX_MATERIAL_TYPES) { "Builder-book material type count is invalid" }
         require(materialItems in 1..BuilderPlan.ABSOLUTE_MAX_ITEMS.toInt()) { "Builder-book material item count is invalid" }
-        require(materialCostMinor > 0L && constructionFeeMinor >= 0L) { "Builder-book costs are invalid" }
+        require(materialCostMinor >= 0L && constructionFeeMinor >= 0L) { "Builder-book costs are invalid" }
         require(issuePriceMinor == Math.addExact(materialCostMinor, constructionFeeMinor)) {
             "Builder-book issue price does not equal its cost components"
         }
         require(issuePriceMinor <= MAX_PRICE_MINOR) { "Builder-book issue price exceeds its hard bound" }
+        require(playerMaterials == BuildBookMaterialRequirements.normalize(playerMaterials)) {
+            "Builder-book player materials are not canonical"
+        }
+        require(playerMaterials.size <= materialTypes) {
+            "Builder-book player material types exceed the full material set"
+        }
+        require(playerMaterials.sumOf { it.amount.toLong() } <= materialItems.toLong()) {
+            "Builder-book player materials exceed the full material count"
+        }
         require(sourceRotation in setOf(0, 90, 180, 270)) { "Builder-book source rotation is invalid" }
         require(createdAtMillis > 0L) { "Builder-book creation time is invalid" }
     }
@@ -180,15 +192,27 @@ internal data class BuilderBookMint(
             "Builder-book provider transaction id is invalid"
         }
         if (status in WITHDRAWN_STATUSES) {
-            require(balanceBeforeMinor != null && balanceAfterMinor == balanceBeforeMinor - blueprint.issuePriceMinor) {
-                "Builder-book mint lacks exact withdrawal evidence"
+            if (blueprint.issuePriceMinor == 0L) {
+                require(balanceBeforeMinor == null && balanceAfterMinor == null) {
+                    "Zero-price builder-book mint must not claim provider balance evidence"
+                }
+            } else {
+                require(balanceBeforeMinor != null && balanceAfterMinor == balanceBeforeMinor - blueprint.issuePriceMinor) {
+                    "Builder-book mint lacks exact withdrawal evidence"
+                }
             }
         }
         if (status == BuilderBookMintStatus.REFUNDED) {
-            require(
-                refundBalanceBeforeMinor != null &&
-                    refundBalanceAfterMinor == refundBalanceBeforeMinor + blueprint.issuePriceMinor,
-            ) { "Builder-book mint lacks exact refund evidence" }
+            if (blueprint.issuePriceMinor == 0L) {
+                require(refundBalanceBeforeMinor == null && refundBalanceAfterMinor == null) {
+                    "Zero-price builder-book refund must not claim provider balance evidence"
+                }
+            } else {
+                require(
+                    refundBalanceBeforeMinor != null &&
+                        refundBalanceAfterMinor == refundBalanceBeforeMinor + blueprint.issuePriceMinor,
+                ) { "Builder-book mint lacks exact refund evidence" }
+            }
         }
     }
 
@@ -209,7 +233,11 @@ internal data class BuilderBookMint(
         )
 
         fun transitions(status: BuilderBookMintStatus): Set<BuilderBookMintStatus> = when (status) {
-            BuilderBookMintStatus.PREPARED -> setOf(BuilderBookMintStatus.WITHDRAWAL_STARTED, BuilderBookMintStatus.CANCELLED)
+            BuilderBookMintStatus.PREPARED -> setOf(
+                BuilderBookMintStatus.WITHDRAWAL_STARTED,
+                BuilderBookMintStatus.FUNDS_WITHDRAWN,
+                BuilderBookMintStatus.CANCELLED,
+            )
             BuilderBookMintStatus.WITHDRAWAL_STARTED -> setOf(
                 BuilderBookMintStatus.FUNDS_WITHDRAWN,
                 BuilderBookMintStatus.CANCELLED,
@@ -262,7 +290,7 @@ internal data class BuilderBookCost(
     val issuePriceMinor: Long,
 ) {
     fun validated(): BuilderBookCost = apply {
-        require(materialCostMinor > 0L && constructionFeeMinor >= 0L) { "Builder-book cost is invalid" }
+        require(materialCostMinor >= 0L && constructionFeeMinor >= 0L) { "Builder-book cost is invalid" }
         require(issuePriceMinor == Math.addExact(materialCostMinor, constructionFeeMinor)) {
             "Builder-book price does not equal cost plus construction fee"
         }
@@ -272,9 +300,7 @@ internal data class BuilderBookCost(
 
 internal object BuilderBookCostRules {
     fun calculate(materialLinesMinor: List<Long>, constructionMarkupBasisPoints: Int): BuilderBookCost {
-        require(materialLinesMinor.isNotEmpty() && materialLinesMinor.all { it > 0L }) {
-            "Builder-book material quote is empty or invalid"
-        }
+        require(materialLinesMinor.all { it > 0L }) { "Builder-book material quote is invalid" }
         require(constructionMarkupBasisPoints in 0..10_000) { "Builder-book construction markup is invalid" }
         val material = materialLinesMinor.fold(0L, Math::addExact)
         val fee = BigDecimal.valueOf(material)

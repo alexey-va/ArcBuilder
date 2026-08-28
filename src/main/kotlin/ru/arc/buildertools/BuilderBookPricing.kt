@@ -6,6 +6,8 @@ import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import ru.arc.autobuild.Building
+import ru.arc.autobuild.BuildBookMaterialRequirement
+import ru.arc.autobuild.BuildBookMaterialRequirements
 import ru.arc.hooks.HookRegistry
 import ru.arc.hooks.economyshop.ShopMaterialQuote
 import ru.arc.hooks.economyshop.ShopPurchaseService
@@ -14,13 +16,13 @@ internal data class BuilderBookPriceQuote(
     val cost: BuilderBookCost,
     val materialTypes: Int,
     val materialItems: Int,
-    val lines: List<ShopMaterialQuote>,
+    val includedLines: List<ShopMaterialQuote>,
+    val playerMaterials: List<BuildBookMaterialRequirement>,
 )
 
 internal sealed interface BuilderBookQuoteResult {
     data class Ready(val quote: BuilderBookPriceQuote) : BuilderBookQuoteResult
     data object ShopUnavailable : BuilderBookQuoteResult
-    data class MaterialsUnavailable(val materials: List<Material>) : BuilderBookQuoteResult
     data object LimitExceeded : BuilderBookQuoteResult
 }
 
@@ -55,21 +57,29 @@ internal class BuilderBookPricing(
         ) {
             return BuilderBookQuoteResult.LimitExceeded
         }
-        val unavailable = mutableListOf<Material>()
-        val lines = buildList {
-            costs.forEach { cost ->
-                val material = BuilderInventory.plainMaterial(cost)
-                if (material == null) {
-                    unavailable += BuilderItemCodec.decodePrototype(cost.itemBase64).type
-                    return@forEach
-                }
-                val quote = runCatching { service.quotePlainMaterial(player, material, cost.amount) }.getOrNull()
-                if (quote == null) unavailable += material else add(quote)
+        val playerMaterials = mutableListOf<BuildBookMaterialRequirement>()
+        val lines = mutableListOf<ShopMaterialQuote>()
+        costs.forEach { cost ->
+            val material = BuilderInventory.plainMaterial(cost)
+            if (material == null) {
+                playerMaterials += BuildBookMaterialRequirement(
+                    BuilderItemCodec.decodePrototype(cost.itemBase64).type,
+                    cost.amount,
+                )
+                return@forEach
+            }
+            val quote = try {
+                service.quotePlainMaterial(player, material, cost.amount)
+            } catch (_: Exception) {
+                return BuilderBookQuoteResult.ShopUnavailable
+            }
+            if (quote == null) {
+                playerMaterials += BuildBookMaterialRequirement(material, cost.amount)
+            } else {
+                lines += quote
             }
         }
-        if (unavailable.isNotEmpty() || lines.size != costs.size) {
-            return BuilderBookQuoteResult.MaterialsUnavailable(unavailable.distinct())
-        }
+        val required = BuildBookMaterialRequirements.normalize(playerMaterials)
         val calculated = runCatching {
             BuilderBookCostRules.calculate(
                 lines.map(ShopMaterialQuote::totalPriceMinor),
@@ -82,7 +92,8 @@ internal class BuilderBookPricing(
                 cost = calculated,
                 materialTypes = costs.size,
                 materialItems = costs.sumOf(BuilderItemAmount::amount),
-                lines = lines,
+                includedLines = lines,
+                playerMaterials = required,
             ),
         )
     }

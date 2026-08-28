@@ -28,6 +28,7 @@ internal data class BuilderDraftRecord(
     val phase: BuilderDraftPhase,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
+    val sourceBookRequired: Boolean? = null,
 ) {
     fun validated(maxBlocks: Int = BuilderPlan.ABSOLUTE_MAX_CHANGES): BuilderDraftRecord = apply {
         require(schemaVersion in 1..CURRENT_SCHEMA_VERSION) { "Unsupported builder-draft journal schema" }
@@ -63,8 +64,10 @@ internal data class BuilderDraftRecord(
         ).validated()
     }
 
+    val requiresSourceBook: Boolean get() = sourceBookRequired ?: true
+
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val CURRENT_SCHEMA_VERSION = 3
         private val SHA256 = Regex("[a-f0-9]{64}")
     }
 }

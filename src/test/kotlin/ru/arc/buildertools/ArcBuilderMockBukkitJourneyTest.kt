@@ -117,7 +117,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(1, 64, 0).type = Material.BROWN_CONCRETE_POWDER
             world.getBlockAt(2, 64, 0).type = Material.BEDROCK
             world.getBlockAt(3, 64, 0).type = Material.CHEST
-            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.inventory.setItemInMainHand(ItemStack(Material.AIR))
             player.performCommand("builder wand") shouldBe true
             val wand = player.inventory.itemInMainHand
             journey.select(player, world, wand, 0, 64, 0, 3, 64, 0)
@@ -341,12 +341,12 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             }
 
             player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
-            player.inventory.setItemInMainHand(ItemStack(Material.BOOK))
+            player.inventory.setItemInMainHand(ItemStack(Material.AIR))
             player.performCommand("builder book draft Original") shouldBe true
             val blueprintKey = checkNotNull(org.bukkit.NamespacedKey.fromString("arc:build_book_blueprint_uuid"))
             val instanceKey = checkNotNull(org.bukkit.NamespacedKey.fromString("arc:build_book_instance_uuid"))
             journey.await("anchored draft delivery and player lease release") {
-                val data = player.inventory.itemInMainHand.itemMeta.persistentDataContainer
+                val data = player.inventory.itemInMainHand.itemMeta?.persistentDataContainer ?: return@await false
                 val isDraft = data.has(blueprintKey, PersistentDataType.STRING) &&
                     !data.has(instanceKey, PersistentDataType.STRING)
                 if (!isDraft) return@await false

@@ -14,6 +14,55 @@ import ru.arc.config.ConfigManager
 import ru.arc.util.TextUtil.strip
 import java.util.UUID
 
+data class BuildBookMaterialRequirement(
+    val material: Material,
+    val amount: Int,
+) {
+    fun validated(): BuildBookMaterialRequirement = apply {
+        require(material.isItem && !material.isAir) { "Build-book player material must be an item" }
+        require(amount in 1..1_000_000) { "Build-book player material amount is outside its safety bound" }
+    }
+
+    val materialKey: String get() = material.key.toString()
+}
+
+object BuildBookMaterialRequirements {
+    fun normalize(requirements: Iterable<BuildBookMaterialRequirement>): List<BuildBookMaterialRequirement> = requirements
+        .groupingBy(BuildBookMaterialRequirement::material)
+        .fold(0L) { total, requirement -> Math.addExact(total, requirement.validated().amount.toLong()) }
+        .entries
+        .sortedBy { it.key.key.toString() }
+        .map { (material, amount) ->
+            require(amount <= 1_000_000L) { "Build-book player material amount is outside its safety bound" }
+            BuildBookMaterialRequirement(material, amount.toInt()).validated()
+        }
+        .also { normalized ->
+            require(normalized.size <= 256) { "Build-book player material type count is outside its safety bound" }
+            require(normalized.sumOf { it.amount.toLong() } <= 2_000_000L) {
+                "Build-book player material total is outside its safety bound"
+            }
+        }
+
+    fun encode(requirements: Iterable<BuildBookMaterialRequirement>): String = normalize(requirements)
+        .joinToString("\n") { requirement -> "${requirement.materialKey}=${requirement.amount}" }
+
+    fun decode(encoded: String?): List<BuildBookMaterialRequirement> {
+        if (encoded.isNullOrEmpty()) return emptyList()
+        require(encoded.length <= 32_768) { "Build-book player material payload is outside its safety bound" }
+        return normalize(
+            encoded.lineSequence().map { line ->
+                val split = line.lastIndexOf('=')
+                require(split in 1 until line.lastIndex) { "Build-book player material entry is invalid" }
+                val material = Material.matchMaterial(line.substring(0, split))
+                    ?: error("Build-book player material is unknown")
+                val amount = line.substring(split + 1).toIntOrNull()
+                    ?: error("Build-book player material amount is invalid")
+                BuildBookMaterialRequirement(material, amount).validated()
+            }.toList(),
+        )
+    }
+}
+
 data class BuildBookTransform(
     val rotation: Int = 0,
     val offsetX: Int = 0,
@@ -81,6 +130,7 @@ data class BuildBookData(
     val deliveryPending: Boolean = false,
     val blockCount: Int? = null,
     val cooldownSeconds: Long? = null,
+    val playerMaterials: List<BuildBookMaterialRequirement> = emptyList(),
 ) {
     fun validated(): BuildBookData = apply {
         require(BUILDING_ID.matches(buildingId)) { "Build-book building id is invalid" }
@@ -101,7 +151,10 @@ data class BuildBookData(
         }
         instanceGeneration?.let { require(it > 0) { "Build-book instance generation is invalid" } }
         require(!deliveryPending || instanceId != null) { "Only an issued build-book instance may await delivery" }
-        require(issuePriceMinor == null || issuePriceMinor in 1..100_000_000_000L) { "Build-book price is invalid" }
+        require(issuePriceMinor == null || issuePriceMinor in 0..100_000_000_000L) { "Build-book price is invalid" }
+        require(playerMaterials == BuildBookMaterialRequirements.normalize(playerMaterials)) {
+            "Build-book player materials are not canonical"
+        }
         require((contentSha256 == null) == (schematicSha256 == null)) {
             "Build-book content digests must be present together"
         }
@@ -137,13 +190,22 @@ object BuildBookSettings {
     val maxOffset: Int get() = config.integer("build-book.player-copy.max-offset", 16)
     val maxBooksPerPlayer: Int get() = config.integer("build-book.player-copy.max-per-player", 24)
     val customModelData: Int get() = config.integer("build-book.player-copy.custom-model-data", 0)
+    val draftCustomModelData: Int
+        get() = config.integer("build-book.player-copy.draft-custom-model-data", customModelData)
+    val activeCustomModelData: Int
+        get() = config.integer("build-book.player-copy.active-custom-model-data", customModelData)
     val defaultTitle: String get() = config.string("build-book.player-copy.default-name", "Моя постройка")
+
+    fun customModelData(data: BuildBookData): Int =
+        if (data.draft) draftCustomModelData else activeCustomModelData
 
     fun validate() {
         config.mergeMissingFromBundled(ConfigManager.bundledModuleResource(CONFIG_FILE))
         require(maxOffset in 0..64) { "Build-book max-offset must be between 0 and 64" }
         require(maxBooksPerPlayer in 1..100) { "Build-book max-per-player must be between 1 and 100" }
         require(customModelData >= 0) { "Build-book custom-model-data cannot be negative" }
+        require(draftCustomModelData >= 0) { "Build-book draft custom-model-data cannot be negative" }
+        require(activeCustomModelData >= 0) { "Build-book active custom-model-data cannot be negative" }
         require(defaultTitle.isNotBlank() && defaultTitle.length <= 48 && defaultTitle.none(Char::isISOControl)) {
             "Build-book default name is invalid"
         }
@@ -153,6 +215,11 @@ object BuildBookSettings {
 
     private val REQUIRED_SCALARS = setOf(
         "build-book.display-name",
+        "build-book.player-materials.draft",
+        "build-book.player-materials.included",
+        "build-book.player-materials.heading",
+        "build-book.player-materials.row",
+        "build-book.player-materials.more",
         "build-book.received",
         "build-book.editor.title",
         "build-book.editor.invalid",
@@ -182,7 +249,7 @@ object BuildBookSettings {
 }
 
 object BuildBookCodec {
-    private const val SCHEMA_VERSION = 4
+    private const val SCHEMA_VERSION = 5
     // Durable books already issued by ARC use the `arc` namespace. Keep it
     // stable after extraction so moving the feature cannot invalidate items.
     @Suppress("DEPRECATION")
@@ -207,6 +274,7 @@ object BuildBookCodec {
     private val deliveryPendingKey get() = key("build_book_delivery_pending")
     private val blockCountKey get() = key("build_book_block_count")
     private val cooldownKey get() = key("build_book_cooldown_seconds")
+    private val playerMaterialsKey get() = key("build_book_player_materials")
 
     fun read(item: ItemStack): BuildBookData? {
         if (item.type != Material.BOOK) return null
@@ -240,6 +308,9 @@ object BuildBookCodec {
                     deliveryPending = (pdc.get(deliveryPendingKey, PersistentDataType.BYTE) ?: 0) != 0.toByte(),
                     blockCount = pdc.get(blockCountKey, PersistentDataType.INTEGER),
                     cooldownSeconds = pdc.get(cooldownKey, PersistentDataType.LONG),
+                    playerMaterials = BuildBookMaterialRequirements.decode(
+                        pdc.get(playerMaterialsKey, PersistentDataType.STRING),
+                    ),
                 ).validated()
             }.getOrNull()
         }
@@ -270,6 +341,11 @@ object BuildBookCodec {
             pdc.set(deliveryPendingKey, PersistentDataType.BYTE, (if (checked.deliveryPending) 1 else 0).toByte())
             pdc.setOrRemove(blockCountKey, PersistentDataType.INTEGER, checked.blockCount)
             pdc.setOrRemove(cooldownKey, PersistentDataType.LONG, checked.cooldownSeconds)
+            pdc.set(
+                playerMaterialsKey,
+                PersistentDataType.STRING,
+                BuildBookMaterialRequirements.encode(checked.playerMaterials),
+            )
         }
     }
 
@@ -311,6 +387,7 @@ object BuildBookCodec {
 }
 
 object BuildBookItems {
+    private const val MAX_VISIBLE_PLAYER_MATERIALS = 6
     internal fun compactTitle(title: String, maximumCodePoints: Int = 28): String {
         require(maximumCodePoints > 0) { "Build-book display title limit must be positive" }
         if (title.codePointCount(0, title.length) <= maximumCodePoints) return title
@@ -318,13 +395,13 @@ object BuildBookItems {
         return title.substring(0, end).trimEnd() + "…"
     }
 
-    fun create(data: BuildBookData, modelId: Int = BuildBookSettings.customModelData): ItemStack =
+    fun create(data: BuildBookData, modelId: Int = BuildBookSettings.customModelData(data)): ItemStack =
         ItemStack(Material.BOOK).also { item ->
             BuildBookCodec.write(item, data)
             refreshAppearance(item, data, modelId)
         }
 
-    fun refreshAppearance(item: ItemStack, data: BuildBookData, modelId: Int? = null) {
+    fun refreshAppearance(item: ItemStack, data: BuildBookData, modelId: Int = BuildBookSettings.customModelData(data)) {
         val config = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
         item.editMeta { meta ->
             strip(
@@ -332,8 +409,7 @@ object BuildBookItems {
                     tag("name", Component.text(compactTitle(data.title)))
                 },
             )?.let(meta::displayName)
-            meta.lore(
-                config.componentList("build-book.lore") {
+            val commonLore = config.componentList("build-book.lore") {
                     tag("name", Component.text(data.title))
                     tag("rotation", Component.text(data.transform.rotation))
                     tag("offset_x", Component.text(data.transform.offsetX))
@@ -361,10 +437,39 @@ object BuildBookItems {
                         } ?: Component.text("после проверки"),
                     )
                     tag("instance", Component.text(data.instanceId?.toString()?.take(8) ?: "после активации"))
-                }.mapNotNull(::strip),
-            )
+                }.mapNotNull(::strip)
+            meta.lore(commonLore + playerMaterialLore(config, data))
             @Suppress("DEPRECATION")
-            if (modelId != null && modelId > 0) meta.setCustomModelData(modelId)
+            meta.setCustomModelData(modelId.takeIf { it > 0 })
+        }
+    }
+
+    private fun playerMaterialLore(config: Config, data: BuildBookData): List<Component> {
+        if (data.draft) {
+            return listOfNotNull(strip(config.component("build-book.player-materials.draft", "<#8c8c8c>Материалы: <#ffb142>после сметы")))
+        }
+        if (data.playerMaterials.isEmpty()) {
+            return listOfNotNull(
+                strip(config.component("build-book.player-materials.included", "<#8c8c8c>Материалы: <#2bba43>включены в стоимость")),
+            )
+        }
+        val visible = data.playerMaterials.take(MAX_VISIBLE_PLAYER_MATERIALS)
+        return buildList {
+            strip(config.component("build-book.player-materials.heading", "<#ffb142>Принести с собой"))?.let(::add)
+            visible.forEach { requirement ->
+                strip(
+                    config.component("build-book.player-materials.row", "<#8c8c8c>   <#e6fff3><amount>× <material>") {
+                        tag("amount", Component.text(requirement.amount))
+                        tag("material", Component.translatable(requirement.material.translationKey()))
+                    },
+                )?.let(::add)
+            }
+            val hidden = data.playerMaterials.size - visible.size
+            if (hidden > 0) {
+                strip(config.component("build-book.player-materials.more", "<#8c8c8c>   <#969696>И ещё <count> видов") {
+                    tag("count", Component.text(hidden))
+                })?.let(::add)
+            }
         }
     }
 }

@@ -102,4 +102,16 @@ class BuilderDraftJournalTest : FunSpec({
         reloaded.acknowledge(ready.operationId) shouldBe false
         reloaded.loadAll() shouldBe emptyList()
     }
+
+    test("creative draft recovery persists that no source book is required") {
+        val root = Files.createTempDirectory("arc-builder-creative-draft-journal-")
+        val journal = BuilderDraftJournal(root, maxBlocks = 10_000)
+        val creative = prepared().copy(sourceBookRequired = false).validated()
+
+        journal.commit(creative)
+
+        val reloaded = BuilderDraftJournal(root, maxBlocks = 10_000).loadAll().single()
+        reloaded.requiresSourceBook shouldBe false
+        prepared().requiresSourceBook shouldBe true
+    }
 })

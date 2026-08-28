@@ -114,9 +114,10 @@ class BuilderBookJourneyTest : FunSpec({
             plan.single { it.contains("<reward>") }.contains("<cost>") shouldBe false
 
             val quote = config.string("locales.$locale.book.quote").lines()
-            quote.size shouldBe 5
+            quote.size shouldBe 6
             quote.first() shouldBe ""
             quote.single { it.contains("<materials>") }.contains("<labor>") shouldBe false
+            quote.single { it.contains("<required>") }.contains("<materials>") shouldBe false
             quote.single { it.contains("<labor>") }.contains("<materials>") shouldBe false
 
             plan.drop(2).all { line -> line.contains(">   ") } shouldBe true

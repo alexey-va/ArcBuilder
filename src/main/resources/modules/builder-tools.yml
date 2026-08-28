@@ -38,7 +38,7 @@ shop:
   max-auto-buy-items: 4096
   max-auto-buy-price: '250000.00'
 
-# Player-authored build books: free drafts, explicit paid activation and paid copies.
+# Player-authored build books: free drafts, explicit priced activation and registered copies.
 # Shop prices are read-only; the stored self-cost never rewrites EconomyShopGUI.
 book-contracts:
   enabled: false
@@ -226,7 +226,7 @@ locales:
         <prefix><#2bba43>Инструмент строителя готов.
         <#8c8c8c>   <#e6fff3>ЛКМ — первая точка; ПКМ — вторая.
       inventory-full: "<prefix><#ff9f0f>Освободите слот для инструмента строителя."
-      material-required: "<prefix><#ff9f0f>Держите обычный осколок эха в основной руке."
+      material-required: "<prefix><#ff9f0f>В выживании держите обычный осколок эха в основной руке."
     crown-brush:
       name: "<#d48763><bold>Кисть крон"
       lore:
@@ -314,13 +314,13 @@ locales:
         - "<#8c8c8c>   1. <click:run_command:'/builder wand'><#d48763>/builder wand</click> <#e6fff3>— получить селектор."
         - "<#8c8c8c>      <#e6fff3>ЛКМ и ПКМ — два угла. Контур виден постоянно."
         - "<#8c8c8c>   2. <click:run_command:'/builder copy'><#d48763>/builder copy</click> <#e6fff3>— сохранить чертёж на 15 минут."
-        - "<#8c8c8c>   3. <#e6fff3>Возьмите обычную книгу."
+        - "<#8c8c8c>   3. <#e6fff3>В выживании возьмите обычную книгу; в творчестве она не нужна."
         - "<#8c8c8c>      <click:suggest_command:'/builder book draft '><#d48763>/builder book draft [имя]</click> <#e6fff3>— бесплатный черновик."
         - "<#8c8c8c>   4. <#e6fff3>ПКМ по блоку — поставить или перенести превью."
         - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — меню положения."
         - "<#8c8c8c>      <#969696>Черновик — только предпросмотр; он не строит."
         - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — получить смету без оплаты."
-        - "<#8c8c8c>   6. <#e6fff3>Нажмите <#2bba43>[Оплатить]<#e6fff3> в сообщении со сметой."
+        - "<#8c8c8c>   6. <#e6fff3>Нажмите <#2bba43>[Подтвердить]<#e6fff3> в сообщении со сметой."
         - "<#8c8c8c>   7. <click:run_command:'/builder book copy'><#d48763>/builder book copy</click> <#e6fff3>— копия по себестоимости."
         - "<#8c8c8c>      <click:suggest_command:'/builder book sell '><#d48763>/builder book sell [цена]</click> <#e6fff3>— продажа."
         - "<#8c8c8c>   <click:run_command:'/builder book status'><#d48763>/builder book status</click> <#e6fff3>— ваш текущий этап."
@@ -348,7 +348,7 @@ locales:
         clipboard: |-
 
           <prefix><#2bba43>Этап 3/7: чертёж готов — <#d48763><count> блоков.
-          <#8c8c8c>   <#e6fff3>Возьмите обычную книгу.
+          <#8c8c8c>   <#e6fff3>В выживании возьмите обычную книгу; в творчестве она не нужна.
           <#8c8c8c>   <click:suggest_command:'/builder book draft '><#d48763>/builder book draft [имя]</click> <#e6fff3>— создать черновик.
         draft: |-
 
@@ -369,10 +369,10 @@ locales:
         quote: |-
 
           <prefix><#ff9f0f>Этап 6/7: смета готова — <#2bba43><price><#ff9f0f>.
-          <#8c8c8c>   <click:run_command:'/builder book confirm'><#2bba43>[Оплатить]</click> <#8c8c8c>— <#e6fff3>осталось <#d48763><seconds> с<#e6fff3>.
+          <#8c8c8c>   <click:run_command:'/builder book confirm'><#2bba43>[Подтвердить]</click> <#8c8c8c>— <#e6fff3>осталось <#d48763><seconds> с<#e6fff3>.
         delivery: |-
 
-          <prefix><#ff9f0f>Этап 7/7: реестр проверяет оплату.
+          <prefix><#ff9f0f>Этап 7/7: реестр выпускает книгу.
           <#8c8c8c>   <#e6fff3>Не перемещайте книгу.
           <#8c8c8c>   <#e6fff3>Выдача продолжится автоматически.
         checking: "<prefix><#e6fff3>Проверяю UUID, владельца и поколение книги…"
@@ -401,7 +401,7 @@ locales:
         <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
         <#8c8c8c>   <#e6fff3>Блоков: <#d48763><count> <#8c8c8c>— <#969696>оплаты не было
         <#8c8c8c>   <#e6fff3>ПКМ по земле — проверить превью.
-      material-required: "<prefix><#ff9f0f>Держите обычную книгу в основной руке."
+      material-required: "<prefix><#ff9f0f>В выживании держите обычную книгу в основной руке."
       inventory-full: "<prefix><#ff9f0f>Освободите один слот для книги строительства."
       invalid-name: "<prefix><#c42323>Название: от 1 до 48 обычных символов."
       limit: "<prefix><#ff9f0f>Достигнут лимит постоянных чертежей."
@@ -439,10 +439,8 @@ locales:
         <prefix><#c42323>Реестр книг временно недоступен.
         <#8c8c8c>   <#969696>Новые деньги не списаны.
       shop-unavailable: "<prefix><#ff9f0f>Цены админшопа сейчас недоступны."
-      material-unavailable: |-
-
-        <prefix><#ff9f0f>Часть материалов отсутствует в админшопе.
-        <#8c8c8c>   <#e6fff3>Нет: <#d48763><materials>
+      player-materials:
+        included: "всё включено в стоимость"
       price-limit: "<prefix><#c42323>Смета превышает безопасный лимит книги."
       quote-kind:
         activation: "Активация"
@@ -450,9 +448,10 @@ locales:
       quote: |-
 
         <prefix><#ffb142><kind> <#d48763>«<name>»
-        <#8c8c8c>   Материалы: <#e6fff3><materials>
+        <#8c8c8c>   Из админшопа: <#e6fff3><materials>
+        <#8c8c8c>   Принести с собой: <#d48763><required>
         <#8c8c8c>   Работа: <#e6fff3><labor> <#8c8c8c>— Итого: <#2bba43><price>
-        <#8c8c8c>   <click:run_command:'/builder book confirm'><#2bba43>[Оплатить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[Отмена]</click>
+        <#8c8c8c>   <click:run_command:'/builder book confirm'><#2bba43>[Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[Отмена]</click>
       preview-opened: |-
 
         <prefix><#d48763>«<name>» <#8c8c8c>— <state>
@@ -490,13 +489,13 @@ locales:
         <#8c8c8c>   <#969696>Повторного списания не будет.
       delivery-space: |-
 
-        <prefix><#ff9f0f>Оплаченная книга ожидает свободный слот.
+        <prefix><#ff9f0f>Выпущенная книга ожидает свободный слот.
         <#8c8c8c>   <#e6fff3>Освободите место — выдача продолжится.
       delivery-pending: |-
 
         <prefix><#ff9f0f>Реестр подтверждает выдачу книги.
         <#8c8c8c>   <#e6fff3>Инвентарь временно защищён.
-      delivery-recovered: "<prefix><#2bba43>Оплаченная книга восстановлена и активна."
+      delivery-recovered: "<prefix><#2bba43>Выпущенная книга восстановлена и активна."
       activated: |-
 
         <prefix><#2bba43>Книга активна и зарегистрирована.
@@ -601,6 +600,7 @@ locales:
 
         <prefix><#2bba43>Операция завершена: <#d48763><kind>
         <#8c8c8c>   <#e6fff3>Изменено блоков: <#2bba43><count>
+      paste-again: "<#8c8c8c>   <click:run_command:'/builder paste'><#d48763>[Вставить ещё раз]</click> <#8c8c8c>— <#e6fff3>открыть новое превью"
       rolled-back: |-
 
         <prefix><#c42323>Операция отменена и полностью восстановлена.
@@ -769,7 +769,7 @@ locales:
       inventory-full: "<prefix><yellow>Free one slot or hold a single echo shard."
       material-required: |-
 
-        <prefix><yellow>Hold a plain echo shard.
+        <prefix><yellow>In survival, hold a plain echo shard.
         <dark_gray>   <gray>ARC never creates one for free.
     crown-brush:
       name: "<aqua><bold>Crown brush"
@@ -855,12 +855,12 @@ locales:
         - "<dark_gray>   1. <aqua>/builder wand <gray>— get the selector."
         - "<dark_gray>      <gray>Mark two corners; the outline stays visible."
         - "<dark_gray>   2. <aqua>/builder copy <gray>— save it for 15 minutes."
-        - "<dark_gray>   3. <gray>Hold a plain book."
+        - "<dark_gray>   3. <gray>In survival, hold a plain book; creative creates it for you."
         - "<dark_gray>      <aqua>/builder book draft [name] <gray>— free draft."
         - "<dark_gray>   4. <gray>Right-click a block to place or move preview."
         - "<dark_gray>      <gray>Sneak-click to adjust its transform."
         - "<dark_gray>   5. <gray>Right-click air for a quote without charge."
-        - "<dark_gray>   6. <gray>Click <green>[Pay]</green> in the quote."
+        - "<dark_gray>   6. <gray>Click <green>[Confirm]</green> in the quote."
         - "<dark_gray>   7. <aqua>/builder book copy <gray>— copy at stored cost."
         - "<dark_gray>      <aqua>/builder book sell [price] <gray>— sell."
         - "<dark_gray>   <aqua>/builder book status <gray>— your current step."
@@ -888,7 +888,7 @@ locales:
         clipboard: |-
 
           <prefix><green>Step 3/7: <white><count></white> blocks copied.
-          <dark_gray>   <gray>Hold a plain book.
+          <dark_gray>   <gray>Hold a plain book in survival; creative needs none.
           <dark_gray>   <aqua>/builder book draft [name] <gray>— create draft.
         draft: |-
 
@@ -909,10 +909,10 @@ locales:
         quote: |-
 
           <prefix><yellow>Step 6/7: quote <green><price></green>.
-          <dark_gray>   <click:run_command:'/builder book confirm'><green>[Pay]</click> <dark_gray>— <gray><seconds>s remaining.
+          <dark_gray>   <click:run_command:'/builder book confirm'><green>[Confirm]</click> <dark_gray>— <gray><seconds>s remaining.
         delivery: |-
 
-          <prefix><yellow>Step 7/7: verifying payment.
+          <prefix><yellow>Step 7/7: issuing the book.
           <dark_gray>   <gray>Do not move the book.
           <dark_gray>   <gray>Delivery resumes automatically.
         checking: "<prefix><gray>Checking the book UUID, owner, and generation…"
@@ -940,7 +940,7 @@ locales:
         <dark_gray>   <gray>Name: <white><name>
         <dark_gray>   <gray><count> blocks — no charge
         <dark_gray>   <gray>Right-click ground to inspect its preview.
-      material-required: "<prefix><yellow>Hold a plain book in your main hand."
+      material-required: "<prefix><yellow>In survival, hold a plain book in your main hand."
       inventory-full: "<prefix><yellow>Free one slot or hold a single plain book."
       invalid-name: "<prefix><red>Use 1–48 ordinary characters for the name."
       limit: |-
@@ -981,10 +981,8 @@ locales:
         <prefix><red>The book registry is unavailable.
         <dark_gray>   <gray>No new charge was made.
       shop-unavailable: "<prefix><yellow>Could not read material prices from the admin shop."
-      material-unavailable: |-
-
-        <prefix><yellow>Some materials are not sold by the admin shop.
-        <dark_gray>   <gray>Missing: <white><materials>
+      player-materials:
+        included: "everything is included in the price"
       price-limit: "<prefix><red>The estimate exceeds the safe book-price limit."
       quote-kind:
         activation: "Activation"
@@ -992,9 +990,10 @@ locales:
       quote: |-
 
         <prefix><gold><kind> <aqua>“<name>”
-        <dark_gray>   Materials: <white><materials>
+        <dark_gray>   From the shop: <white><materials>
+        <dark_gray>   Bring yourself: <aqua><required>
         <dark_gray>   Work: <white><labor> <dark_gray>— Total: <green><price>
-        <dark_gray>   <click:run_command:'/builder book confirm'><green>[Pay]</click>  <click:run_command:'/builder book cancel'><gray>[Cancel]</click>
+        <dark_gray>   <click:run_command:'/builder book confirm'><green>[Confirm]</click>  <click:run_command:'/builder book cancel'><gray>[Cancel]</click>
       preview-opened: |-
 
         <prefix><aqua>“<name>” <dark_gray>— <state>
@@ -1032,13 +1031,13 @@ locales:
         <dark_gray>   <gray>ARC will not charge it again.
       delivery-space: |-
 
-        <prefix><yellow>Your paid book needs one free slot.
+        <prefix><yellow>Your issued book needs one free slot.
         <dark_gray>   <gray>Free space; delivery will resume.
       delivery-pending: |-
 
         <prefix><yellow>The registry is confirming delivery.
         <dark_gray>   <gray>Your inventory is temporarily protected.
-      delivery-recovered: "<prefix><green>Your paid book is recovered and active."
+      delivery-recovered: "<prefix><green>Your issued book is recovered and active."
       activated: |-
 
         <prefix><green>The build book is active and registered.
@@ -1126,6 +1125,7 @@ locales:
         <dark_gray>   <gray>Your inventory is briefly protected.
       progress: "<gray><kind>: <green><count><dark_gray>/<aqua><total>"
       completed: "<prefix><green><white><kind></white> completed: <white><count></white> blocks."
+      paste-again: "<dark_gray>   <click:run_command:'/builder paste'><aqua>[Paste again]</aqua></click> <dark_gray>— <gray>open a fresh preview"
       rolled-back: |-
 
         <prefix><red>The operation was rolled back and restored.

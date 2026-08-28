@@ -3,12 +3,42 @@ package ru.arc.buildertools
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import org.bukkit.GameMode
+import org.bukkit.Material
+import org.bukkit.inventory.ItemStack
+import ru.arc.autobuild.BuildBookData
+import ru.arc.autobuild.BuildBookMaterialRequirement
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.UUID
 
 class BuilderBookContractsTest : StringSpec({
     "construction fee rounds upward to the nearest currency minor unit" {
         BuilderBookCostRules.calculate(listOf(100L, 1L), 1_500) shouldBe
             BuilderBookCost(materialCostMinor = 101L, constructionFeeMinor = 16L, issuePriceMinor = 117L)
+    }
+
+    "an all-player-supplied build has a valid zero shop subtotal" {
+        BuilderBookCostRules.calculate(emptyList(), 1_500) shouldBe
+            BuilderBookCost(materialCostMinor = 0L, constructionFeeMinor = 0L, issuePriceMinor = 0L)
+    }
+
+    "book construction consumes recorded player materials only in survival" {
+        MockBukkitTestRuntime.open().use {
+            val data = BuildBookData(
+                buildingId = "fixture.schem",
+                title = "Дом",
+                playerMaterials = listOf(BuildBookMaterialRequirement(Material.OAK_PLANKS, 12)),
+            )
+            val book = ItemStack(Material.BOOK)
+
+            val survival = BuilderBookConstructionCosts.calculate(book, data, GameMode.SURVIVAL)
+            survival.map { it.materialKey to it.amount }.toSet() shouldBe setOf(
+                "minecraft:book" to 1,
+                "minecraft:oak_planks" to 12,
+            )
+            BuilderBookConstructionCosts.calculate(book, data, GameMode.CREATIVE)
+                .map { it.materialKey to it.amount } shouldBe listOf("minecraft:book" to 1)
+        }
     }
 
     "shop totals are fixed to currency precision without binary floating drift" {

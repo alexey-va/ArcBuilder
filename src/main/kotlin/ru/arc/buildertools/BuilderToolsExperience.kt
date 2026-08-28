@@ -74,6 +74,11 @@ internal object BuilderProgressCadence {
     }
 }
 
+internal object BuilderOperationCompletion {
+    fun repeatPaste(kind: BuilderPlanKind, hasClipboard: Boolean): Boolean =
+        kind == BuilderPlanKind.PASTE && hasClipboard
+}
+
 /** Starts one lifecycle-owned repeating preview task. */
 internal class BuilderPreviewLoop(
     scope: LifecycleTaskScope,

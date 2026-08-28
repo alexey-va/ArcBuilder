@@ -12,6 +12,12 @@ custom-items:
   arc:background:
     material: GRAY_STAINED_GLASS_PANE
     model: assets/arc/models/gui/background.json
+  arc:builder_book_draft:
+    material: BOOK
+    model: assets/arc/models/builder/book_draft.json
+  arc:builder_book_active:
+    material: BOOK
+    model: assets/arc/models/builder/book_active.json
 
 sources:
   builder:
@@ -25,6 +31,7 @@ sources:
     include:
       - build-book.display-name
       - build-book.lore
+      - build-book.player-materials.*
       - build-book.received
       - build-book.draft-preview-message
       - build-book.editor.*
@@ -67,6 +74,7 @@ placeholders:
   progress: '67'
   purchased: '48'
   radius: '6'
+  required: '32× дубовых досок, 16× стекла'
   reward: '12 глубинного сланца'
   rotation: '90'
   seconds: '30'
@@ -128,22 +136,49 @@ surfaces:
       lore: builder:crown-brush.lore
     - id: draft-build-book
       material: BOOK
+      itemsadder: arc:builder_book_draft
       name: autobuild:build-book.display-name
-      lore: autobuild:build-book.lore
+      lore:
+        - autobuild:build-book.lore
+        - autobuild:build-book.player-materials.draft
       placeholders:
         state: Бесплатный черновик
         price: после проверки
     - id: active-build-book
       material: BOOK
+      itemsadder: arc:builder_book_active
       name: autobuild:build-book.display-name
-      lore: autobuild:build-book.lore
+      lore:
+        - autobuild:build-book.lore
+        - autobuild:build-book.player-materials.heading
+        - ref: autobuild:build-book.player-materials.row
+          placeholders: {amount: '32', material: 'Дубовые доски'}
+        - ref: autobuild:build-book.player-materials.row
+          placeholders: {amount: '16', material: 'Стекло'}
+      placeholders:
+        state: Активная одноразовая книга
+        price: '1 920.00 <white>💰</white>'
+    - id: active-build-book-all-included
+      material: BOOK
+      itemsadder: arc:builder_book_active
+      name: autobuild:build-book.display-name
+      lore:
+        - autobuild:build-book.lore
+        - autobuild:build-book.player-materials.included
       placeholders:
         state: Активная одноразовая книга
         price: '1 920.00 <white>💰</white>'
     - id: delivery-pending-book
       material: BOOK
+      itemsadder: arc:builder_book_active
       name: autobuild:build-book.display-name
-      lore: autobuild:build-book.lore
+      lore:
+        - autobuild:build-book.lore
+        - autobuild:build-book.player-materials.heading
+        - ref: autobuild:build-book.player-materials.row
+          placeholders: {amount: '32', material: 'Дубовые доски'}
+        - ref: autobuild:build-book.player-materials.row
+          placeholders: {amount: '16', material: 'Стекло'}
       placeholders:
         state: Подтверждается реестром
         price: '1 920.00 <white>💰</white>'

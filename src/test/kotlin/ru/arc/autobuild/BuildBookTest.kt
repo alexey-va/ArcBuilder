@@ -95,6 +95,10 @@ class BuildBookTest : TestBase() {
             instanceId = UUID.randomUUID(),
             instanceGeneration = 1,
             issuePriceMinor = 12_345L,
+            playerMaterials = listOf(
+                BuildBookMaterialRequirement(Material.OAK_PLANKS, 32),
+                BuildBookMaterialRequirement(Material.STONE, 64),
+            ).let(BuildBookMaterialRequirements::normalize),
         ).validated()
 
         val draftItem = BuildBookItems.create(draft)
@@ -116,11 +120,33 @@ class BuildBookTest : TestBase() {
         val registeredLore = registeredItem.itemMeta.lore().orEmpty().map(plainText::serialize)
         assertTrue(draftLore.any { it.contains("Себестоимость: после проверки") })
         assertTrue(registeredLore.any { it.contains("Себестоимость: 123.45 💰") })
+        assertTrue(registeredLore.any { it.contains("Принести с собой") })
+        assertTrue(registeredLore.any { it.contains("32×") })
+        assertTrue(registeredLore.any { it.contains("64×") })
         val coinGlyphs = registeredItem.itemMeta.lore().orEmpty()
             .flatMap { line -> line.descendants().filterIsInstance<TextComponent>().toList() }
             .filter { component -> component.content() == "💰" }
         assertEquals(1, coinGlyphs.size)
         assertTrue(coinGlyphs.all { component -> component.color() == NamedTextColor.WHITE })
+    }
+
+    @Test
+    fun `player material requirements use a canonical bounded PDC representation`() {
+        val encoded = BuildBookMaterialRequirements.encode(
+            listOf(
+                BuildBookMaterialRequirement(Material.STONE, 32),
+                BuildBookMaterialRequirement(Material.OAK_PLANKS, 16),
+                BuildBookMaterialRequirement(Material.STONE, 32),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                BuildBookMaterialRequirement(Material.OAK_PLANKS, 16),
+                BuildBookMaterialRequirement(Material.STONE, 64),
+            ),
+            BuildBookMaterialRequirements.decode(encoded),
+        )
     }
 
     @Test
