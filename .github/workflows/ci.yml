@@ -36,7 +36,7 @@ jobs:
           jar tf "$jar_path" | grep -Fq 'kotlin/collections/CollectionsKt.class'
           ! jar tf "$jar_path" | grep -Eq '^(org/bukkit|io/papermc|com/sk89q)/'
           unzip -p "$jar_path" plugin.yml | grep -Fx 'name: ArcBuilder'
-      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ArcBuilder-${{ github.sha }}
           path: build/libs/ArcBuilder-1.0.0.jar
