@@ -20,7 +20,6 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.opentest4j.TestAbortedException
 import ru.arc.autobuild.ConstructionSite
-import ru.arc.autobuild.BuildBookCodec
 import ru.arc.autobuild.PlayerBuildBookStore
 import ru.arc.autobuild.PlayerBuildBookDigestInspection
 import ru.arc.autobuild.PlayerBuildBookTemplate
@@ -81,7 +80,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.renderer.selections.containsKey(player.uniqueId) shouldBe true
 
             player.performCommand("builder confirm") shouldBe true
-            journey.awaitSettled {
+            journey.awaitSettled(player) {
                 world.getBlockAt(10, 64, 10).type == Material.STONE &&
                     world.getBlockAt(11, 64, 10).type == Material.OAK_PLANKS
             }
@@ -94,7 +93,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(10, 64, 10).type shouldBe Material.STONE
             world.getBlockAt(11, 64, 10).type shouldBe Material.OAK_PLANKS
             player.performCommand("builder confirm") shouldBe true
-            journey.awaitSettled {
+            journey.awaitSettled(player) {
                 world.getBlockAt(10, 64, 10).type == Material.AIR &&
                     world.getBlockAt(11, 64, 10).type == Material.AIR
             }
@@ -125,7 +124,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(13, 64, 10).type shouldBe Material.AIR
             world.getBlockAt(13, 64, 11).type shouldBe Material.AIR
             player.performCommand("builder confirm") shouldBe true
-            journey.awaitSettled {
+            journey.awaitSettled(player) {
                 world.getBlockAt(13, 64, 10).type == Material.SAND &&
                     world.getBlockAt(13, 64, 11).type == Material.BROWN_CONCRETE_POWDER
             }
@@ -159,7 +158,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.countLine(world, Material.STONE) shouldBe 4
             journey.paper.performTicks(1)
             journey.countLine(world, Material.STONE) shouldBe 5
-            journey.awaitSettled { journey.countLine(world, Material.STONE) == 5 }
+            journey.awaitSettled(player) { journey.countLine(world, Material.STONE) == 5 }
             journey.amount(player, Material.STONE) shouldBe 0
         }
     }
@@ -208,7 +207,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 player.teleport(Location(world, x, 64.0, 3.5, 0f, 0f))
                 player.performCommand("builder paste") shouldBe true
                 player.performCommand("builder confirm") shouldBe true
-                journey.awaitSettled {
+                journey.awaitSettled(player) {
                     world.getBlockAt(x.toInt(), 64, 0).type == Material.STONE &&
                         world.getBlockAt(x.toInt() + 1, 64, 0).type == Material.OAK_PLANKS
                 }
@@ -217,8 +216,13 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
             player.inventory.setItemInMainHand(ItemStack(Material.BOOK))
             player.performCommand("builder book draft Original") shouldBe true
+            val blueprintKey = checkNotNull(org.bukkit.NamespacedKey.fromString("arc:build_book_blueprint_uuid"))
+            val instanceKey = checkNotNull(org.bukkit.NamespacedKey.fromString("arc:build_book_instance_uuid"))
             journey.await("anchored draft delivery and player lease release") {
-                if (BuildBookCodec.read(player.inventory.itemInMainHand)?.draft != true) return@await false
+                val data = player.inventory.itemInMainHand.itemMeta.persistentDataContainer
+                val isDraft = data.has(blueprintKey, PersistentDataType.STRING) &&
+                    !data.has(instanceKey, PersistentDataType.STRING)
+                if (!isDraft) return@await false
                 val commandEvent = PlayerCommandPreprocessEvent(player, "/builder status")
                 journey.paper.callEvent(commandEvent)
                 !commandEvent.isCancelled && journey.activeLeases() == 0
@@ -296,9 +300,10 @@ private class ArcBuilderJourney private constructor(
         world.getBlockAt(x, 64, 0).type == material
     }
 
-    fun awaitSettled(condition: () -> Boolean) {
+    fun awaitSettled(player: Player, condition: () -> Boolean) {
         await("completed builder operation") {
-            condition() && runtime.runtimeHealthContribution().activeLeases == 0
+            condition() && !runtime.isPlayerLeaseActive(player.uniqueId) &&
+                runtime.runtimeHealthContribution().activeLeases == 0
         }
     }
 

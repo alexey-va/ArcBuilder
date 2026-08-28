@@ -1444,6 +1444,8 @@ internal class BuilderToolsRuntime(
 
     internal fun runtimeHealthContribution(): RuntimeHealthContribution = runtimeHealth.get()
 
+    internal fun isPlayerLeaseActive(playerId: UUID): Boolean = operationLocks.isPlayerLocked(playerId)
+
     private fun publishRuntimeHealth() {
         val bookHealth = books.health()
         runtimeHealth.set(
