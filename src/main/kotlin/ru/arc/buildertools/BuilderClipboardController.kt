@@ -1,6 +1,7 @@
 package ru.arc.buildertools
 
 import org.bukkit.Bukkit
+import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.block.data.type.Leaves
@@ -19,6 +20,7 @@ internal interface BuilderClipboardHost {
     fun ensureInRangeAndLoaded(player: Player, block: Block)
     fun ensureProtected(player: Player, block: Block)
     fun ensureMutable(player: Player, block: Block)
+    fun ensurePlacement(player: Player, block: Block, material: Material) = ensureMutable(player, block)
     fun createPastePlan(
         player: Player,
         changes: List<BuilderBlockChange>,
@@ -137,7 +139,7 @@ internal class BuilderClipboardController(
                 skippedUnsafe += 1
                 return@mapNotNull null
             }
-            host.ensureMutable(player, block)
+            host.ensurePlacement(player, block, after.material)
             if (BuilderGameModePolicy.usesInventory(player.gameMode)) {
                 costs += BuilderPlacementCost.item(after)
             }

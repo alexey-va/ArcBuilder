@@ -41,6 +41,7 @@ class BuilderFillControllerTest : FunSpec({
             creative.costs shouldBe emptyList()
             harness.permissionChecks shouldBe 2
             harness.mutableChecks shouldBe 4
+            harness.placementMaterials shouldContainExactly List(4) { Material.STONE }
             world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
             world.getBlockAt(1, 64, 0).type shouldBe Material.SHORT_GRASS
             world.getBlockAt(2, 64, 0).type shouldBe Material.STONE
@@ -108,6 +109,7 @@ private class FillHarness(
     private var selection: BuilderSelection? = null
     var permissionChecks = 0
     var mutableChecks = 0
+    val placementMaterials = mutableListOf<Material>()
     var createdPlans = 0
 
     private val safety = BuilderBlockSafety(plugin, setOf("AIR", "SHORT_GRASS"))
@@ -130,6 +132,11 @@ private class FillHarness(
             override fun ensureMutable(player: Player, block: Block) {
                 mutableChecks++
                 if (!mutable) throw FillFailure("errors.protection")
+            }
+
+            override fun ensurePlacement(player: Player, block: Block, material: Material) {
+                placementMaterials += material
+                ensureMutable(player, block)
             }
 
             override fun createPlan(

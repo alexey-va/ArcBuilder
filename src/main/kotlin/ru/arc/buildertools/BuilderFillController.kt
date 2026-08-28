@@ -15,6 +15,7 @@ internal interface BuilderFillHost {
     fun world(worldId: UUID): World
     fun placementData(material: Material): BlockData
     fun ensureMutable(player: Player, block: Block)
+    fun ensurePlacement(player: Player, block: Block, material: Material) = ensureMutable(player, block)
     fun createPlan(
         player: Player,
         changes: List<BuilderBlockChange>,
@@ -51,7 +52,7 @@ internal class BuilderFillController(
         selection.positionsBottomUp().forEach { position ->
             val block = world.getBlockAt(position.x, position.y, position.z)
             if (block.blockData.asString == after.asString || !safety.isReplaceable(block)) return@forEach
-            host.ensureMutable(player, block)
+            host.ensurePlacement(player, block, after.material)
             changes += BuilderBlockChange(position, block.blockData.asString, after.asString)
             if (changes.size > maximumChanges) host.fail("errors.selection-too-large")
         }

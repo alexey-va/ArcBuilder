@@ -2,7 +2,6 @@ package ru.arc.hooks.lands
 
 import me.angeschossen.lands.api.LandsIntegration
 import me.angeschossen.lands.api.flags.type.Flags
-import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.block.Block
 import org.bukkit.entity.Player
@@ -17,13 +16,9 @@ class LandsHook(plugin: Plugin) {
         val location = block.location
         if (landWorld.getArea(location) == null) return true
         val landPlayer = integration.getLandPlayer(player.uniqueId) ?: return false
-        val breakAllowed = landWorld.hasRoleFlag(landPlayer, location, Flags.BLOCK_BREAK, block.type, false)
+        val breakAllowed = block.type.isAir ||
+            landWorld.hasRoleFlag(landPlayer, location, Flags.BLOCK_BREAK, block.type, false)
         val placeAllowed = placing == null || landWorld.hasRoleFlag(landPlayer, location, Flags.BLOCK_PLACE, placing, false)
         return breakAllowed && placeAllowed
-    }
-
-    fun isProtectedFor(player: Player, location: Location): Boolean {
-        val world = location.world ?: return false
-        return canModify(player, world.getBlockAt(location))
     }
 }

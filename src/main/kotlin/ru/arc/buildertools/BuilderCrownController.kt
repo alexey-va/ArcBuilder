@@ -28,6 +28,7 @@ internal interface BuilderCrownHost {
     fun ensureAvailable(player: Player)
     fun ensurePermission(player: Player)
     fun ensureMutable(player: Player, block: Block)
+    fun ensurePlacement(player: Player, block: Block, material: Material) = ensureMutable(player, block)
     fun placementData(material: Material): BlockData
     fun materialLabel(player: Player, material: Material): Component
     fun setFirstPosition(player: Player, location: Location)
@@ -306,7 +307,7 @@ internal class BuilderCrownController(
             val data = dataByMaterial.getValue(material)
             if (block.blockData.asString == data.asString) return@mapNotNull null
             if (!safety.isReplaceable(block)) return@mapNotNull null
-            host.ensureMutable(player, block)
+            host.ensurePlacement(player, block, data.material)
             if (BuilderGameModePolicy.usesInventory(player.gameMode)) costs += ItemStack(material)
             BuilderBlockChange(position, block.blockData.asString, data.asString)
         }.take(maximumChanges + 1).toList()

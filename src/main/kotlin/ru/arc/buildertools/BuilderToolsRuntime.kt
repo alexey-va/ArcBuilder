@@ -88,6 +88,9 @@ internal class BuilderToolsRuntime(
 
             override fun ensureMutable(player: Player, block: Block) = this@BuilderToolsRuntime.ensureMutable(player, block)
 
+            override fun ensurePlacement(player: Player, block: Block, material: Material) =
+                this@BuilderToolsRuntime.ensureMutable(player, block, material)
+
             override fun createPlan(
                 player: Player,
                 changes: List<BuilderBlockChange>,
@@ -118,6 +121,9 @@ internal class BuilderToolsRuntime(
                 this@BuilderToolsRuntime.ensureProtected(player, block)
 
             override fun ensureMutable(player: Player, block: Block) = this@BuilderToolsRuntime.ensureMutable(player, block)
+
+            override fun ensurePlacement(player: Player, block: Block, material: Material) =
+                this@BuilderToolsRuntime.ensureMutable(player, block, material)
 
             override fun createPastePlan(
                 player: Player,
@@ -236,6 +242,9 @@ internal class BuilderToolsRuntime(
                     override fun ensurePermission(player: Player) = ensureFeaturePermission(player, BuilderFeature.CROWN)
 
                     override fun ensureMutable(player: Player, block: Block) = this@BuilderToolsRuntime.ensureMutable(player, block)
+
+                    override fun ensurePlacement(player: Player, block: Block, material: Material) =
+                        this@BuilderToolsRuntime.ensureMutable(player, block, material)
 
                     override fun placementData(material: Material) = this@BuilderToolsRuntime.placementData(material)
 
@@ -600,7 +609,7 @@ internal class BuilderToolsRuntime(
                 skippedUnsafe += 1
                 return@mapNotNull null
             }
-            ensureMutable(player, block)
+            ensureMutable(player, block, after.material)
             BuilderBlockChange(
                 BuilderBlockPos(site.world.uid, block.x, block.y, block.z).validated(),
                 block.blockData.asString,
@@ -864,10 +873,10 @@ internal class BuilderToolsRuntime(
             while (processed < config.blocksPerTick && operation.appliedChanges < changes.size) {
                 val change = changes[operation.appliedChanges]
                 val block = block(requireWorld(change.position.worldId), change.position)
-                ensureMutable(player, block)
                 check(block.blockData.asString == change.beforeBlockData) { "block changed after confirmation" }
                 val before = Bukkit.createBlockData(change.beforeBlockData)
                 val after = Bukkit.createBlockData(change.afterBlockData)
+                ensureMutable(player, block, after.material.takeUnless(Material::isAir))
                 block.setBlockData(after, false)
                 coreProtect?.logChange(operation.record.playerName, block.location, before, after)
                 operation.appliedChanges++
@@ -1032,12 +1041,12 @@ internal class BuilderToolsRuntime(
         plan.validated(config.maxChanges)
         plan.changes.forEach { change ->
             val block = block(requireWorld(change.position.worldId), change.position)
-            ensureMutable(player, block)
+            val after = Bukkit.createBlockData(change.afterBlockData)
+            ensureMutable(player, block, after.material.takeUnless(Material::isAir))
             if (block.blockData.asString != change.beforeBlockData) throw BuilderUserFailure("errors.expired")
             if (!block.type.isAir && !safety.isSafeExisting(block) && !safety.isReplaceable(block)) {
                 throw BuilderUserFailure("errors.expired")
             }
-            val after = Bukkit.createBlockData(change.afterBlockData)
             if (!safety.isSafePlacement(after) && after.material !in safety.replaceable) {
                 throw BuilderUserFailure("errors.plan-failed")
             }
@@ -1135,9 +1144,9 @@ internal class BuilderToolsRuntime(
         }
     }
 
-    private fun ensureMutable(player: Player, block: Block) {
+    private fun ensureMutable(player: Player, block: Block, placing: Material? = null) {
         ensureInRangeAndLoaded(player, block)
-        ensureProtected(player, block)
+        ensureProtected(player, block, placing)
         if (!block.world.worldBorder.isInside(block.location)) throw BuilderUserFailure("errors.protection")
     }
 
@@ -1148,9 +1157,9 @@ internal class BuilderToolsRuntime(
         }
     }
 
-    private fun ensureProtected(player: Player, block: Block) {
+    private fun ensureProtected(player: Player, block: Block, placing: Material? = null) {
         val lands = HookRegistry.landsHook
-        if ((lands != null && !lands.isProtectedFor(player, block.location)) || (lands == null && config.requireLands)) {
+        if ((lands != null && !lands.canModify(player, block, placing)) || (lands == null && config.requireLands)) {
             throw BuilderUserFailure("errors.protection")
         }
     }

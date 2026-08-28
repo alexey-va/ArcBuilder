@@ -2,6 +2,7 @@ package ru.arc.buildertools
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
@@ -79,6 +80,8 @@ class BuilderClipboardControllerTest : FunSpec({
                 creative.costs shouldBe emptyList()
                 harness.pastePermissions shouldBe 2
                 harness.mutableBlocks shouldBe 4
+                harness.placementMaterials shouldContainExactly
+                    listOf(Material.STONE, Material.OAK_SLAB, Material.STONE, Material.OAK_SLAB)
 
                 controller.close()
                 controller.current(player.uniqueId) shouldBe null
@@ -150,6 +153,7 @@ private class ClipboardHarness(
     var readableBlocks = 0
     var protectedBlocks = 0
     var mutableBlocks = 0
+    val placementMaterials = mutableListOf<Material>()
 
     val controller = BuilderClipboardController(
         safety = safety,
@@ -184,6 +188,11 @@ private class ClipboardHarness(
 
             override fun ensureMutable(player: Player, block: Block) {
                 mutableBlocks++
+            }
+
+            override fun ensurePlacement(player: Player, block: Block, material: Material) {
+                placementMaterials += material
+                ensureMutable(player, block)
             }
 
             override fun createPastePlan(

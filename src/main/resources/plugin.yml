@@ -5,6 +5,7 @@ api-version: '1.21.11'
 authors: [RusCrafting]
 description: Survival-friendly builder tools and construction books
 softdepend:
+  - CoreProtect
   - Lands
   - Slimefun
   - ItemsAdder

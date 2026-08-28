@@ -39,7 +39,7 @@ internal class BuilderBlockDisplayRenderer(
         val glow: Color,
     )
 
-    private data class Scene(val signature: Int, val entities: List<Entity>)
+    private data class Scene(val worldId: UUID, val signature: Int, val entities: List<Entity>)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
 
     init {
@@ -106,6 +106,10 @@ internal class BuilderBlockDisplayRenderer(
     override fun close(playerId: UUID) = remove(playerId, Layer.BOOK)
 
     private fun renderBook(site: ConstructionSite) {
+        if (site.player.world.uid != site.world.uid) {
+            remove(site.player.uniqueId, Layer.BOOK)
+            return
+        }
         val specs = buildList {
             val positions = site.relativePositionsBottomUp().mapNotNull { relative ->
                 val data = runCatching {
@@ -176,7 +180,7 @@ internal class BuilderBlockDisplayRenderer(
     private fun replace(player: Player, layer: Layer, specs: List<DisplaySpec>) {
         val key = player.uniqueId to layer
         val signature = specs.hashCode()
-        if (scenes[key]?.signature == signature) return
+        if (scenes[key]?.let { it.worldId == player.world.uid && it.signature == signature } == true) return
         remove(player.uniqueId, layer)
         if (specs.isEmpty() || !player.isOnline) return
         val spawned = mutableListOf<Entity>()
@@ -202,7 +206,7 @@ internal class BuilderBlockDisplayRenderer(
                 player.showEntity(plugin, display)
                 spawned += display
             }
-            scenes[key] = Scene(signature, spawned)
+            scenes[key] = Scene(player.world.uid, signature, spawned)
         } catch (failure: Throwable) {
             spawned.forEach(Entity::remove)
             throw failure
