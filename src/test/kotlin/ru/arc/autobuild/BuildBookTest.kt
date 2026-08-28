@@ -1,13 +1,16 @@
 package ru.arc.autobuild
 
-import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.TextComponent
+import net.kyori.adventure.text.format.NamedTextColor
+import net.kyori.adventure.text.format.TextDecoration
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
-import net.kyori.adventure.text.format.TextDecoration
-import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -113,6 +116,11 @@ class BuildBookTest : TestBase() {
         val registeredLore = registeredItem.itemMeta.lore().orEmpty().map(plainText::serialize)
         assertTrue(draftLore.any { it.contains("Себестоимость: после проверки") })
         assertTrue(registeredLore.any { it.contains("Себестоимость: 123.45 💰") })
+        val coinGlyphs = registeredItem.itemMeta.lore().orEmpty()
+            .flatMap { line -> line.descendants().filterIsInstance<TextComponent>().toList() }
+            .filter { component -> component.content() == "💰" }
+        assertEquals(1, coinGlyphs.size)
+        assertTrue(coinGlyphs.all { component -> component.color() == NamedTextColor.WHITE })
     }
 
     @Test
@@ -217,4 +225,9 @@ class BuildBookTest : TestBase() {
         createdAtMillis = now,
         expiresAtMillis = now + 60_000,
     ).validated(100)
+}
+
+private fun Component.descendants(): Sequence<Component> = sequence {
+    yield(this@descendants)
+    children().forEach { child -> yieldAll(child.descendants()) }
 }

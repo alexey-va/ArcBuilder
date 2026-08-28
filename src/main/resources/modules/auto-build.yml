@@ -6,21 +6,21 @@
 # Тик интервала очистки «зависших» построек
 cleanup-interval: 20
 build-book:
-  display-name: '<#92bed8><bold><name>'
+  display-name: '<#d48763><bold><name>'
   lore:
-    - '<#92bed8><state>'
+    - '<#d48763><state>'
     - ''
     - '<#8c8c8c>Автор: <#e6fff3><creator>'
     - '<#8c8c8c>Объём: <#e6fff3><blocks> блоков'
     - '<#8c8c8c>Себестоимость: <#2bba43><price>'
     - ''
-    - '<#92bed8>ПКМ по блоку <#8c8c8c>— перенести'
-    - '<#92bed8>ПКМ в воздух <#8c8c8c>— продолжить'
-    - '<#92bed8>Shift+ПКМ <#8c8c8c>— положение'
-  received: '<#92bed8>🛠 <#2bba43>Книга строительства создана: <#e6fff3><building>'
+    - '<#d48763>ПКМ по блоку <#8c8c8c>— перенести'
+    - '<#d48763>ПКМ в воздух <#8c8c8c>— продолжить'
+    - '<#d48763>Shift+ПКМ <#8c8c8c>— положение'
+  received: '<#d48763>🛠 <#2bba43>Книга строительства создана: <#e6fff3><building>'
   draft-preview-message: |-
 
-    <#92bed8>🛠 <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
+    <#d48763>🛠 <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
     <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — смета
   player-copy:
     max-offset: 16
@@ -29,8 +29,8 @@ build-book:
     default-name: 'Моя постройка'
   editor:
     title: '<dark_gray>Настройка книги'
-    invalid: '<#92bed8>🛠 <#c42323>Книга повреждена или её чертёж недоступен.'
-    no-permission: '<#92bed8>🛠 <#c42323>У вас нет доступа к настройке этой книги.'
+    invalid: '<#d48763>🛠 <#c42323>Книга повреждена или её чертёж недоступен.'
+    no-permission: '<#d48763>🛠 <#c42323>У вас нет доступа к настройке этой книги.'
     preview-inactive:
       name: '<#ff9f0f><bold>Предпросмотр завершён'
       lore:
@@ -47,34 +47,34 @@ build-book:
         - '<#e6fff3>Здесь нельзя поставить часть блоков.'
         - '<#8c8c8c>Измените сдвиг или поворот.'
     overview:
-      name: '<#92bed8><bold><name>'
+      name: '<#d48763><bold><name>'
       lore:
-        - '<#8c8c8c>Поворот: <#92bed8><rotation>°'
-        - '<#8c8c8c>Сдвиг: <#92bed8><offset_x> / <offset_y> / <offset_z>'
+        - '<#8c8c8c>Поворот: <#d48763><rotation>°'
+        - '<#8c8c8c>Сдвиг: <#d48763><offset_x> / <offset_y> / <offset_z>'
         - ''
         - '<#969696>Esc — закрыть'
     axis-x:
-      name: '<#92bed8><bold>Смещение X'
+      name: '<#d48763><bold>Смещение X'
       lore:
-        - '<#8c8c8c>Сейчас: <#92bed8><value>'
+        - '<#8c8c8c>Сейчас: <#d48763><value>'
         - '<#e6fff3>ЛКМ −1 <#8c8c8c>— <#e6fff3>ПКМ +1'
         - '<#969696>Shift: шаг 5'
     axis-y:
-      name: '<#92bed8><bold>Высота Y'
+      name: '<#d48763><bold>Высота Y'
       lore:
-        - '<#8c8c8c>Сейчас: <#92bed8><value>'
+        - '<#8c8c8c>Сейчас: <#d48763><value>'
         - '<#e6fff3>ЛКМ −1 <#8c8c8c>— <#e6fff3>ПКМ +1'
         - '<#969696>Shift: шаг 5'
     axis-z:
-      name: '<#92bed8><bold>Смещение Z'
+      name: '<#d48763><bold>Смещение Z'
       lore:
-        - '<#8c8c8c>Сейчас: <#92bed8><value>'
+        - '<#8c8c8c>Сейчас: <#d48763><value>'
         - '<#e6fff3>ЛКМ −1 <#8c8c8c>— <#e6fff3>ПКМ +1'
         - '<#969696>Shift: шаг 5'
     rotation:
-      name: '<#92bed8><bold>Поворот'
+      name: '<#d48763><bold>Поворот'
       lore:
-        - '<#8c8c8c>Сейчас: <#92bed8><value>°'
+        - '<#8c8c8c>Сейчас: <#d48763><value>°'
         - '<#e6fff3>ЛКМ −90° <#8c8c8c>— <#e6fff3>ПКМ +90°'
     reset:
       name: '<#ff9f0f><bold>Сбросить настройку'
@@ -85,9 +85,9 @@ build-book:
 disable-building: false
 cant-build-message: |-
 
-  <#92bed8>🛠 <#c42323>Здесь нельзя разместить эту постройку.
+  <#d48763>🛠 <#c42323>Здесь нельзя разместить эту постройку.
   <#8c8c8c>   <#e6fff3>Проверьте право строительства на всей площадке.
-disabled-message: '<#92bed8>🛠 <#ff9f0f>Автопостройка в этом мире отключена.'
+disabled-message: '<#d48763>🛠 <#ff9f0f>Автопостройка в этом мире отключена.'
 display:
   border-particle-interval: 5
   border-particle: FLAME
@@ -101,7 +101,7 @@ display:
   max-per-10-min: 10000000
 start-message: |-
 
-  <#92bed8>🛠 <#e6fff3>Превью открыто.
+  <#d48763>🛠 <#e6fff3>Превью открыто.
   <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — продолжить
 confirm-time: 180
 construction:
@@ -131,7 +131,7 @@ construction:
   blocks-per-tick: 3
   play-sounds: true
   show-particles: false
-confirm-message: '<#92bed8>🛠 <#e6fff3>Проверьте площадку и нажмите <#92bed8>ПКМ по строителю<#e6fff3>.'
+confirm-message: '<#d48763>🛠 <#e6fff3>Проверьте площадку и нажмите <#d48763>ПКМ по строителю<#e6fff3>.'
 confirm-gui:
   title: '<dark_gray>Подтверждение постройки'
   confirm:
@@ -148,15 +148,15 @@ confirm-gui:
     lore:
       - '<#e6fff3>Закрыть подтверждение без изменений.'
     customModelData: 0
-start-build-message: '<#92bed8>🛠 <#2bba43>Строительство началось.'
-already-building-message: '<#92bed8>🛠 <#ff9f0f>Сначала завершите текущую постройку.'
+start-build-message: '<#d48763>🛠 <#2bba43>Строительство началось.'
+already-building-message: '<#d48763>🛠 <#ff9f0f>Сначала завершите текущую постройку.'
 building-gui:
   title: '<dark_gray>Строительство'
   progress:
     material: PAPER
-    display: '<#92bed8><bold>Ход строительства'
+    display: '<#d48763><bold>Ход строительства'
     lore:
-      - '<#e6fff3>Завершено: <#92bed8><progress>%'
+      - '<#e6fff3>Завершено: <#d48763><progress>%'
       - ''
       - '<#969696>Панель обновляется автоматически.'
   cancel:
@@ -184,8 +184,8 @@ building-gui:
       - '<#e6fff3>Поставить все оставшиеся блоки без ожидания.'
       - ''
       - '<#969696>Служебное действие для администрации.'
-inactivity-cancel-message: '<#92bed8>🛠 <#969696>Предпросмотр закрыт из-за неактивности.'
+inactivity-cancel-message: '<#d48763>🛠 <#969696>Предпросмотр закрыт из-за неактивности.'
 messages:
-  display-limit: '<#92bed8>🛠 <#ff9f0f>Показана часть чертежа: <#e6fff3><amount>/<max> блоков.'
-  display-limit-2: '<#92bed8>🛠 <#c42323>Этот чертёж слишком велик для безопасного предпросмотра.'
-cancel-build-message: '<#92bed8>🛠 <#969696>Постройка отменена.'
+  display-limit: '<#d48763>🛠 <#ff9f0f>Показана часть чертежа: <#e6fff3><amount>/<max> блоков.'
+  display-limit-2: '<#d48763>🛠 <#c42323>Этот чертёж слишком велик для безопасного предпросмотра.'
+cancel-build-message: '<#d48763>🛠 <#969696>Постройка отменена.'

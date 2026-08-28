@@ -400,7 +400,7 @@ class BuilderToolsDomainTest : FunSpec({
         bundled.contains("разрешена WorldGuard") shouldBe false
     }
 
-    test("bundled builder messages use the historical tools prefix without dot bullets") {
+    test("bundled builder messages use the construction copper identity without dot bullets") {
         val tools = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
             .bufferedReader()
             .use { it.readText() }
@@ -408,9 +408,11 @@ class BuilderToolsDomainTest : FunSpec({
             .bufferedReader()
             .use { it.readText() }
 
-        tools.lines().count { it.trim() == "prefix: \"<#92bed8>🛠 \"" } shouldBe 2
-        books.contains("<#92bed8>🛠 ") shouldBe true
+        tools.lines().count { it.trim() == "prefix: \"<#d48763>🛠 \"" } shouldBe 2
+        books.contains("<#d48763>🛠 ") shouldBe true
         listOf(tools, books).forEach { bundled ->
+            bundled.contains("#92bed8", ignoreCase = true) shouldBe false
+            bundled.contains("#d48763", ignoreCase = true) shouldBe true
             bundled.contains("◇") shouldBe false
             bundled.contains("•") shouldBe false
         }

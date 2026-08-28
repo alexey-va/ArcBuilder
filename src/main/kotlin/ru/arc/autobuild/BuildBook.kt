@@ -2,16 +2,16 @@ package ru.arc.autobuild
 
 import de.tr7zw.changeme.nbtapi.NBT
 import net.kyori.adventure.text.Component
-import net.kyori.adventure.text.format.NamedTextColor
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import ru.arc.ARC
+import ru.arc.buildertools.BuilderCurrencyPresentation
+import ru.arc.buildertools.BuilderMoney
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
 import ru.arc.util.TextUtil.strip
-import ru.arc.buildertools.BuilderMoney
 import java.util.UUID
 
 data class BuildBookTransform(
@@ -328,7 +328,7 @@ object BuildBookItems {
         val config = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
         item.editMeta { meta ->
             strip(
-                config.component("build-book.display-name", "<#92bed8><bold><name>") {
+                config.component("build-book.display-name", "<#d48763><bold><name>") {
                     tag("name", Component.text(compactTitle(data.title)))
                 },
             )?.let(meta::displayName)
@@ -355,9 +355,9 @@ object BuildBookItems {
                     tag(
                         "price",
                         data.issuePriceMinor?.let { priceMinor ->
-                            Component.text(BuilderMoney.decimal(priceMinor).toPlainString())
-                                .append(Component.space())
-                                .append(Component.text("💰", NamedTextColor.WHITE))
+                            BuilderCurrencyPresentation.amountWithCoin(
+                                Component.text(BuilderMoney.decimal(priceMinor).toPlainString()),
+                            )
                         } ?: Component.text("после проверки"),
                     )
                     tag("instance", Component.text(data.instanceId?.toString()?.take(8) ?: "после активации"))

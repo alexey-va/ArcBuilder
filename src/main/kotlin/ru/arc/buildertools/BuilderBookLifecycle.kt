@@ -1,7 +1,6 @@
 package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
-import net.kyori.adventure.text.format.NamedTextColor
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Material
@@ -1304,9 +1303,8 @@ internal class BuilderBookLifecycle(
 
     private fun formatMinor(amount: Long): String = String.format(Locale.US, "%,.2f", amount / 100.0)
 
-    private fun moneyLabel(formatted: String): Component = messages.literal(formatted)
-        .append(Component.space())
-        .append(Component.text("💰", NamedTextColor.WHITE))
+    private fun moneyLabel(formatted: String): Component =
+        BuilderCurrencyPresentation.amountWithCoin(messages.literal(formatted))
 
     private fun replaceOneHeldBook(player: Player, held: ItemStack, replacement: ItemStack) {
         if (held.amount == 1) {

@@ -1,7 +1,6 @@
 package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
-import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
@@ -251,9 +250,9 @@ internal class BuilderShopCoordinator(
 
     private fun priceLabel(formatted: String): Component {
         if (formatted == "—") return messages.literal(formatted)
-        return messages.literal(formatted.trim().removeSuffix("💰").trimEnd())
-            .append(Component.space())
-            .append(Component.text("💰", NamedTextColor.WHITE))
+        return BuilderCurrencyPresentation.amountWithCoin(
+            messages.literal(formatted.trim().removeSuffix(BuilderCurrencyPresentation.COIN_GLYPH).trimEnd()),
+        )
     }
 
     private fun send(player: Player, path: String, vararg values: Pair<String, Component>) {

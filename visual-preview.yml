@@ -2,6 +2,7 @@ schema: 1
 plugin: ArcBuilder
 minecraft-version: '1.21.11'
 minecraft-client-sha1: ba2df812c2d12e0219c489c4cd9a5e1f0760f5bd
+gallery-accent: '#d48763'
 
 resource-pack:
   url: https://storage.yandexcloud.net/ruscraftinresources/RusCraftingResource.zip
@@ -42,27 +43,27 @@ sources:
 
 placeholders:
   amount: '384'
-  balance: '842.50 💰'
+  balance: '842.50 <white>💰</white>'
   blocks: '1 248'
   building: 'Дом у северной гавани'
   cost: '64 камня, 32 дубовых доски'
   count: '1 248'
   creator: 'AlexeyBuilder'
   density: 'естественная'
-  full_price: '1 920.00 💰'
+  full_price: '1 920.00 <white>💰</white>'
   items: '96'
   kind: 'Вставка чертежа'
-  labor: '240.00 💰'
+  labor: '240.00 <white>💰</white>'
   material: 'Дубовые доски ×32'
-  materials: '1 680.00 💰'
+  materials: '1 680.00 <white>💰</white>'
   max: '2 000'
-  missing_price: '640.00 💰'
+  missing_price: '640.00 <white>💰</white>'
   name: 'Дом у северной гавани'
   noise: 'мягкий'
   offset_x: '-5'
   offset_y: '2'
   offset_z: '12'
-  price: '1 920.00 💰'
+  price: '1 920.00 <white>💰</white>'
   progress: '67'
   purchased: '48'
   radius: '6'
@@ -74,7 +75,7 @@ placeholders:
   skipped: '3'
   state: 'черновик'
   status: 'готово'
-  total: '1 920.00 💰'
+  total: '1 920.00 <white>💰</white>'
   types: '4'
   value: '-5'
   volume: '1 728'
@@ -136,14 +137,14 @@ surfaces:
       lore: autobuild:build-book.lore
       placeholders:
         state: Активная одноразовая книга
-        price: '1 920.00 💰'
+        price: '1 920.00 <white>💰</white>'
     - id: delivery-pending-book
       material: BOOK
       name: autobuild:build-book.display-name
       lore: autobuild:build-book.lore
       placeholders:
         state: Подтверждается реестром
-        price: '1 920.00 💰'
+        price: '1 920.00 <white>💰</white>'
 
   inventories:
     - id: book-editor-default

@@ -82,7 +82,7 @@ object BuildBookEditorGui {
 
     private fun overview(data: BuildBookData): GuiItem = item(
         Material.BOOK,
-        config.component("build-book.editor.overview.name", "<#92bed8><bold><name>") {
+        config.component("build-book.editor.overview.name", "<#d48763><bold><name>") {
             tag("name", Component.text(BuildBookItems.compactTitle(data.title)))
         },
         config.componentList("build-book.editor.overview.lore") {
