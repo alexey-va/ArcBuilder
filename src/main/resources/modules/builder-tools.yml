@@ -79,7 +79,7 @@ safety:
 
 locales:
   ru:
-    prefix: "<#d48763>🛠 "
+    prefix: "<white>🛠</white> "
     help:
       - "<prefix><#e6fff3>Инструменты строителя"
       - "<#8c8c8c>   <#d48763>/builder wand <#e6fff3>— выделить область"
@@ -633,7 +633,7 @@ locales:
       crown: "Крона"
       undo: "Отмена"
   en:
-    prefix: "<#d48763>🛠 "
+    prefix: "<white>🛠</white> "
     help:
       - "<prefix><white>Builder tools"
       - "<dark_gray>   <white>/builder wand <gray>— prepare the selector"

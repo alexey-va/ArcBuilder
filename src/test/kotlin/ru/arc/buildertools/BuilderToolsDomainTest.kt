@@ -400,7 +400,7 @@ class BuilderToolsDomainTest : FunSpec({
         bundled.contains("разрешена WorldGuard") shouldBe false
     }
 
-    test("bundled builder messages use the construction copper identity without dot bullets") {
+    test("bundled builder messages isolate the full-color builder mark and keep continuation indentation") {
         val tools = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
             .bufferedReader()
             .use { it.readText() }
@@ -408,8 +408,10 @@ class BuilderToolsDomainTest : FunSpec({
             .bufferedReader()
             .use { it.readText() }
 
-        tools.lines().count { it.trim() == "prefix: \"<#d48763>🛠 \"" } shouldBe 2
-        books.contains("<#d48763>🛠 ") shouldBe true
+        tools.lines().count { it.trim() == "prefix: \"<white>🛠</white> \"" } shouldBe 2
+        books.contains("<white>🛠</white> ") shouldBe true
+        tools.contains("<#8c8c8c>   <#d48763>/builder wand") shouldBe true
+        books.contains("<#8c8c8c>   ПКМ по блоку") shouldBe true
         listOf(tools, books).forEach { bundled ->
             bundled.contains("#92bed8", ignoreCase = true) shouldBe false
             bundled.contains("#d48763", ignoreCase = true) shouldBe true

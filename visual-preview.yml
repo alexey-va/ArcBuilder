@@ -84,10 +84,12 @@ placeholders:
   y: '85'
   z: '-506'
 
-glyph-fallbacks:
-  '🛠': '⛏'
-
 glyphs:
+  - character: '🛠'
+    path: '@ops/classic_survival/plugins/ItemsAdder/contents/arc/resourcepack/arc/textures/glyphs/builder_mark.png'
+    height: 7
+    ascent: 7
+    advance: 8
   - character: '💰'
     path: '@ops/classic_survival/plugins/ItemsAdder/contents/arc/resourcepack/arc/textures/glyphs/coin.png'
     height: 9

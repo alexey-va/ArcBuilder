@@ -17,10 +17,10 @@ build-book:
     - '<#d48763>ПКМ по блоку <#8c8c8c>— перенести'
     - '<#d48763>ПКМ в воздух <#8c8c8c>— продолжить'
     - '<#d48763>Shift+ПКМ <#8c8c8c>— положение'
-  received: '<#d48763>🛠 <#2bba43>Книга строительства создана: <#e6fff3><building>'
+  received: '<white>🛠</white> <#2bba43>Книга строительства создана: <#e6fff3><building>'
   draft-preview-message: |-
 
-    <#d48763>🛠 <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
+    <white>🛠</white> <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
     <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — смета
   player-copy:
     max-offset: 16
@@ -29,8 +29,8 @@ build-book:
     default-name: 'Моя постройка'
   editor:
     title: '<dark_gray>Настройка книги'
-    invalid: '<#d48763>🛠 <#c42323>Книга повреждена или её чертёж недоступен.'
-    no-permission: '<#d48763>🛠 <#c42323>У вас нет доступа к настройке этой книги.'
+    invalid: '<white>🛠</white> <#c42323>Книга повреждена или её чертёж недоступен.'
+    no-permission: '<white>🛠</white> <#c42323>У вас нет доступа к настройке этой книги.'
     preview-inactive:
       name: '<#ff9f0f><bold>Предпросмотр завершён'
       lore:
@@ -85,9 +85,9 @@ build-book:
 disable-building: false
 cant-build-message: |-
 
-  <#d48763>🛠 <#c42323>Здесь нельзя разместить эту постройку.
+  <white>🛠</white> <#c42323>Здесь нельзя разместить эту постройку.
   <#8c8c8c>   <#e6fff3>Проверьте право строительства на всей площадке.
-disabled-message: '<#d48763>🛠 <#ff9f0f>Автопостройка в этом мире отключена.'
+disabled-message: '<white>🛠</white> <#ff9f0f>Автопостройка в этом мире отключена.'
 display:
   border-particle-interval: 5
   border-particle: FLAME
@@ -101,7 +101,7 @@ display:
   max-per-10-min: 10000000
 start-message: |-
 
-  <#d48763>🛠 <#e6fff3>Превью открыто.
+  <white>🛠</white> <#e6fff3>Превью открыто.
   <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — продолжить
 confirm-time: 180
 construction:
@@ -131,7 +131,7 @@ construction:
   blocks-per-tick: 3
   play-sounds: true
   show-particles: false
-confirm-message: '<#d48763>🛠 <#e6fff3>Проверьте площадку и нажмите <#d48763>ПКМ по строителю<#e6fff3>.'
+confirm-message: '<white>🛠</white> <#e6fff3>Проверьте площадку и нажмите <#d48763>ПКМ по строителю<#e6fff3>.'
 confirm-gui:
   title: '<dark_gray>Подтверждение постройки'
   confirm:
@@ -148,8 +148,8 @@ confirm-gui:
     lore:
       - '<#e6fff3>Закрыть подтверждение без изменений.'
     customModelData: 0
-start-build-message: '<#d48763>🛠 <#2bba43>Строительство началось.'
-already-building-message: '<#d48763>🛠 <#ff9f0f>Сначала завершите текущую постройку.'
+start-build-message: '<white>🛠</white> <#2bba43>Строительство началось.'
+already-building-message: '<white>🛠</white> <#ff9f0f>Сначала завершите текущую постройку.'
 building-gui:
   title: '<dark_gray>Строительство'
   progress:
@@ -184,8 +184,8 @@ building-gui:
       - '<#e6fff3>Поставить все оставшиеся блоки без ожидания.'
       - ''
       - '<#969696>Служебное действие для администрации.'
-inactivity-cancel-message: '<#d48763>🛠 <#969696>Предпросмотр закрыт из-за неактивности.'
+inactivity-cancel-message: '<white>🛠</white> <#969696>Предпросмотр закрыт из-за неактивности.'
 messages:
-  display-limit: '<#d48763>🛠 <#ff9f0f>Показана часть чертежа: <#e6fff3><amount>/<max> блоков.'
-  display-limit-2: '<#d48763>🛠 <#c42323>Этот чертёж слишком велик для безопасного предпросмотра.'
-cancel-build-message: '<#d48763>🛠 <#969696>Постройка отменена.'
+  display-limit: '<white>🛠</white> <#ff9f0f>Показана часть чертежа: <#e6fff3><amount>/<max> блоков.'
+  display-limit-2: '<white>🛠</white> <#c42323>Этот чертёж слишком велик для безопасного предпросмотра.'
+cancel-build-message: '<white>🛠</white> <#969696>Постройка отменена.'
