@@ -12,6 +12,7 @@ import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.entity.Player
 import org.bukkit.event.block.Action
+import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
@@ -19,6 +20,11 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.opentest4j.TestAbortedException
 import ru.arc.autobuild.ConstructionSite
+import ru.arc.autobuild.BuildBookCodec
+import ru.arc.autobuild.PlayerBuildBookStore
+import ru.arc.autobuild.PlayerBuildBookDigestInspection
+import ru.arc.autobuild.PlayerBuildBookTemplate
+import ru.arc.autobuild.PreparedPlayerBuildBookTemplate
 import ru.arc.config.ConfigManager
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -185,6 +191,40 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.renderer.plans.containsKey(owner.uniqueId) shouldBe false
         }
     }
+
+    test("book draft after anchored paste journeys releases its player lease") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("DraftBuilder", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.OAK_PLANKS
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
+            player.performCommand("builder copy") shouldBe true
+
+            listOf(10.5, 14.5, 18.5).forEach { x ->
+                player.teleport(Location(world, x, 64.0, 3.5, 0f, 0f))
+                player.performCommand("builder paste") shouldBe true
+                player.performCommand("builder confirm") shouldBe true
+                journey.awaitSettled {
+                    world.getBlockAt(x.toInt(), 64, 0).type == Material.STONE &&
+                        world.getBlockAt(x.toInt() + 1, 64, 0).type == Material.OAK_PLANKS
+                }
+            }
+
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.BOOK))
+            player.performCommand("builder book draft Original") shouldBe true
+            journey.await("anchored draft delivery and player lease release") {
+                if (BuildBookCodec.read(player.inventory.itemInMainHand)?.draft != true) return@await false
+                val commandEvent = PlayerCommandPreprocessEvent(player, "/builder status")
+                journey.paper.callEvent(commandEvent)
+                !commandEvent.isCancelled && journey.activeLeases() == 0
+            }
+        }
+    }
 })
 
 private class ArcBuilderJourney private constructor(
@@ -207,6 +247,8 @@ private class ArcBuilderJourney private constructor(
             "arc.builder.tools.paste",
             "arc.builder.tools.deconstruct",
             "arc.builder.tools.crown",
+            "arc.build.book.use",
+            "arc.build.book.create",
         ).forEach { permission -> player.addAttachment(plugin, permission, true) }
         player.recalculatePermissions()
     }
@@ -260,6 +302,8 @@ private class ArcBuilderJourney private constructor(
         }
     }
 
+    fun activeLeases(): Int = runtime.runtimeHealthContribution().activeLeases
+
     fun await(description: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos()
         while (System.nanoTime() < deadline) {
@@ -298,6 +342,7 @@ private class ArcBuilderJourney private constructor(
                     config = BuilderToolsConfig(config).validated(),
                     displayRenderer = renderer,
                     blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
+                    draftStorage = InMemoryBuilderDraftStorage(),
                 )
                 checkNotNull(plugin.getCommand("builder")).apply {
                     setExecutor(runtime)
@@ -317,6 +362,37 @@ private class ArcBuilderJourney private constructor(
             }
         }
     }
+}
+
+private class InMemoryBuilderDraftStorage : BuilderDraftStorage {
+    private val templates = mutableMapOf<String, PlayerBuildBookTemplate>()
+
+    override fun prepare(creatorId: UUID, source: BuilderClipboard): PreparedPlayerBuildBookTemplate =
+        PreparedPlayerBuildBookTemplate(
+            creatorId = creatorId,
+            fileName = PlayerBuildBookStore.fileName(creatorId, source),
+            contentSha256 = PlayerBuildBookStore.contentSha256(source),
+            blockCount = source.blocks.size,
+            writeSchematic = {},
+        )
+
+    override fun persist(prepared: PreparedPlayerBuildBookTemplate): PlayerBuildBookTemplate =
+        PlayerBuildBookTemplate(
+            buildingId = prepared.fileName,
+            contentSha256 = prepared.contentSha256,
+            schematicSha256 = "b".repeat(64),
+            blockCount = prepared.blockCount,
+        ).also { templates[it.buildingId] = it }
+
+    override fun inspectSchematic(buildingId: String): PlayerBuildBookDigestInspection =
+        templates[buildingId]?.let { PlayerBuildBookDigestInspection.Ready(it.schematicSha256) }
+            ?: PlayerBuildBookDigestInspection.Missing
+
+    override fun inspectContent(buildingId: String): PlayerBuildBookDigestInspection =
+        templates[buildingId]?.let { PlayerBuildBookDigestInspection.Ready(it.contentSha256) }
+            ?: PlayerBuildBookDigestInspection.Missing
+
+    override fun register(template: PlayerBuildBookTemplate) = Unit
 }
 
 private data class RecordedSelection(

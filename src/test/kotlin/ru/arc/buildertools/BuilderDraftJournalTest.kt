@@ -45,6 +45,20 @@ class BuilderDraftJournalTest : FunSpec({
         }
     }
 
+    test("draft record accepts bounded player anchors as part of its content address") {
+        val anchored = prepared().copy(
+            buildingId = "player-${playerId.toString().replace("-", "")}-o-12_4_1024-$contentSha256.schem",
+        )
+
+        anchored.validated() shouldBe anchored
+        shouldThrow<IllegalArgumentException> {
+            anchored.copy(buildingId = anchored.buildingId.replace(contentSha256, "c".repeat(64))).validated()
+        }
+        shouldThrow<IllegalArgumentException> {
+            anchored.copy(buildingId = anchored.buildingId.replace("o-12_4_1024", "o-12_4_1025")).validated()
+        }
+    }
+
     test("recovery distinguishes incomplete persistence, ready delivery and duplicates") {
         val prepared = prepared()
         val ready = prepared.ready(schematicSha256, prepared.updatedAtMillis + 1)

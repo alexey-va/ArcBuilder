@@ -140,9 +140,9 @@ class BuilderToolsDomainTest : FunSpec({
         val plain = PlainTextComponentSerializer.plainText()
 
         plain.serialize(messages.render("errors.player-only", "ru-RU")) shouldBe
-            "◇ Команда доступна только игрокам."
+            "🛠 Команда доступна только игрокам."
         plain.serialize(messages.render("errors.player-only", "en-US")) shouldBe
-            "◇ This command is available only to players."
+            "🛠 This command is available only to players."
     }
 
     test("pending plans bind their confirmation game mode atomically") {
@@ -395,6 +395,16 @@ class BuilderToolsDomainTest : FunSpec({
         bundled.contains("require-worldguard") shouldBe false
         bundled.contains("allowed by WorldGuard") shouldBe false
         bundled.contains("разрешена WorldGuard") shouldBe false
+    }
+
+    test("bundled builder messages use the historical tools prefix without dot bullets") {
+        val bundled = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
+            .bufferedReader()
+            .use { it.readText() }
+
+        bundled.lines().count { it.trim() == "prefix: \"<#92bed8>🛠 \"" } shouldBe 2
+        bundled.contains("◇") shouldBe false
+        bundled.contains("•") shouldBe false
     }
 
     test("permission policy accepts canonical feature and build-book entry nodes") {

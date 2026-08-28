@@ -74,6 +74,7 @@ internal class BuilderBookLifecycle(
     private val operationLocks: BuilderOperationLocks,
     private val host: BuilderBookLifecycleHost,
     draftJournal: BuilderDraftJournal,
+    draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
 ) : AutoCloseable {
     private data class PendingMint(
         val kind: BuilderBookMintKind,
@@ -95,6 +96,7 @@ internal class BuilderBookLifecycle(
         operationLocks = operationLocks,
         host = host,
         journal = draftJournal,
+        storage = draftStorage,
     )
     private val registry: BuilderBookRegistry? = if (config.bookContractsEnabled) {
         runCatching {

@@ -59,6 +59,7 @@ internal class BuilderToolsRuntime(
         config.previewMaxPlanParticles,
     ),
     blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
+    draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
@@ -299,6 +300,7 @@ internal class BuilderToolsRuntime(
                 storageExecutor = storageExecutor,
                 operationLocks = operationLocks,
                 draftJournal = BuilderDraftJournal(plugin.dataPath, BuilderPlan.ABSOLUTE_MAX_CHANGES),
+                draftStorage = draftStorage,
                 host = object : BuilderBookLifecycleHost {
                     override fun ensureOperationalContext(player: Player) =
                         this@BuilderToolsRuntime.ensureOperationalContext(player)
@@ -1455,6 +1457,7 @@ internal class BuilderToolsRuntime(
                     reservationReleaseBacklog = bookHealth.reservationReleaseBacklog,
                     activeOperations = operationLocks.activeOperationCount,
                     bookLockedPlayers = operationLocks.bookLockedPlayerCount,
+                    recoveryLockedPlayers = operationLocks.recoveryLockedPlayerCount,
                     landsRequired = config.requireLands,
                     landsAvailable = HookRegistry.landsHook != null,
                     coreProtectRequired = config.requireCoreProtect,

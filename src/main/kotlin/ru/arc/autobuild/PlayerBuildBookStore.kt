@@ -44,6 +44,22 @@ internal data class PreparedPlayerBuildBookTemplate(
     val writeSchematic: (OutputStream) -> Unit,
 )
 
+internal object PlayerBuildBookAddress {
+    private val SHA256 = Regex("[0-9a-f]{64}")
+    private val ANCHOR = Regex("o(-?\\d{1,4})_(-?\\d{1,4})_(-?\\d{1,4})")
+
+    fun matches(creatorId: UUID, buildingId: String, contentSha256: String): Boolean {
+        if (!contentSha256.matches(SHA256)) return false
+        val owner = creatorId.toString().replace("-", "")
+        if (buildingId == "player-$owner-$contentSha256.schem") return true
+        val prefix = "player-$owner-"
+        val suffix = "-$contentSha256.schem"
+        if (!buildingId.startsWith(prefix) || !buildingId.endsWith(suffix)) return false
+        val anchor = ANCHOR.matchEntire(buildingId.removePrefix(prefix).removeSuffix(suffix)) ?: return false
+        return anchor.groupValues.drop(1).all { value -> value.toIntOrNull() in -1_024..1_024 }
+    }
+}
+
 object PlayerBuildBookStore {
     /**
      * Paper-primary-thread preparation. All Bukkit block-data conversion is
@@ -82,10 +98,7 @@ object PlayerBuildBookStore {
         require(prepared.contentSha256.matches(Regex("[0-9a-f]{64}"))) {
             "Player build-book content digest is invalid"
         }
-        require(prepared.fileName.startsWith("player-${prepared.creatorId.toString().replace("-", "")}-")) {
-            "Player build-book filename owner is invalid"
-        }
-        require(prepared.fileName.endsWith("-${prepared.contentSha256}.schem")) {
+        require(PlayerBuildBookAddress.matches(prepared.creatorId, prepared.fileName, prepared.contentSha256)) {
             "Player build-book filename does not match its content address"
         }
         val root = resolvedSchematicsRoot()
@@ -112,9 +125,6 @@ object PlayerBuildBookStore {
         val origin = "o${checked.originDx}_${checked.originDy}_${checked.originDz}"
         return "player-${creatorId.toString().replace("-", "")}-$origin-${contentSha256(checked)}.schem"
     }
-
-    private fun fileName(creatorId: UUID, contentSha256: String): String =
-        "player-${creatorId.toString().replace("-", "")}-o0_0_0-$contentSha256.schem"
 
     internal fun contentSha256(clipboard: BuilderClipboard): String {
         val digest = MessageDigest.getInstance("SHA-256")

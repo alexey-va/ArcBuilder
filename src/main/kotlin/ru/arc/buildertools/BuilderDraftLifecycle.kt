@@ -61,6 +61,22 @@ internal data class BuilderDraftInventoryEvidence(
     }
 }
 
+internal interface BuilderDraftStorage {
+    fun prepare(creatorId: UUID, source: BuilderClipboard): PreparedPlayerBuildBookTemplate
+    fun persist(prepared: PreparedPlayerBuildBookTemplate): PlayerBuildBookTemplate
+    fun inspectSchematic(buildingId: String): PlayerBuildBookDigestInspection
+    fun inspectContent(buildingId: String): PlayerBuildBookDigestInspection
+    fun register(template: PlayerBuildBookTemplate)
+}
+
+internal object PlayerBuildBookDraftStorage : BuilderDraftStorage {
+    override fun prepare(creatorId: UUID, source: BuilderClipboard) = PlayerBuildBookStore.prepare(creatorId, source)
+    override fun persist(prepared: PreparedPlayerBuildBookTemplate) = PlayerBuildBookStore.persist(prepared)
+    override fun inspectSchematic(buildingId: String) = PlayerBuildBookStore.inspectSchematic(buildingId)
+    override fun inspectContent(buildingId: String) = PlayerBuildBookStore.inspectContent(buildingId)
+    override fun register(template: PlayerBuildBookTemplate) = PlayerBuildBookStore.register(template)
+}
+
 /**
  * Durable free-draft issuance. The journal is committed before the schematic is
  * published and acknowledged only after the exact draft is in the inventory.
@@ -73,6 +89,7 @@ internal class BuilderDraftLifecycle(
     private val operationLocks: BuilderOperationLocks,
     private val host: BuilderBookLifecycleHost,
     private val journal: BuilderDraftJournal,
+    private val storage: BuilderDraftStorage,
 ) : AutoCloseable {
     private sealed interface PersistenceOutcome {
         data class Ready(val record: BuilderDraftRecord) : PersistenceOutcome
@@ -142,12 +159,11 @@ internal class BuilderDraftLifecycle(
         val title = rawTitle.joinToString(" ").trim().ifEmpty { BuildBookSettings.defaultTitle }
         if (title.length > 48 || title.any(Char::isISOControl)) fail("book.invalid-name")
         val prepared = try {
-            PlayerBuildBookStore.prepare(player.uniqueId, clipboard)
+            storage.prepare(player.uniqueId, clipboard)
         } catch (failure: Throwable) {
             error("Could not prepare player build book for ${player.name}: type=${BuilderToolsFailureType.of(failure)}")
             fail("book.failed")
         }
-        if (!operationLocks.tryBookLock(player.uniqueId)) fail("errors.busy")
         val expectedBook = held.clone()
         val now = System.currentTimeMillis()
         val record = BuilderDraftRecord(
@@ -163,65 +179,71 @@ internal class BuilderDraftLifecycle(
             createdAtMillis = now,
             updatedAtMillis = now,
         ).validated(config.maxClipboardBlocks)
-        send(player, "book.draft-saving")
-        writeAsync(
-            action = { persist(record, prepared) },
-            callback = { outcome, failure ->
-                when {
-                    failure != null || outcome == null -> {
-                        operationLocks.unlockBook(player.uniqueId)
-                        error(
-                            "Could not start durable player build-book draft for ${player.name}: " +
-                                "type=${BuilderToolsFailureType.of(failure)}",
-                        )
-                        if (player.isOnline) send(player, "book.failed")
-                    }
-                    outcome is PersistenceOutcome.CleanFailure -> {
-                        operationLocks.unlockBook(player.uniqueId)
-                        if (player.isOnline) {
-                            send(
-                                player,
-                                if (outcome.failure is PlayerBuildBookLimitException) "book.limit" else "book.failed",
-                            )
-                        }
-                    }
-                    outcome is PersistenceOutcome.Ready -> {
-                        pending[player.uniqueId] = outcome.record
-                        if (player.isOnline) {
-                            recover(
-                                player,
-                                allowDelivery = true,
-                                announce = true,
-                                expectedBook = expectedBook,
-                                createdNow = true,
-                            )
-                        } else {
+        if (!operationLocks.tryBookLock(player.uniqueId)) fail("errors.busy")
+        try {
+            send(player, "book.draft-saving")
+            writeAsync(
+                action = { persist(record, prepared) },
+                callback = { outcome, failure ->
+                    when {
+                        failure != null || outcome == null -> {
                             operationLocks.unlockBook(player.uniqueId)
-                        }
-                    }
-                    outcome is PersistenceOutcome.Recoverable -> {
-                        pending[player.uniqueId] = outcome.record
-                        warn(
-                            "Builder-draft persistence requires recovery: operation={} player={} type={}",
-                            outcome.record.operationId,
-                            outcome.record.playerId,
-                            BuilderToolsFailureType.of(outcome.failure),
-                        )
-                        if (player.isOnline) {
-                            recover(
-                                player,
-                                allowDelivery = true,
-                                announce = true,
-                                expectedBook = expectedBook,
-                                createdNow = true,
+                            error(
+                                "Could not start durable player build-book draft for ${player.name}: " +
+                                    "type=${BuilderToolsFailureType.of(failure)}",
                             )
-                        } else {
+                            if (player.isOnline) send(player, "book.failed")
+                        }
+                        outcome is PersistenceOutcome.CleanFailure -> {
                             operationLocks.unlockBook(player.uniqueId)
+                            if (player.isOnline) {
+                                send(
+                                    player,
+                                    if (outcome.failure is PlayerBuildBookLimitException) "book.limit" else "book.failed",
+                                )
+                            }
+                        }
+                        outcome is PersistenceOutcome.Ready -> {
+                            pending[player.uniqueId] = outcome.record
+                            if (player.isOnline) {
+                                recover(
+                                    player,
+                                    allowDelivery = true,
+                                    announce = true,
+                                    expectedBook = expectedBook,
+                                    createdNow = true,
+                                )
+                            } else {
+                                operationLocks.unlockBook(player.uniqueId)
+                            }
+                        }
+                        outcome is PersistenceOutcome.Recoverable -> {
+                            pending[player.uniqueId] = outcome.record
+                            warn(
+                                "Builder-draft persistence requires recovery: operation={} player={} type={}",
+                                outcome.record.operationId,
+                                outcome.record.playerId,
+                                BuilderToolsFailureType.of(outcome.failure),
+                            )
+                            if (player.isOnline) {
+                                recover(
+                                    player,
+                                    allowDelivery = true,
+                                    announce = true,
+                                    expectedBook = expectedBook,
+                                    createdNow = true,
+                                )
+                            } else {
+                                operationLocks.unlockBook(player.uniqueId)
+                            }
                         }
                     }
-                }
-            },
-        )
+                },
+            )
+        } catch (failure: Throwable) {
+            operationLocks.unlockBook(player.uniqueId)
+            throw failure
+        }
     }
 
     fun onPlayerAvailable(player: Player) {
@@ -252,7 +274,7 @@ internal class BuilderDraftLifecycle(
     ): PersistenceOutcome {
         val durable = journal.commit(initial)
         return try {
-            val template = PlayerBuildBookStore.persist(prepared)
+            val template = storage.persist(prepared)
             PersistenceOutcome.Ready(
                 journal.transition(
                     durable,
@@ -260,7 +282,7 @@ internal class BuilderDraftLifecycle(
                 ),
             )
         } catch (failure: Throwable) {
-            when (val inspection = PlayerBuildBookStore.inspectSchematic(durable.buildingId)) {
+            when (val inspection = storage.inspectSchematic(durable.buildingId)) {
                 PlayerBuildBookDigestInspection.Missing -> {
                     if (runCatching { journal.acknowledgeConfirmed(durable.operationId) }.getOrDefault(false)) {
                         PersistenceOutcome.CleanFailure(failure)
@@ -308,7 +330,7 @@ internal class BuilderDraftLifecycle(
             return
         }
         writeAsync(
-            action = { PlayerBuildBookStore.inspectSchematic(record.buildingId) },
+            action = { storage.inspectSchematic(record.buildingId) },
             callback = recovery@{ inspection, failure ->
                 if (!player.isOnline) {
                     finishRecovery(playerId)
@@ -330,7 +352,7 @@ internal class BuilderDraftLifecycle(
                 }
                 val actualSha256 = (inspection as? PlayerBuildBookDigestInspection.Ready)?.sha256
                 if (actualSha256 != null) {
-                    when (val content = PlayerBuildBookStore.inspectContent(record.buildingId)) {
+                    when (val content = storage.inspectContent(record.buildingId)) {
                         is PlayerBuildBookDigestInspection.Ready -> if (content.sha256 != record.contentSha256) {
                             manualReview(player, record)
                             return@recovery
@@ -475,7 +497,7 @@ internal class BuilderDraftLifecycle(
         }
         try {
             replaceOneHeldBook(player, held, output)
-            runCatching { PlayerBuildBookStore.register(template(record)) }
+            runCatching { storage.register(template(record)) }
                 .onFailure { failure ->
                     warn(
                         "Builder-draft cache registration failed but lazy file lookup remains available: " +

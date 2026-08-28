@@ -37,11 +37,12 @@ class BuilderToolsRuntimeHealthTest : FunSpec({
                 reservationReleaseBacklog = 6,
                 activeOperations = 1,
                 bookLockedPlayers = 4,
+                recoveryLockedPlayers = 2,
             ),
         )
         failed.state shouldBe RuntimeHealthState.DOWN
         failed.recoveryBacklog shouldBe 11
-        failed.activeLeases shouldBe 5
+        failed.activeLeases shouldBe 7
     }
 
     test("book registry failure degrades tools without hiding the dependency") {
@@ -111,6 +112,7 @@ private fun healthyInputs() = BuilderToolsRuntimeHealthInputs(
     reservationReleaseBacklog = 0,
     activeOperations = 0,
     bookLockedPlayers = 0,
+    recoveryLockedPlayers = 0,
     landsRequired = true,
     landsAvailable = true,
     coreProtectRequired = true,

@@ -159,6 +159,7 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
 
     val activeOperationCount: Int get() = activeOperations.size
     val bookLockedPlayerCount: Int get() = bookLockedPlayers.size
+    val recoveryLockedPlayerCount: Int get() = recoveryLockedPlayers.size
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onInventoryClick(event: InventoryClickEvent) {

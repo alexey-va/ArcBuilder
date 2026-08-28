@@ -3,6 +3,7 @@ package ru.arc.buildertools
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import ru.arc.persistence.DurableRecordJournal
+import ru.arc.autobuild.PlayerBuildBookAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.UUID
@@ -36,9 +37,9 @@ internal data class BuilderDraftRecord(
             "Builder-draft title is invalid"
         }
         require(contentSha256.matches(SHA256)) { "Builder-draft content digest is invalid" }
-        require(
-            buildingId == "player-${playerId.toString().replace("-", "")}-$contentSha256.schem",
-        ) { "Builder-draft building id does not match its content address" }
+        require(PlayerBuildBookAddress.matches(playerId, buildingId, contentSha256)) {
+            "Builder-draft building id does not match its content address"
+        }
         require(blockCount in 1..maxBlocks) { "Builder-draft block count is invalid" }
         require(createdAtMillis > 0L && updatedAtMillis >= createdAtMillis) {
             "Builder-draft timestamps are invalid"
