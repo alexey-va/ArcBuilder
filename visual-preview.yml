@@ -31,6 +31,9 @@ sources:
     include:
       - build-book.display-name
       - build-book.lore
+      - build-book.footer
+      - build-book.states.*
+      - build-book.price.*
       - build-book.player-materials.*
       - build-book.received
       - build-book.draft-preview-message
@@ -124,6 +127,15 @@ surfaces:
       bossbar-progress: 1.0
       placeholders:
         name: Дом у северной гавани
+    - id: book-plan-ready
+      title: builder:book.plan-ready.title
+      subtitle: builder:book.plan-ready.subtitle
+      actionbar: builder:book.preview.actionbar
+      bossbar: builder:book.preview.bossbar-active
+      bossbar-color: green
+      bossbar-progress: 1.0
+      placeholders:
+        name: Дом у северной гавани
 
   items:
     - id: selector-wand
@@ -141,6 +153,7 @@ surfaces:
       lore:
         - autobuild:build-book.lore
         - autobuild:build-book.player-materials.draft
+        - autobuild:build-book.footer
       placeholders:
         state: Бесплатный черновик
         price: после проверки
@@ -155,6 +168,7 @@ surfaces:
           placeholders: {amount: '32', material: 'Дубовые доски'}
         - ref: autobuild:build-book.player-materials.row
           placeholders: {amount: '16', material: 'Стекло'}
+        - autobuild:build-book.footer
       placeholders:
         state: Активная одноразовая книга
         price: '1 920.00 <white>💰</white>'
@@ -165,6 +179,7 @@ surfaces:
       lore:
         - autobuild:build-book.lore
         - autobuild:build-book.player-materials.included
+        - autobuild:build-book.footer
       placeholders:
         state: Активная одноразовая книга
         price: '1 920.00 <white>💰</white>'
@@ -179,9 +194,24 @@ surfaces:
           placeholders: {amount: '32', material: 'Дубовые доски'}
         - ref: autobuild:build-book.player-materials.row
           placeholders: {amount: '16', material: 'Стекло'}
+        - autobuild:build-book.footer
       placeholders:
         state: Подтверждается реестром
         price: '1 920.00 <white>💰</white>'
+    - id: starter-build-book
+      material: BOOK
+      itemsadder: arc:builder_book_active
+      name: autobuild:build-book.display-name
+      lore:
+        - autobuild:build-book.lore
+        - autobuild:build-book.player-materials.included
+        - autobuild:build-book.footer
+      placeholders:
+        name: Стартовый дом
+        state: Готова к строительству
+        price: не копируется
+        creator: RusCrafting
+        blocks: '1 248'
 
   inventories:
     - id: book-editor-default
@@ -224,6 +254,11 @@ surfaces:
           material: REPEATER
           name: autobuild:build-book.editor.reset.name
           lore: autobuild:build-book.editor.reset.lore
+        - slot: 25
+          material: WRITABLE_BOOK
+          name: autobuild:build-book.editor.copy.name
+          lore: autobuild:build-book.editor.copy.lore
+          placeholders: {price: '1 920.00 <white>💰</white>'}
     - id: book-editor-preview-inactive
       extends: book-editor-default
       items:

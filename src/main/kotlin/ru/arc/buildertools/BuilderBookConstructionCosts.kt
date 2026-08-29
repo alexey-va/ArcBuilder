@@ -37,11 +37,12 @@ internal object BuilderBookConstructionCosts {
         data: BuildBookData,
         gameMode: GameMode,
         placements: List<BuilderBookPlannedChange>,
+        systemMaterialsIncluded: Boolean = false,
     ): BuilderBookConstructionDefinition {
         val exactBook = book.clone().also { it.amount = 1 }
         val playerSuppliedTypes = if (!BuilderGameModePolicy.usesInventory(gameMode)) {
             emptySet()
-        } else if (!data.playerCreated) {
+        } else if (!data.playerCreated && !systemMaterialsIncluded) {
             null
         } else {
             data.playerMaterials.mapTo(mutableSetOf()) { requirement ->

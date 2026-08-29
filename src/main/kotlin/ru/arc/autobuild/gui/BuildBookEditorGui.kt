@@ -23,6 +23,9 @@ import ru.arc.autobuild.BuildBookSettings
 import ru.arc.autobuild.BuildBookTransform
 import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.PreviewTransformUpdateResult
+import ru.arc.buildertools.BuilderBookCopyPolicy
+import ru.arc.buildertools.BuilderCurrencyPresentation
+import ru.arc.buildertools.BuilderMoney
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
 import ru.arc.util.TextUtil
@@ -30,7 +33,7 @@ import ru.arc.util.TextUtil
 object BuildBookEditorGui {
     private val config: Config get() = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
 
-    fun open(player: Player) {
+    fun open(player: Player, onCopy: ((Player) -> Unit)? = null) {
         if (!player.hasPermission("arcbuild.book.edit")) {
             player.sendMessage(text("build-book.editor.no-permission"))
             return
@@ -40,10 +43,10 @@ object BuildBookEditorGui {
             player.sendMessage(text("build-book.editor.invalid"))
             return
         }
-        create(player, data).show(player)
+        create(player, data, onCopy).show(player)
     }
 
-    private fun create(player: Player, data: BuildBookData): ChestGui {
+    private fun create(player: Player, data: BuildBookData, onCopy: ((Player) -> Unit)?): ChestGui {
         val gui = ChestGui(
             3,
             TextHolder.deserialize(TextUtil.toLegacy(config.string("build-book.editor.title"))),
@@ -61,17 +64,20 @@ object BuildBookEditorGui {
             Slot.fromXY(0, 0),
             StaticPane(9, 3).apply {
                 addItem(overview(data), 4, 0)
-                addItem(axisItem("axis-x", Material.REDSTONE_TORCH, data.transform.offsetX, feedback) { click ->
+                addItem(axisItem("axis-x", Material.REDSTONE_TORCH, data.transform.offsetX, feedback, onCopy) { click ->
                     data.transform.offset(dx = click.delta())
                 }, 2, 1)
-                addItem(axisItem("axis-y", Material.SCAFFOLDING, data.transform.offsetY, feedback) { click ->
+                addItem(axisItem("axis-y", Material.SCAFFOLDING, data.transform.offsetY, feedback, onCopy) { click ->
                     data.transform.offset(dy = click.delta())
                 }, 4, 1)
-                addItem(axisItem("axis-z", Material.RECOVERY_COMPASS, data.transform.offsetZ, feedback) { click ->
+                addItem(axisItem("axis-z", Material.RECOVERY_COMPASS, data.transform.offsetZ, feedback, onCopy) { click ->
                     data.transform.offset(dz = click.delta())
                 }, 6, 1)
-                addItem(rotationItem(data, feedback), 3, 2)
-                addItem(actionItem("reset", Material.REPEATER, feedback) { BuildBookTransform() }, 5, 2)
+                addItem(rotationItem(data, feedback, onCopy), 3, 2)
+                addItem(actionItem("reset", Material.REPEATER, feedback, onCopy) { BuildBookTransform() }, 5, 2)
+                if (onCopy != null && BuilderBookCopyPolicy.canRequest(player.uniqueId, data)) {
+                    addItem(copyItem(data, onCopy), 7, 2)
+                }
             },
         )
         gui.setOnTopClick { it.isCancelled = true }
@@ -99,16 +105,18 @@ object BuildBookEditorGui {
         material: Material,
         value: Int,
         feedback: BuildBookEditorFeedbackController,
+        onCopy: ((Player) -> Unit)?,
         change: (InventoryClickEvent) -> BuildBookTransform,
     ): GuiItem = item(
         material,
         text("build-book.editor.$path.name"),
         config.componentList("build-book.editor.$path.lore") { tag("value", Component.text(value)) },
-    ) { event, source -> applyChange(event, source, feedback, change(event)) }
+    ) { event, source -> applyChange(event, source, feedback, onCopy, change(event)) }
 
     private fun rotationItem(
         data: BuildBookData,
         feedback: BuildBookEditorFeedbackController,
+        onCopy: ((Player) -> Unit)?,
     ): GuiItem = item(
         Material.CLOCK,
         text("build-book.editor.rotation.name"),
@@ -117,24 +125,43 @@ object BuildBookEditorGui {
         },
     ) { event, source ->
         val delta = if (event.isRightClick) 90 else -90
-        applyChange(event, source, feedback, data.transform.rotate(delta))
+        applyChange(event, source, feedback, onCopy, data.transform.rotate(delta))
     }
 
     private fun actionItem(
         path: String,
         material: Material,
         feedback: BuildBookEditorFeedbackController,
+        onCopy: ((Player) -> Unit)?,
         change: () -> BuildBookTransform?,
     ): GuiItem = item(
         material,
         text("build-book.editor.$path.name"),
         config.componentList("build-book.editor.$path.lore"),
-    ) { event, source -> change()?.let { applyChange(event, source, feedback, it) } }
+    ) { event, source -> change()?.let { applyChange(event, source, feedback, onCopy, it) } }
+
+    private fun copyItem(data: BuildBookData, onCopy: (Player) -> Unit): GuiItem = item(
+        Material.WRITABLE_BOOK,
+        text("build-book.editor.copy.name"),
+        config.componentList("build-book.editor.copy.lore") {
+            tag(
+                "price",
+                BuilderCurrencyPresentation.amountWithCoin(
+                    Component.text(BuilderMoney.decimal(checkNotNull(data.issuePriceMinor)).toPlainString()),
+                ),
+            )
+        },
+    ) { event, _ ->
+        val player = event.whoClicked as? Player ?: return@item
+        player.closeInventory()
+        onCopy(player)
+    }
 
     private fun applyChange(
         event: InventoryClickEvent,
         source: GuiItem,
         feedback: BuildBookEditorFeedbackController,
+        onCopy: ((Player) -> Unit)?,
         nextTransform: BuildBookTransform,
     ) {
         event.isCancelled = true
@@ -162,7 +189,7 @@ object BuildBookEditorGui {
         }
         player.inventory.setItemInMainHand(BuildBookCodec.update(held, next))
         player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.7f, 1.2f)
-        create(player, next).show(player)
+        create(player, next, onCopy).show(player)
     }
 
     private fun InventoryClickEvent.delta(): Int {

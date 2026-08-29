@@ -24,16 +24,20 @@ class SystemBuildBookCatalogTest : FunSpec({
                 """
                 books:
                   - building-id: viking.schem
-                    title: Стартовый дом викинга
+                    title: Стартовый дом
                     sha256: ${sha256(bytes)}
                     player-enabled: true
+                    materials-included: true
                 """,
             ),
             root,
         )
         val data = BuildBookData(buildingId = "viking.schem", title = "viking.schem")
 
-        catalog.resolve(data)?.title shouldBe "Стартовый дом викинга"
+        val definition = checkNotNull(catalog.resolve(data))
+        definition.title shouldBe "Стартовый дом"
+        definition.materialsIncluded shouldBe true
+        definition.title.contains(".schem") shouldBe false
         catalog.resolve(BuildBookData(buildingId = "unknown.schem", title = "unknown")) shouldBe null
 
         Files.writeString(root.resolve("viking.schem"), "changed")

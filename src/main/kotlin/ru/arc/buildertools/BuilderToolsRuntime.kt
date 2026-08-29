@@ -2,6 +2,7 @@ package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import net.kyori.adventure.title.Title
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
@@ -33,6 +34,7 @@ import ru.arc.autobuild.gui.BuildBookEditorGui
 import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.SystemBuildBookCatalog
+import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.hooks.HookRegistry
 import ru.arc.observability.RuntimeHealthContribution
@@ -84,7 +86,7 @@ internal class BuilderToolsRuntime(
     draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
     bookSchematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
     private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
-    private val systemBuildBookResolver: (BuildBookData) -> Boolean = loadSystemBuildBookResolver(plugin),
+    private val systemBuildBookResolver: (BuildBookData) -> SystemBuildBookDefinition? = loadSystemBuildBookResolver(plugin),
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
@@ -789,13 +791,14 @@ internal class BuilderToolsRuntime(
     private fun planBuildBook(player: Player, site: ConstructionSite, book: ItemStack): BuilderBookPlannedProject {
         if (!player.hasPermission("arcbuild.book.use")) throw BuilderUserFailure("errors.no-permission")
         val data = site.bookData
-        if (data.playerCreated) {
+        val systemDefinition = if (data.playerCreated) {
             if (data.draft) throw BuilderUserFailure("book.unactivated")
             if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
             if (!data.available) throw BuilderUserFailure("book.invalid")
             books.verifySchematic(data)
-        } else if (!systemBuildBookResolver(data)) {
-            throw BuilderUserFailure("book.invalid")
+            null
+        } else {
+            systemBuildBookResolver(data) ?: throw BuilderUserFailure("book.invalid")
         }
         if (BuilderBookAuctionTokenCodec.read(book) != null) throw BuilderUserFailure("book.auction-locked")
         if (!BuildBookCodec.matches(book, data)) throw BuilderUserFailure("book.missing")
@@ -823,7 +826,13 @@ internal class BuilderToolsRuntime(
             }
         }.take(config.maxChanges + 1).toList()
         requireChanges(placements.map(BuilderBookPlannedChange::change))
-        val construction = BuilderBookConstructionCosts.calculate(book, data, player.gameMode, placements)
+        val construction = BuilderBookConstructionCosts.calculate(
+            book,
+            data,
+            player.gameMode,
+            placements,
+            systemMaterialsIncluded = systemDefinition?.materialsIncluded == true,
+        )
         val plan = newPlan(
             player = player,
             kind = BuilderPlanKind.BUILD_BOOK,
@@ -958,6 +967,10 @@ internal class BuilderToolsRuntime(
             plan = BuilderPendingPlan(plan, player.gameMode),
             expireAfterTicks = config.planTtl.toTicks(),
         )
+        showPlanSummary(player, plan, includeShop = true)
+    }
+
+    private fun showPlanSummary(player: Player, plan: BuilderPlan, includeShop: Boolean) {
         send(
             player,
             "plan.ready",
@@ -972,7 +985,18 @@ internal class BuilderToolsRuntime(
         if (plan.skippedUnsafeBlocks > 0) {
             send(player, "plan.skipped", mapOf("count" to messages.literal(plan.skippedUnsafeBlocks)))
         }
-        shop.preview(player, plan)
+        if (plan.kind == BuilderPlanKind.BUILD_BOOK) {
+            player.showTitle(
+                Title.title(
+                    messages.render("book.plan-ready.title", locale(player)),
+                    messages.render("book.plan-ready.subtitle", locale(player)),
+                    5,
+                    45,
+                    10,
+                ),
+            )
+        }
+        if (includeShop) shop.preview(player, plan)
     }
 
     private fun confirmImmediately(player: Player, plan: BuilderPlan) {
@@ -2018,43 +2042,112 @@ internal class BuilderToolsRuntime(
     ) {
         try {
             ensureAvailable(player)
-            if (player.isSneaking && data.playerCreated) {
-                BuildBookEditorGui.open(player)
+            val (effectiveItem, effectiveData) = canonicalBook(player, item, data)
+            if (player.isSneaking) {
+                discardPreparedBookPlan(player.uniqueId)
+                BuildBookEditorGui.open(player, ::prepareBookCopy)
                 return
-            }
-            if (data.playerCreated) {
-                if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
-                books.verifySchematic(data)
-            } else if (!systemBuildBookResolver(data)) {
-                throw BuilderUserFailure("book.invalid")
             }
             val current = BuildingManager.pending(player.uniqueId)
-            if (action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
-                val opened = BuildingManager.openPreview(player, checkNotNull(clickedLocation), data)
+            val preparedPlan = preparedBookPlan(player.uniqueId, effectiveItem)
+            val decision = BuilderBookInteractionPolicy.decide(
+                action = if (action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
+                    BuilderBookClick.BLOCK
+                } else {
+                    BuilderBookClick.AIR
+                },
+                exactBookPreviewOpen = current?.isExactOpenPreview(player, effectiveData) == true,
+                preparedPlan = preparedPlan,
+            )
+            when (decision) {
+                BuilderBookInteractionDecision.OPEN_PREVIEW,
+                BuilderBookInteractionDecision.REPLACE_PLAN_WITH_PREVIEW,
+                -> {
+                    if (decision == BuilderBookInteractionDecision.REPLACE_PLAN_WITH_PREVIEW) {
+                        discardPendingPlan(player.uniqueId)
+                    }
+                    val opened = BuildingManager.openPreview(player, checkNotNull(clickedLocation), effectiveData)
                     ?: throw BuilderUserFailure("book.invalid")
-                if (current?.isExactOpenPreview(player, data) != true) {
-                    send(
-                        player,
-                        "book.preview-opened",
-                        mapOf(
-                            "name" to messages.literal(data.title),
-                            "state" to messages.render(if (data.draft) "book.state.draft" else "book.state.active", locale(player)),
-                        ),
-                    )
+                    if (current?.isExactOpenPreview(player, effectiveData) != true) {
+                        send(
+                            player,
+                            "book.preview-opened",
+                            mapOf(
+                                "name" to messages.literal(effectiveData.title),
+                                "state" to messages.render(
+                                    if (effectiveData.draft) "book.state.draft" else "book.state.active",
+                                    locale(player),
+                                ),
+                            ),
+                        )
+                    }
                 }
-                return
-            }
-            if (current?.isExactOpenPreview(player, data) != true) throw BuilderUserFailure("book.preview-required")
-            if (data.draft) {
-                books.handleCommand(player, listOf("activate"))
-            } else {
-                startPlayerBuildBook(player, current, item)
+                BuilderBookInteractionDecision.PREPARE_PLAN -> {
+                    val site = checkNotNull(current)
+                    if (effectiveData.draft) {
+                        books.handleCommand(player, listOf("activate"))
+                    } else {
+                        startPlayerBuildBook(player, site, effectiveItem)
+                    }
+                }
+                BuilderBookInteractionDecision.RESHOW_PREPARED_PLAN -> {
+                    val plan = checkNotNull(previews.plan(player.uniqueId))
+                    showPlanSummary(player, plan, includeShop = false)
+                }
+                BuilderBookInteractionDecision.DISCARD_PLAN_AND_REQUIRE_PREVIEW -> {
+                    discardPendingPlan(player.uniqueId)
+                    throw BuilderUserFailure("book.preview-required")
+                }
+                BuilderBookInteractionDecision.REQUIRE_PREVIEW -> throw BuilderUserFailure("book.preview-required")
             }
         } catch (failure: BuilderUserFailure) {
             send(player, failure.path, failure.values)
         } catch (failure: Throwable) {
             error("Builder-book interaction failed for ${player.name}", failure)
             send(player, "book.failed")
+        }
+    }
+
+    private fun canonicalBook(player: Player, item: ItemStack, data: BuildBookData): Pair<ItemStack, BuildBookData> {
+        val canonical = if (data.playerCreated) {
+            if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
+            books.verifySchematic(data)
+            data
+        } else {
+            val definition = systemBuildBookResolver(data) ?: throw BuilderUserFailure("book.invalid")
+            data.copy(
+                title = definition.title,
+                systemMaterialsIncluded = definition.materialsIncluded,
+            ).validated()
+        }
+        if (canonical == data) return item to data
+        val updated = BuildBookCodec.update(item, canonical)
+        player.inventory.setItemInMainHand(updated)
+        return updated to canonical
+    }
+
+    private fun preparedBookPlan(playerId: UUID, book: ItemStack): BuilderBookPreparedPlan {
+        val plan = previews.plan(playerId) ?: return BuilderBookPreparedPlan.NONE
+        if (plan.kind != BuilderPlanKind.BUILD_BOOK) return BuilderBookPreparedPlan.OTHER_BOOK
+        val construction = plannedConstructionProjects[plan.id] ?: return BuilderBookPreparedPlan.OTHER_BOOK
+        val (expected, amount) = BuilderItemCodec.decode(construction.bookCost)
+        val presented = book.clone().also { it.amount = 1 }
+        return if (amount == 1 && expected.isSimilar(presented)) {
+            BuilderBookPreparedPlan.SAME_BOOK
+        } else {
+            BuilderBookPreparedPlan.OTHER_BOOK
+        }
+    }
+
+    private fun discardPreparedBookPlan(playerId: UUID) {
+        if (previews.plan(playerId)?.kind == BuilderPlanKind.BUILD_BOOK) discardPendingPlan(playerId)
+    }
+
+    private fun prepareBookCopy(player: Player) {
+        try {
+            books.handleCommand(player, listOf("copy"))
+        } catch (failure: BuilderUserFailure) {
+            send(player, failure.path, failure.values)
         }
     }
 
@@ -2174,9 +2267,9 @@ internal class BuilderToolsRuntime(
     }
 }
 
-private fun loadSystemBuildBookResolver(plugin: JavaPlugin): (BuildBookData) -> Boolean {
+private fun loadSystemBuildBookResolver(plugin: JavaPlugin): (BuildBookData) -> SystemBuildBookDefinition? {
     val path = plugin.dataPath.resolve("modules/system-build-books.yml")
     require(Files.isRegularFile(path)) { "System build-book catalog is missing" }
     val catalog = SystemBuildBookCatalog.load(path, BuilderStoragePaths.schematicsRoot())
-    return { data -> catalog.resolve(data) != null }
+    return catalog::resolve
 }

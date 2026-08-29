@@ -67,7 +67,7 @@ class BuilderBookConstructionCostsTest : FunSpec({
         }
     }
 
-    test("legacy system book requires every actual placement material while creative only consumes the book") {
+    test("starter system book with included materials consumes only its physical book") {
         MockBukkitTestRuntime.open().use {
             val worldId = UUID.randomUUID()
             val book = ItemStack(Material.BOOK)
@@ -84,13 +84,23 @@ class BuilderBookConstructionCostsTest : FunSpec({
                 ),
             )
 
-            val survival = BuilderBookConstructionCosts.calculate(book, data, GameMode.SURVIVAL, placements)
-            val creative = BuilderBookConstructionCosts.calculate(book, data, GameMode.CREATIVE, placements)
-
-            survival.costs.map { it.materialKey to it.amount } shouldContainExactly listOf(
-                "minecraft:book" to 1,
-                "minecraft:pale_oak_planks" to 1,
+            val survival = BuilderBookConstructionCosts.calculate(
+                book,
+                data,
+                GameMode.SURVIVAL,
+                placements,
+                systemMaterialsIncluded = true,
             )
+            val creative = BuilderBookConstructionCosts.calculate(
+                book,
+                data,
+                GameMode.CREATIVE,
+                placements,
+                systemMaterialsIncluded = true,
+            )
+
+            survival.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:book" to 1)
+            survival.steps.single().requiredMaterial shouldBe null
             creative.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:book" to 1)
             creative.steps.single().requiredMaterial shouldBe null
         }

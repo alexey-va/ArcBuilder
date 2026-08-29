@@ -92,6 +92,19 @@ tasks {
         useJUnitPlatform()
         shouldRunAfter(test)
     }
+    register<JavaExec>("rebaseSchematicOrigin") {
+        description = "Moves schematic placement in world space by changing its Sponge offset."
+        group = "builder maintenance"
+        dependsOn(testClasses)
+        classpath = sourceSets.test.get().runtimeClasspath
+        mainClass.set("ru.arc.autobuild.SchematicOriginTool")
+        val input = providers.gradleProperty("schematicInput")
+        val output = providers.gradleProperty("schematicOutput")
+        val shiftY = providers.gradleProperty("schematicShiftY")
+        doFirst {
+            args(input.get(), output.get(), shiftY.get())
+        }
+    }
     jar { archiveClassifier.set("plain") }
     shadowJar {
         archiveClassifier.set("")

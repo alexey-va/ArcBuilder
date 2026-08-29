@@ -31,8 +31,8 @@ class BuildBookEditorPresentationTest : KotestTestBase({
                 tag("offset_y", Component.text(1))
                 tag("offset_z", Component.text(-3))
             }.map(plain::serialize) shouldContainExactly listOf(
-                "Поворот: 90°",
-                "Сдвиг: 2 / 1 / -3",
+                "Поворот постройки: 90°",
+                "Смещение от выбранного блока: 2 / 1 / -3",
                 "",
                 "Esc — закрыть",
             )

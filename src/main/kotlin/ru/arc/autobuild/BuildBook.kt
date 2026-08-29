@@ -137,6 +137,7 @@ data class BuildBookData(
     val blockCount: Int? = null,
     val cooldownSeconds: Long? = null,
     val playerMaterials: List<BuildBookMaterialRequirement> = emptyList(),
+    val systemMaterialsIncluded: Boolean? = null,
 ) {
     fun validated(): BuildBookData = apply {
         require(BUILDING_ID.matches(buildingId)) { "Build-book building id is invalid" }
@@ -150,6 +151,9 @@ data class BuildBookData(
             "Build-book cooldown is invalid"
         }
         require(!playerCreated || creatorId != null) { "Player-created build books require a creator" }
+        require(!playerCreated || systemMaterialsIncluded == null) {
+            "Player-created build books cannot carry a system material policy"
+        }
         creatorName?.let { require(CREATOR_NAME.matches(it)) { "Build-book creator name is invalid" } }
         require(instanceId == null || blueprintId != null) { "Build-book instance requires a blueprint" }
         require((instanceId == null) == (instanceGeneration == null)) {
@@ -201,6 +205,10 @@ object BuildBookSettings {
     val activeCustomModelData: Int
         get() = config.integer("build-book.player-copy.active-custom-model-data", customModelData)
     val defaultTitle: String get() = config.string("build-book.player-copy.default-name", "Моя постройка")
+    val tooltipStyle: NamespacedKey
+        get() = checkNotNull(NamespacedKey.fromString(config.string("build-book.tooltip-style", "lzblocks:tooltip/rare"))) {
+            "Build-book tooltip style is invalid"
+        }
 
     fun customModelData(data: BuildBookData): Int =
         if (data.draft) draftCustomModelData else activeCustomModelData
@@ -215,14 +223,23 @@ object BuildBookSettings {
         require(defaultTitle.isNotBlank() && defaultTitle.length <= 48 && defaultTitle.none(Char::isISOControl)) {
             "Build-book default name is invalid"
         }
+        tooltipStyle
         REQUIRED_SCALARS.forEach { path -> require(config.stringOrNull(path) != null) { "Missing build-book text '$path'" } }
         REQUIRED_LISTS.forEach { path -> require(config.stringListOrNull(path)?.isNotEmpty() == true) { "Missing build-book lore '$path'" } }
     }
 
     private val REQUIRED_SCALARS = setOf(
         "build-book.display-name",
+        "build-book.tooltip-style",
+        "build-book.states.delivery-pending",
+        "build-book.states.active",
+        "build-book.states.draft",
+        "build-book.states.system",
+        "build-book.price.draft",
+        "build-book.price.system",
         "build-book.player-materials.draft",
         "build-book.player-materials.included",
+        "build-book.player-materials.system-required",
         "build-book.player-materials.heading",
         "build-book.player-materials.row",
         "build-book.player-materials.more",
@@ -239,15 +256,18 @@ object BuildBookSettings {
         "build-book.editor.axis-z.name",
         "build-book.editor.rotation.name",
         "build-book.editor.reset.name",
+        "build-book.editor.copy.name",
     )
     private val REQUIRED_LISTS = setOf(
         "build-book.lore",
+        "build-book.footer",
         "build-book.editor.overview.lore",
         "build-book.editor.axis-x.lore",
         "build-book.editor.axis-y.lore",
         "build-book.editor.axis-z.lore",
         "build-book.editor.rotation.lore",
         "build-book.editor.reset.lore",
+        "build-book.editor.copy.lore",
         "build-book.editor.preview-inactive.lore",
         "build-book.editor.preview-book-mismatch.lore",
         "build-book.editor.preview-protection-denied.lore",
@@ -281,6 +301,7 @@ object BuildBookCodec {
     private val blockCountKey get() = key("build_book_block_count")
     private val cooldownKey get() = key("build_book_cooldown_seconds")
     private val playerMaterialsKey get() = key("build_book_player_materials")
+    private val systemMaterialsIncludedKey get() = key("build_book_system_materials_included")
 
     fun read(item: ItemStack): BuildBookData? {
         if (item.type != Material.BOOK) return null
@@ -317,6 +338,7 @@ object BuildBookCodec {
                     playerMaterials = BuildBookMaterialRequirements.decode(
                         pdc.get(playerMaterialsKey, PersistentDataType.STRING),
                     ),
+                    systemMaterialsIncluded = pdc.get(systemMaterialsIncludedKey, PersistentDataType.BYTE)?.let { it != 0.toByte() },
                 ).validated()
             }.getOrNull()
         }
@@ -351,6 +373,11 @@ object BuildBookCodec {
                 playerMaterialsKey,
                 PersistentDataType.STRING,
                 BuildBookMaterialRequirements.encode(checked.playerMaterials),
+            )
+            pdc.setOrRemove(
+                systemMaterialsIncludedKey,
+                PersistentDataType.BYTE,
+                checked.systemMaterialsIncluded?.let { included -> (if (included) 1 else 0).toByte() },
             )
         }
     }
@@ -425,13 +452,14 @@ object BuildBookItems {
                     tag("creator", Component.text(data.creatorName ?: "RusCrafting"))
                     tag(
                         "state",
-                        Component.text(
+                        config.component(
                             when {
-                                data.deliveryPending -> "подтверждается"
-                                data.registered -> "активна"
-                                data.draft -> "черновик"
-                                else -> "служебная"
+                                data.deliveryPending -> "build-book.states.delivery-pending"
+                                data.registered -> "build-book.states.active"
+                                data.draft -> "build-book.states.draft"
+                                else -> "build-book.states.system"
                             },
+                            "<#e6fff3>Готова",
                         ),
                     )
                     tag(
@@ -440,19 +468,34 @@ object BuildBookItems {
                             BuilderCurrencyPresentation.amountWithCoin(
                                 Component.text(BuilderMoney.decimal(priceMinor).toPlainString()),
                             )
-                        } ?: Component.text("после проверки"),
+                        } ?: config.component(
+                            if (data.draft) "build-book.price.draft" else "build-book.price.system",
+                            "<#969696>Недоступно",
+                        ),
                     )
                     tag("instance", Component.text(data.instanceId?.toString()?.take(8) ?: "после активации"))
                 }.mapNotNull(::strip)
-            meta.lore(commonLore + playerMaterialLore(config, data))
+            val footer = config.componentList("build-book.footer").mapNotNull(::strip)
+            meta.lore(commonLore + playerMaterialLore(config, data) + footer)
             @Suppress("DEPRECATION")
             meta.setCustomModelData(modelId.takeIf { it > 0 })
+            meta.tooltipStyle = BuildBookSettings.tooltipStyle
         }
     }
 
     private fun playerMaterialLore(config: Config, data: BuildBookData): List<Component> {
         if (data.draft) {
             return listOfNotNull(strip(config.component("build-book.player-materials.draft", "<#8c8c8c>Материалы: <#ffb142>после сметы")))
+        }
+        if (!data.playerCreated && data.systemMaterialsIncluded != true) {
+            return listOfNotNull(
+                strip(
+                    config.component(
+                        "build-book.player-materials.system-required",
+                        "<#8c8c8c>Материалы: <#ffb142>понадобятся во время строительства",
+                    ),
+                ),
+            )
         }
         if (data.playerMaterials.isEmpty()) {
             return listOfNotNull(

@@ -10,6 +10,7 @@ internal data class SystemBuildBookDefinition(
     val title: String,
     val schematicSha256: String,
     val playerEnabled: Boolean,
+    val materialsIncluded: Boolean,
 ) {
     fun validated(): SystemBuildBookDefinition = apply {
         require(BUILDING_ID.matches(buildingId) && '/' !in buildingId && '\\' !in buildingId && ".." !in buildingId) {
@@ -70,6 +71,7 @@ internal class SystemBuildBookCatalog private constructor(
                         ?: throw IllegalArgumentException("System build-book digest is missing"),
                     playerEnabled = raw["player-enabled"] as? Boolean
                         ?: throw IllegalArgumentException("System build-book player-enabled flag is missing"),
+                    materialsIncluded = raw["materials-included"] as? Boolean ?: false,
                 ).validated()
             }
             val catalog = SystemBuildBookCatalog(root, definitions)

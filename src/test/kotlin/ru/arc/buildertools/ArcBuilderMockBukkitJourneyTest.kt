@@ -6,7 +6,12 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeSameInstanceAs
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import io.mockk.verify
+import com.sk89q.worldedit.math.BlockVector3
+import com.sk89q.worldedit.bukkit.BukkitAdapter
+import com.sk89q.worldedit.world.block.BaseBlock
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextDecoration
 import org.bukkit.Bukkit
@@ -39,6 +44,7 @@ import ru.arc.autobuild.PlayerBuildBookStore
 import ru.arc.autobuild.PlayerBuildBookDigestInspection
 import ru.arc.autobuild.PlayerBuildBookTemplate
 import ru.arc.autobuild.PreparedPlayerBuildBookTemplate
+import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.config.ConfigManager
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -628,6 +634,61 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             BuildingManager.pending(player.uniqueId) shouldBe null
         }
     }
+
+    test("random build-book clicks never leave an orphan plan preview") {
+        val definition = SystemBuildBookDefinition(
+            buildingId = "viking.schem",
+            title = "Стартовый дом",
+            schematicSha256 = "a".repeat(64),
+            playerEnabled = true,
+            materialsIncluded = true,
+        )
+        val schematicBlock = mockk<BaseBlock>()
+        mockkStatic(BukkitAdapter::class)
+        try {
+            strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
+                every { BukkitAdapter.adapt(schematicBlock) } returns Bukkit.createBlockData(Material.STONE)
+                val building = mockk<Building>()
+                every { building.fileName } returns "viking.schem"
+                every { building.volume } returns 1L
+                every { building.getCorner1(any()) } returns BlockVector3.ZERO
+                every { building.getCorner2(any()) } returns BlockVector3.ZERO
+                every { building.getBlock(any(), any()) } returns schematicBlock
+                BuildingManager.addBuilding(building)
+
+                val player = journey.builder("StarterBook", GameMode.SURVIVAL)
+                player.teleport(player.location.apply { yaw = -180f })
+                val original = ru.arc.autobuild.BuildBookItems.create(
+                    ru.arc.autobuild.BuildBookData("viking.schem", "viking.schem"),
+                )
+                player.inventory.setItemInMainHand(original)
+                val first = journey.world.getBlockAt(4, 64, 4).also { it.type = Material.DIRT }
+                val second = journey.world.getBlockAt(9, 64, 9).also { it.type = Material.DIRT }
+
+                journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, first)
+                checkNotNull(BuildingManager.pending(player.uniqueId)).bookData.title shouldBe "Стартовый дом"
+                BuildBookCodec.read(player.inventory.itemInMainHand) shouldBe
+                    checkNotNull(BuildingManager.pending(player.uniqueId)).bookData
+                journey.renderer.hasBook(player.uniqueId) shouldBe true
+
+                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
+                journey.renderer.hasBook(player.uniqueId) shouldBe false
+                journey.renderer.plans.containsKey(player.uniqueId) shouldBe true
+                val firstPlan = checkNotNull(journey.renderer.plans[player.uniqueId])
+                firstPlan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:book" to 1)
+
+                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
+                journey.renderer.plans[player.uniqueId] shouldBe firstPlan
+
+                journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, second)
+                journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
+                journey.renderer.hasBook(player.uniqueId) shouldBe true
+                checkNotNull(BuildingManager.pending(player.uniqueId)).centerBlock.blockX shouldBe 9
+            }
+        } finally {
+            unmockkStatic(BukkitAdapter::class)
+        }
+    }
 })
 
 private class ArcBuilderJourney private constructor(
@@ -711,6 +772,19 @@ private class ArcBuilderJourney private constructor(
     fun planBuildBookBlock(player: Player, block: org.bukkit.block.Block, after: BlockData): BuilderBookPlacementResult =
         runtime.planBuildBookBlock(player, block, after)
 
+    fun rightClickBook(player: Player, action: Action, block: org.bukkit.block.Block?) {
+        paper.callEvent(
+            PlayerInteractEvent(
+                player,
+                action,
+                player.inventory.itemInMainHand,
+                block,
+                BlockFace.UP,
+                EquipmentSlot.HAND,
+            ),
+        )
+    }
+
     fun await(description: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos()
         while (System.nanoTime() < deadline) {
@@ -729,7 +803,10 @@ private class ArcBuilderJourney private constructor(
     }
 
     companion object {
-        fun open(blocksPerTick: Int = 2): ArcBuilderJourney {
+        fun open(
+            blocksPerTick: Int = 2,
+            systemResolver: (ru.arc.autobuild.BuildBookData) -> SystemBuildBookDefinition? = { null },
+        ): ArcBuilderJourney {
             ConfigManager.clear()
             val paper = MockBukkitTestRuntime.open()
             try {
@@ -752,7 +829,7 @@ private class ArcBuilderJourney private constructor(
                     draftStorage = InMemoryBuilderDraftStorage(),
                     bookSchematicVerifier = BuilderBookSchematicVerifier { true },
                     bookReplacementRefund = { block -> ItemStack(block.type) },
-                    systemBuildBookResolver = { false },
+                    systemBuildBookResolver = systemResolver,
                 )
                 checkNotNull(plugin.getCommand("builder")).apply {
                     setExecutor(runtime)
@@ -816,6 +893,8 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
     private val books = mutableSetOf<UUID>()
     var selectionRenders = 0
         private set
+
+    fun hasBook(playerId: UUID): Boolean = playerId in books
 
     override fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?) {
         selectionRenders++

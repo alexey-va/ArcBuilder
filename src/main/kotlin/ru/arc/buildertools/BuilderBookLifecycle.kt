@@ -553,6 +553,7 @@ internal class BuilderBookLifecycle(
         val activeRegistry = requireRegistry()
         val held = player.inventory.itemInMainHand
         val data = BuildBookCodec.read(held)?.takeIf { it.available } ?: fail("book.active-required")
+        if (!BuilderBookCopyPolicy.canRequest(player.uniqueId, data)) fail("book.creator-only")
         if (held.amount != 1) fail("book.duplicate")
         if (BuilderBookAuctionTokenCodec.read(held) != null) fail("book.auction-locked")
         if (player.inventory.firstEmpty() == -1) fail("book.inventory-full")
@@ -577,6 +578,10 @@ internal class BuilderBookLifecycle(
                         if (!player.isOnline) return@blueprintLookup
                         if (blueprintFailure != null || blueprint == null) {
                             send(player, if (blueprintFailure == null) "book.invalid" else "book.registry-unavailable")
+                            return@blueprintLookup
+                        }
+                        if (!BuilderBookCopyPolicy.canConfirm(player.uniqueId, data.creatorId, blueprint.creatorId)) {
+                            send(player, "book.creator-only")
                             return@blueprintLookup
                         }
                         if (!matchesBlueprint(data, blueprint)) {
@@ -624,6 +629,13 @@ internal class BuilderBookLifecycle(
         }
         val held = player.inventory.itemInMainHand
         val data = BuildBookCodec.read(held) ?: fail("book.source-changed")
+        if (
+            pending.kind == BuilderBookMintKind.COPY &&
+            !BuilderBookCopyPolicy.canConfirm(player.uniqueId, data.creatorId, pending.blueprint.creatorId)
+        ) {
+            pendingMints.remove(player.uniqueId)
+            fail("book.creator-only")
+        }
         if (!matchesPendingSource(data, pending) || held.amount != 1) fail("book.source-changed")
         if (pending.kind == BuilderBookMintKind.CREATE) requireExactDraftPreview(player, data)
         if (pending.kind == BuilderBookMintKind.COPY && player.inventory.firstEmpty() == -1) fail("book.inventory-full")

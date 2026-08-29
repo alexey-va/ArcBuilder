@@ -333,11 +333,11 @@ locales:
           <#8c8c8c>      <#e6fff3>В творчестве она не нужна.
         - "<#8c8c8c>      <click:suggest_command:'/builder book draft '><#d48763>/builder book draft [имя]</click> <#e6fff3>— бесплатный <hover:show_text:'Книга для выбора места и расчёта цены; строить она ещё не может.'>черновик</hover>."
         - "<#8c8c8c>   4. <#e6fff3>ПКМ по блоку — поставить или перенести <hover:show_text:'Личный контур будущей постройки; мир пока не меняется.'>превью</hover>."
-        - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — меню положения."
+        - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — подробные настройки."
         - "<#8c8c8c>      <#969696>Черновик — только предпросмотр; он не строит."
         - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — получить <hover:show_text:'Расчёт стоимости материалов и работы до списания денег.'>смету</hover> без оплаты."
         - "<#8c8c8c>   6. <#e6fff3>Нажмите <#2bba43>[Подтвердить]<#e6fff3> в сообщении со сметой."
-        - "<#8c8c8c>   7. <click:run_command:'/builder book copy'><#d48763>/builder book copy</click> <#e6fff3>— копия по <hover:show_text:'Цена материалов плюс установленная стоимость работы, без наценки продавца.'>себестоимости</hover>."
+        - "<#8c8c8c>   7. <#e6fff3>Автор может выпустить <hover:show_text:'Отдельный оплачиваемый экземпляр той же книги; каждую книгу можно использовать один раз.'>новую одноразовую копию</hover> кнопкой в настройках или командой <click:run_command:'/builder book copy'><#d48763>/builder book copy</click>."
         - "<#8c8c8c>      <click:suggest_command:'/builder book sell '><#d48763>/builder book sell [цена]</click> <#e6fff3>— продажа."
         - "<#8c8c8c>   <click:run_command:'/builder book status'><#d48763>/builder book status</click> <#e6fff3>— ваш текущий этап."
       status:
@@ -401,9 +401,9 @@ locales:
 
           <prefix><#2bba43>Книга активна и зарегистрирована.
           <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
-          <#8c8c8c>   <hover:show_text:'Цена материалов плюс установленная стоимость работы, без наценки продавца.'><#e6fff3>Себестоимость копии</hover>: <#d48763><price>
+          <#8c8c8c>   <hover:show_text:'Автор платит эту сумму только при выпуске новой одноразовой книги.'><#e6fff3>Цена новой копии</hover>: <#d48763><price>
           <#8c8c8c>   <#e6fff3>ПКМ по земле — превью.
-          <#8c8c8c>   <click:run_command:'/builder book copy'><#d48763>/builder book copy</click> <#e6fff3>— копия.
+          <#8c8c8c>   <#e6fff3>Shift + ПКМ — настройки и копирование для автора.
           <#8c8c8c>   <click:suggest_command:'/builder book sell '><#d48763>/builder book sell [цена]</click> <#e6fff3>— продажа.
       draft-created: |-
 
@@ -435,7 +435,7 @@ locales:
         <prefix><#ff9f0f>Сначала разместите превью книги.
         <#8c8c8c>   <#e6fff3>Нажмите ПКМ книгой по опорному блоку.
       active-required: "<prefix><#ff9f0f>Держите активную книгу в основной руке."
-      creator-only: "<prefix><#ff9f0f>Первую активацию подтверждает автор."
+      creator-only: "<prefix><#ff9f0f>Активировать черновик и выпускать новые копии может только автор книги."
       unactivated: |-
 
         <prefix><#ff9f0f>Это только черновик — по нему нельзя строить.
@@ -473,13 +473,16 @@ locales:
       preview-opened: |-
 
         <prefix><#d48763>«<name>» <#8c8c8c>— <state>
-        <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — продолжить
+        <#8c8c8c>   ПКМ по блоку — переставить предпросмотр; ПКМ в воздух — подготовить план
       preview:
         title: "<#ffb142>Предпросмотр размещён"
-        subtitle: "<#e6fff3>ПКМ по блоку — перенести"
-        actionbar: "<#d48763>ПКМ блок: перенести   <#8c8c8c>—   <#e6fff3>ПКМ воздух: продолжить"
+        subtitle: "<#e6fff3>ПКМ в воздух — подготовить план"
+        actionbar: "<#d48763>ПКМ по блоку: переставить   <#8c8c8c>—   <#e6fff3>ПКМ в воздух: план"
         bossbar-draft: "<#ffb142>Черновик «<name>» — выберите место"
         bossbar-active: "<#2bba43>Книга «<name>» — проверьте место"
+      plan-ready:
+        title: "<#2bba43>План готов"
+        subtitle: "<#e6fff3>Подтвердите действие в чате"
       state:
         draft: "<#ffb142>черновик"
         active: "<#2bba43>активна"
@@ -914,10 +917,10 @@ locales:
           <dark_gray>      <gray>Creative mode does not require one.
         - "<dark_gray>      <aqua>/builder book draft [name] <gray>— free <hover:show_text:'A positioning and price-check book that cannot build yet.'>draft</hover>."
         - "<dark_gray>   4. <gray>Right-click a block to place or move <hover:show_text:'A player-only outline of the future build; the world is unchanged.'>preview</hover>."
-        - "<dark_gray>      <gray>Sneak-click to adjust its transform."
+        - "<dark_gray>      <gray>Sneak-click to open detailed settings."
         - "<dark_gray>   5. <gray>Right-click air for a <hover:show_text:'The material and labor price calculated before any charge.'>quote</hover> without charge."
         - "<dark_gray>   6. <gray>Click <green>[Confirm]</green> in the quote."
-        - "<dark_gray>   7. <aqua>/builder book copy <gray>— copy at <hover:show_text:'Material price plus configured labor, without a seller markup.'>stored cost</hover>."
+        - "<dark_gray>   7. <gray>The author can issue a <hover:show_text:'A separately paid instance of the same book; each physical book is single-use.'>new single-use copy</hover> from settings or with <aqua>/builder book copy</aqua>."
         - "<dark_gray>      <aqua>/builder book sell [price] <gray>— sell."
         - "<dark_gray>   <aqua>/builder book status <gray>— your current step."
       status:
@@ -981,8 +984,8 @@ locales:
 
           <prefix><green>The book is active and registered.
           <dark_gray>   <gray>Name: <white><name>
-          <dark_gray>   <hover:show_text:'Material price plus configured labor, without a seller markup.'><gray>Copy at stored cost</hover>: <white><price>
-          <dark_gray>   <aqua>/builder book copy <gray>— copy.
+          <dark_gray>   <hover:show_text:'The author pays this amount only when another single-use book is issued.'><gray>New-copy price</hover>: <white><price>
+          <dark_gray>   <gray>Sneak-click for settings and the author-only copy button.
           <dark_gray>   <aqua>/builder book sell [price] <gray>— sell.
       draft-created: |-
 
@@ -1017,7 +1020,7 @@ locales:
         <prefix><yellow>Place the book preview first.
         <dark_gray>   <gray>Right-click an anchor block while holding the book.
       active-required: "<prefix><yellow>Hold a registered build book in your main hand."
-      creator-only: "<prefix><yellow>The draft author must approve its first activation."
+      creator-only: "<prefix><yellow>Only the book author may activate its draft or issue new copies."
       unactivated: |-
 
         <prefix><yellow>This draft is preview-only.
@@ -1055,13 +1058,16 @@ locales:
       preview-opened: |-
 
         <prefix><aqua>“<name>” <dark_gray>— <state>
-        <dark_gray>   Right-click a block to move; right-click air to continue
+        <dark_gray>   Right-click a block to reposition; right-click air to prepare the build plan
       preview:
         title: "<gold>Preview placed"
-        subtitle: "<white>Right-click a block to move it"
-        actionbar: "<aqua>Block click: move   <dark_gray>—   <white>Air click: continue"
+        subtitle: "<white>Right-click air to prepare the plan"
+        actionbar: "<aqua>Block click: reposition   <dark_gray>—   <white>Air click: plan"
         bossbar-draft: "<gold>Draft “<name>” — choose its position"
         bossbar-active: "<green>Book “<name>” — verify its position"
+      plan-ready:
+        title: "<green>Plan ready"
+        subtitle: "<white>Confirm it in chat"
       state:
         draft: "<gold>draft"
         active: "<green>active"

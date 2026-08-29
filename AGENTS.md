@@ -13,7 +13,9 @@ Standalone Kotlin/Paper plugin for survival-friendly Builder Tools and construct
 - Copy stores the player's anchor relative to the selected cuboid. Paste anchors at the player's current block position, applies rotation around that anchor, then previews before confirmation.
 - Player-facing text belongs in `modules/builder-tools.yml`; GUI item text is non-italic.
   Keep compact domain terms and summary metrics visually short, but explain
-  potentially unfamiliar meanings with localized MiniMessage hover text.
+  every potentially unfamiliar term or value with localized MiniMessage hover
+  text (for example cost, return, included materials, copy price, state, and
+  offsets).
   Hover help supplements visible critical information; it never hides a
   required action, warning, price, or destructive consequence.
 - Locally run only `./gradlew --no-daemon test shadowJar` and the arc-core consumer verifier.

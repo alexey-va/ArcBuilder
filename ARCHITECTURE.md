@@ -192,6 +192,26 @@ constrains every path to the shared schematic root, and verifies its SHA-256 at
 startup and again on use. Do not make every file in the shared root callable:
 it also contains player schematics and operational test files.
 
+`BuilderBookInteractionPolicy` is the canonical state machine for book clicks.
+A player may own one block preview or one prepared build plan, never both.
+Opening a new block preview discards an existing book plan first; repeated air
+clicks keep and explain the same prepared plan instead of creating an orphaned
+display. `BuilderToolsRuntime` canonicalizes legacy item titles from the system
+catalogue before either transition, so filenames are never player-facing.
+
+Player-authored copying is author-only at both boundaries: the editor exposes
+its copy button only to the blueprint creator, and `BuilderBookLifecycle`
+revalidates authoritative blueprint ownership immediately before charging and
+minting. A stored issue price describes a newly issued copy, not construction;
+building never withdraws money.
+
+System catalogue entries may opt into `materials-included`. Those books consume
+only their physical book and create steps without material requirements. The
+starter `viking.schem` book uses this policy. Its Sponge `Offset Y` is zero so a
+ground anchor places the house on, rather than below, the clicked surface.
+See `BUILD_BOOKS.md` for the maintenance command, live shared-root contract,
+CMI kit boundary, and rollout checklist.
+
 The MySQL integration suite belongs to GitHub Actions and must not be run
 locally.
 

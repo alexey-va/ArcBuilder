@@ -245,6 +245,8 @@ class BuilderToolsConfig(
                 "book.preview.actionbar",
                 "book.preview.bossbar-draft",
                 "book.preview.bossbar-active",
+                "book.plan-ready.title",
+                "book.plan-ready.subtitle",
                 "book.preview-cancelled",
                 "book.nothing-to-cancel",
                 "book.state.draft",

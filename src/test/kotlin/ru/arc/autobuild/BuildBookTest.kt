@@ -118,8 +118,9 @@ class BuildBookTest : TestBase() {
         val plainText = PlainTextComponentSerializer.plainText()
         val draftLore = draftItem.itemMeta.lore().orEmpty().map(plainText::serialize)
         val registeredLore = registeredItem.itemMeta.lore().orEmpty().map(plainText::serialize)
-        assertTrue(draftLore.any { it.contains("Себестоимость: после проверки") })
-        assertTrue(registeredLore.any { it.contains("Себестоимость: 123.45 💰") })
+        assertTrue(draftLore.any { it.contains("Цена новой копии: после проверки") })
+        assertTrue(registeredLore.any { it.contains("Цена новой копии: 123.45 💰") })
+        assertTrue(registeredLore.any { it.contains("При строительстве монеты не списываются") })
         assertTrue(registeredLore.any { it.contains("Принести с собой") })
         assertTrue(registeredLore.any { it.contains("32×") })
         assertTrue(registeredLore.any { it.contains("64×") })
@@ -128,6 +129,25 @@ class BuildBookTest : TestBase() {
             .filter { component -> component.content() == "💰" }
         assertEquals(1, coinGlyphs.size)
         assertTrue(coinGlyphs.all { component -> component.color() == NamedTextColor.WHITE })
+        assertEquals(NamespacedKey.fromString("lzblocks:tooltip/rare"), registeredItem.itemMeta.tooltipStyle)
+    }
+
+    @Test
+    fun `system book presentation never exposes the schematic filename`() {
+        val item = BuildBookItems.create(
+            BuildBookData(
+                buildingId = "viking.schem",
+                title = "Стартовый дом",
+            ).validated(),
+        )
+        val plain = PlainTextComponentSerializer.plainText()
+        val visible = buildList {
+            add(plain.serialize(checkNotNull(item.itemMeta.displayName())))
+            addAll(item.itemMeta.lore().orEmpty().map(plain::serialize))
+        }
+
+        assertTrue(visible.none { ".schem" in it })
+        assertTrue(visible.any { "Стартовый дом" in it })
     }
 
     @Test
