@@ -21,6 +21,7 @@ open class ArcBuilderPlugin : JavaPlugin() {
         saveResourceIfMissing("modules/builder-tools.yml")
         saveResourceIfMissing("modules/auto-build.yml")
         saveResourceIfMissing("modules/metrics.yml")
+        saveResourceIfMissing("modules/system-build-books.yml")
         PaperArcRuntime.installScheduling(this)
         val runtime = PaperPluginRuntime(this, "arc-builder").also {
             lifecycle = it

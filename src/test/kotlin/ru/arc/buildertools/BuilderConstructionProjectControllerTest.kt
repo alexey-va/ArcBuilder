@@ -47,6 +47,7 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         var mutable: Boolean = true,
         var inputAvailable: Boolean = true,
         var outputSpace: Boolean = true,
+        var outputFailure: Boolean = false,
     ) : BuilderConstructionProjectPort {
         var removed = 0
         var returned = 0
@@ -73,9 +74,12 @@ class BuilderConstructionProjectControllerTest : FunSpec({
             playerId: UUID,
             project: BuilderConstructionProjectRecord,
             output: BuilderItemAmount,
-        ): Boolean = outputSpace.also { if (it) stored += output.amount }
+        ): Boolean {
+            if (outputFailure) error("unknown container result")
+            return outputSpace.also { if (it) stored += output.amount }
+        }
 
-        override fun apply(change: BuilderBlockChange) {
+        override fun apply(project: BuilderConstructionProjectRecord, change: BuilderBlockChange) {
             applied += 1
             blockData = change.afterBlockData
         }
@@ -84,18 +88,31 @@ class BuilderConstructionProjectControllerTest : FunSpec({
     test("missing material pauses before mutating the block") {
         val port = FakePort(inputAvailable = false)
 
-        val result = BuilderConstructionProjectController.tick(active(), createdAt + 2, port)
+        val result = BuilderConstructionProjectController.tick(active(), createdAt + 2, port)!!
 
-        result?.state shouldBe BuilderConstructionProjectState.WAITING_MATERIALS
-        result?.cursor shouldBe 0
+        result.state shouldBe BuilderConstructionProjectState.WAITING_MATERIALS
+        result.cursor shouldBe 0
         port.applied shouldBe 0
         port.removed shouldBe 0
+
+        BuilderConstructionProjectController.tick(result, createdAt + 3, port) shouldBe null
+        port.inputAvailable = true
+        BuilderConstructionProjectController.tick(result, createdAt + 4, port)?.state shouldBe
+            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE
     }
 
-    test("successful step consumes input stores replacement and completes") {
+    test("successful step durably marks delivery before storing replacement and completing") {
         val port = FakePort()
 
-        val result = BuilderConstructionProjectController.tick(active(), createdAt + 2, port)
+        val waiting = BuilderConstructionProjectController.tick(active(), createdAt + 2, port)!!
+        waiting.state shouldBe BuilderConstructionProjectState.WAITING_OUTPUT_SPACE
+        port.stored shouldBe 0
+
+        val delivering = BuilderConstructionProjectController.tick(waiting, createdAt + 3, port)!!
+        delivering.state shouldBe BuilderConstructionProjectState.DELIVERING_OUTPUT
+        port.stored shouldBe 0
+
+        val result = BuilderConstructionProjectController.tick(delivering, createdAt + 4, port)
 
         result?.state shouldBe BuilderConstructionProjectState.COMPLETED
         result?.cursor shouldBe 1
@@ -113,13 +130,26 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         waiting.pendingOutput shouldBe dirt
         port.blockData shouldBe "minecraft:stone"
 
+        val delivering = BuilderConstructionProjectController.tick(waiting, createdAt + 3, port)!!
         port.outputSpace = true
-        val completed = BuilderConstructionProjectController.tick(waiting, createdAt + 3, port)
+        val completed = BuilderConstructionProjectController.tick(delivering, createdAt + 4, port)
         completed?.state shouldBe BuilderConstructionProjectState.COMPLETED
         completed?.cursor shouldBe 1
         port.removed shouldBe 1
         port.stored shouldBe 1
         port.applied shouldBe 1
+    }
+
+    test("failed or ambiguous output delivery never retries from the delivering state") {
+        val port = FakePort()
+        val waiting = BuilderConstructionProjectController.tick(active(), createdAt + 2, port)!!
+        val delivering = BuilderConstructionProjectController.tick(waiting, createdAt + 3, port)!!
+        port.outputFailure = true
+
+        val recovery = BuilderConstructionProjectController.tick(delivering, createdAt + 4, port)
+
+        recovery?.state shouldBe BuilderConstructionProjectState.RECOVERY_REQUIRED
+        port.stored shouldBe 0
     }
 
     test("protection denial and unexpected world state enter recovery without touching resources") {

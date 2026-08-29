@@ -76,14 +76,17 @@ class BuilderConstructionProjectDomainTest : FunSpec({
     test("missing input and full output storage pause without losing the current step") {
         val active = prepared().activated(createdAt + 1)
         val waitingMaterial = active.waitingForMaterials(createdAt + 2)
-        val resumed = waitingMaterial.activated(createdAt + 3)
-        val waitingOutput = resumed.waitingForOutput(refund, createdAt + 4)
-        val delivered = waitingOutput.outputDelivered(createdAt + 5)
+        val waitingOutput = active.waitingForOutput(refund, createdAt + 4)
+        val delivering = waitingOutput.deliveringOutput(createdAt + 5)
+        val delivered = delivering.outputDelivered(createdAt + 6)
 
         waitingMaterial.cursor shouldBe 0
         waitingMaterial.state shouldBe BuilderConstructionProjectState.WAITING_MATERIALS
+        shouldThrow<IllegalArgumentException> { waitingMaterial.activated(createdAt + 3) }
         waitingOutput.cursor shouldBe 0
         waitingOutput.pendingOutput shouldBe refund
+        delivering.state shouldBe BuilderConstructionProjectState.DELIVERING_OUTPUT
+        delivering.pendingOutput shouldBe refund
         delivered.cursor shouldBe 1
         delivered.pendingOutput shouldBe null
         delivered.state shouldBe BuilderConstructionProjectState.ACTIVE

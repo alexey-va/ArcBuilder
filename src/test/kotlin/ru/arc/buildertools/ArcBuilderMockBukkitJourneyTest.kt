@@ -752,6 +752,7 @@ private class ArcBuilderJourney private constructor(
                     draftStorage = InMemoryBuilderDraftStorage(),
                     bookSchematicVerifier = BuilderBookSchematicVerifier { true },
                     bookReplacementRefund = { block -> ItemStack(block.type) },
+                    systemBuildBookResolver = { false },
                 )
                 checkNotNull(plugin.getCommand("builder")).apply {
                     setExecutor(runtime)

@@ -28,9 +28,11 @@ import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.ARC
 import ru.arc.autobuild.BuildBookCodec
 import ru.arc.autobuild.BuildBookData
+import ru.arc.autobuild.BuilderStoragePaths
 import ru.arc.autobuild.gui.BuildBookEditorGui
 import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.ConstructionSite
+import ru.arc.autobuild.SystemBuildBookCatalog
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.hooks.HookRegistry
 import ru.arc.observability.RuntimeHealthContribution
@@ -51,15 +53,22 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.nio.file.Files
 
 internal sealed interface BuilderBookPlacementResult {
     data object Unchanged : BuilderBookPlacementResult
     data object SkippedUnsafe : BuilderBookPlacementResult
     data class Change(
         val block: BuilderBlockChange,
+        val placementItem: ItemStack?,
         val refund: ItemStack?,
     ) : BuilderBookPlacementResult
 }
+
+internal data class BuilderBookPlannedProject(
+    val plan: BuilderPlan,
+    val project: BuilderConstructionProjectRecord,
+)
 
 internal class BuilderToolsRuntime(
     private val plugin: JavaPlugin,
@@ -75,12 +84,14 @@ internal class BuilderToolsRuntime(
     draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
     bookSchematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
     private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
+    private val systemBuildBookResolver: (BuildBookData) -> Boolean = loadSystemBuildBookResolver(plugin),
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
     private val safety = BuilderBlockSafety(plugin, config.replaceableMaterials)
     private val coreProtect = BuilderCoreProtectBridge.resolve()
     private val journal = BuilderJournalStore(plugin.dataPath, config.maxChanges)
+    private val constructionStore = BuilderConstructionProjectStore(plugin.dataPath, config.maxChanges)
     private val stateService = PaperPlayerStateService()
     private val stateCodec = PaperPlayerStateCodec()
     private val storageExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -254,6 +265,80 @@ internal class BuilderToolsRuntime(
     private val playerRecoveries: BuilderPlayerRecoveryCoordinator
     private val committedRecords = mutableMapOf<UUID, BuilderJournalRecord>()
     private val consumedUndoSources = mutableSetOf<UUID>()
+    private val plannedConstructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
+    private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
+    private val constructionWrites = mutableSetOf<UUID>()
+    private val constructionCompletions = mutableSetOf<UUID>()
+    private val constructionLocks = mutableSetOf<UUID>()
+    private val constructionResources = BuilderConstructionResources(
+        containerRadius = config.constructionContainerRadius,
+        onlineRange = config.constructionOnlineInventoryRange,
+        worldProvider = Bukkit::getWorld,
+        onlinePlayerProvider = Bukkit::getPlayer,
+        canOpenContainer = { playerId, block -> HookRegistry.landsHook?.canOpenContainer(playerId, block) ?: true },
+    )
+    private val constructionPort = object : BuilderConstructionProjectPort {
+        override fun currentBlockData(position: BuilderBlockPos): String {
+            val world = Bukkit.getWorld(position.worldId)
+                ?: throw IllegalStateException("Builder construction world is unavailable")
+            if (!world.isChunkLoaded(position.x shr 4, position.z shr 4)) {
+                throw BuilderConstructionTemporarilyUnavailableException()
+            }
+            return block(world, position).blockData.asString
+        }
+
+        override fun canModify(playerId: UUID, change: BuilderBlockChange): Boolean {
+            val world = Bukkit.getWorld(change.position.worldId) ?: return false
+            if (!config.allowsWorld(world.name) || !world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
+                throw BuilderConstructionTemporarilyUnavailableException()
+            }
+            val target = block(world, change.position)
+            if (!world.worldBorder.isInside(target.location)) return false
+            val after = Bukkit.createBlockData(change.afterBlockData)
+            if (!after.material.isAir && !safety.isSafePlacement(after)) return false
+            val replaceable = safety.isReplaceable(target)
+            if (!replaceable && !safety.isSafeExisting(target)) return false
+            return HookRegistry.landsHook?.canModify(
+                playerId,
+                target,
+                after.material.takeUnless(Material::isAir),
+            ) ?: true
+        }
+
+        override fun removeInput(
+            playerId: UUID,
+            project: BuilderConstructionProjectRecord,
+            input: BuilderItemAmount,
+        ): Boolean = constructionResources.removeInput(playerId, project, input)
+
+        override fun returnInput(
+            playerId: UUID,
+            project: BuilderConstructionProjectRecord,
+            input: BuilderItemAmount,
+        ): Boolean = constructionResources.returnInput(playerId, project, input)
+
+        override fun storeOutput(
+            playerId: UUID,
+            project: BuilderConstructionProjectRecord,
+            output: BuilderItemAmount,
+        ): Boolean = constructionResources.storeOutput(playerId, project, output)
+
+        override fun apply(project: BuilderConstructionProjectRecord, change: BuilderBlockChange) {
+            val world = Bukkit.getWorld(change.position.worldId)
+                ?: throw IllegalStateException("Builder construction world is unavailable")
+            if (!world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
+                throw BuilderConstructionTemporarilyUnavailableException()
+            }
+            val target = block(world, change.position)
+            check(target.blockData.asString == change.beforeBlockData) {
+                "Builder construction block changed before apply"
+            }
+            val before = Bukkit.createBlockData(change.beforeBlockData)
+            val after = Bukkit.createBlockData(change.afterBlockData)
+            target.setBlockData(after, false)
+            coreProtect?.logChange(project.playerName, target.location, before, after)
+        }
+    }
     private var recovering = true
     private var recoveryBlocked = false
     private var closed = false
@@ -385,7 +470,12 @@ internal class BuilderToolsRuntime(
                         selections.points(player.uniqueId, player.world.uid)
 
                     override fun startJournaledOperation(player: Player, plan: BuilderPlan, plannedMode: GameMode) =
-                        this@BuilderToolsRuntime.startJournaledOperation(player, plan, plannedMode)
+                        this@BuilderToolsRuntime.startConstructionProject(
+                            player,
+                            plannedConstructionProjects.remove(plan.id)
+                                ?: throw IllegalStateException("Builder construction project metadata is missing"),
+                            plannedMode,
+                        )
 
                     override fun localJournalRecord(operationId: UUID): BuilderJournalRecord? =
                         committedRecords[operationId]
@@ -457,6 +547,14 @@ internal class BuilderToolsRuntime(
             }
             loadRecoveryState()
             books.start()
+            loadConstructionProjects()
+            checkNotNull(
+                taskScope.runTimer(
+                    config.constructionTickPeriod,
+                    config.constructionTickPeriod,
+                    ::tickConstructionProjects,
+                ),
+            ) { "Builder construction project task was not scheduled" }
         } catch (failure: Throwable) {
             HandlerList.unregisterAll(this)
             initializedPlayerRecoveries?.close()
@@ -688,20 +786,23 @@ internal class BuilderToolsRuntime(
         return BuilderPermissionPolicy.maximumAxis(player::hasPermission, config.absoluteMaxAxis)
     }
 
-    private fun planBuildBook(player: Player, site: ConstructionSite, book: ItemStack): BuilderPlan {
+    private fun planBuildBook(player: Player, site: ConstructionSite, book: ItemStack): BuilderBookPlannedProject {
         if (!player.hasPermission("arcbuild.book.use")) throw BuilderUserFailure("errors.no-permission")
-        val data = site.bookData.takeIf { it.playerCreated } ?: throw BuilderUserFailure("book.invalid")
-        if (data.draft) throw BuilderUserFailure("book.unactivated")
-        if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
-        if (!data.available) throw BuilderUserFailure("book.invalid")
+        val data = site.bookData
+        if (data.playerCreated) {
+            if (data.draft) throw BuilderUserFailure("book.unactivated")
+            if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
+            if (!data.available) throw BuilderUserFailure("book.invalid")
+            books.verifySchematic(data)
+        } else if (!systemBuildBookResolver(data)) {
+            throw BuilderUserFailure("book.invalid")
+        }
         if (BuilderBookAuctionTokenCodec.read(book) != null) throw BuilderUserFailure("book.auction-locked")
         if (!BuildBookCodec.matches(book, data)) throw BuilderUserFailure("book.missing")
-        books.verifySchematic(data)
         if (site.building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
 
-        val rewards = mutableListOf<ItemStack>()
         var skippedUnsafe = 0
-        val changes = site.relativePositionsBottomUp().mapNotNull { relative ->
+        val placements = site.relativePositionsBottomUp().mapNotNull { relative ->
             val after = rotateBlockData(
                 BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)),
                 site.fullRotation,
@@ -713,24 +814,43 @@ internal class BuilderToolsRuntime(
                     null
                 }
                 is BuilderBookPlacementResult.Change -> {
-                    placement.refund?.let(rewards::add)
-                    placement.block
+                    BuilderBookPlannedChange(
+                        change = placement.block,
+                        placementItem = placement.placementItem,
+                        refund = placement.refund,
+                    )
                 }
             }
         }.take(config.maxChanges + 1).toList()
-        requireChanges(changes)
-        return newPlan(
+        requireChanges(placements.map(BuilderBookPlannedChange::change))
+        val construction = BuilderBookConstructionCosts.calculate(book, data, player.gameMode, placements)
+        val plan = newPlan(
             player = player,
             kind = BuilderPlanKind.BUILD_BOOK,
-            changes = changes,
-            costs = BuilderBookConstructionCosts.calculate(book, data, player.gameMode),
-            rewards = BuilderItemCodec.aggregate(rewards),
-            bookBlueprintId = checkNotNull(data.blueprintId),
-            bookInstanceId = checkNotNull(data.instanceId),
-            bookInstanceGeneration = checkNotNull(data.instanceGeneration),
-            bookBuildingId = data.buildingId,
-            bookSchematicSha256 = checkNotNull(data.schematicSha256),
+            changes = construction.steps.map(BuilderConstructionStep::change),
+            costs = construction.costs,
+            rewards = construction.rewards,
+            bookBlueprintId = data.blueprintId,
+            bookInstanceId = data.instanceId,
+            bookInstanceGeneration = data.instanceGeneration,
+            bookBuildingId = data.buildingId.takeIf { data.registered },
+            bookSchematicSha256 = data.schematicSha256.takeIf { data.registered },
             skippedUnsafeBlocks = skippedUnsafe,
+        )
+        return BuilderBookPlannedProject(
+            plan = plan,
+            project = BuilderConstructionProjectRecord(
+                projectId = plan.id,
+                playerId = player.uniqueId,
+                playerName = player.name,
+                plan = plan,
+                steps = construction.steps,
+                bookCost = construction.bookCost,
+                state = BuilderConstructionProjectState.PREPARED,
+                cursor = 0,
+                createdAtMillis = plan.createdAtMillis,
+                updatedAtMillis = plan.createdAtMillis,
+            ).validated(config.maxChanges),
         )
     }
 
@@ -759,6 +879,7 @@ internal class BuilderToolsRuntime(
                 block.blockData.asString,
                 after.asString,
             ),
+            BuilderPlacementCost.itemOrNull(after),
             refund,
         )
     }
@@ -875,8 +996,20 @@ internal class BuilderToolsRuntime(
         if (plan.kind != BuilderPlanKind.UNDO && used + plan.changes.size > hourlyLimit(player)) {
             throw BuilderUserFailure("errors.hourly-limit")
         }
-        val canApplyNow = BuilderInventory.canApply(player, plan.costs, plan.rewards, plan.toolFingerprintBase64, plan.toolDamage)
+        val construction = plannedConstructionProjects[plan.id]
+        val immediateCosts = construction?.let { listOf(it.bookCost) } ?: plan.costs
+        val immediateRewards = if (construction == null) plan.rewards else emptyList()
+        val immediateToolFingerprint = if (construction == null) plan.toolFingerprintBase64 else null
+        val immediateToolDamage = if (construction == null) plan.toolDamage else 0
+        val canApplyNow = BuilderInventory.canApply(
+            player,
+            immediateCosts,
+            immediateRewards,
+            immediateToolFingerprint,
+            immediateToolDamage,
+        )
         if (!canApplyNow) {
+            if (construction != null) throw BuilderUserFailure("book.missing")
             if (!BuilderShopEstimateRules.supportsAutoBuy(plan.kind)) throw BuilderUserFailure("errors.inventory")
             val missing = BuilderInventory.missingCosts(player, plan.costs)
             if (
@@ -897,9 +1030,15 @@ internal class BuilderToolsRuntime(
 
     private fun startPlayerBuildBook(player: Player, site: ConstructionSite, book: ItemStack): Boolean = try {
         ensureBuildBookAvailable(player)
-        val plan = planBuildBook(player, site, book)
+        val planned = planBuildBook(player, site, book)
         site.cancelSilently()
-        preparePlan(player, plan)
+        plannedConstructionProjects[planned.plan.id] = planned.project
+        try {
+            preparePlan(player, planned.plan)
+        } catch (failure: Throwable) {
+            plannedConstructionProjects.remove(planned.plan.id)
+            throw failure
+        }
         true
     } catch (failure: BuilderUserFailure) {
         send(player, failure.path, failure.values)
@@ -915,10 +1054,10 @@ internal class BuilderToolsRuntime(
     }
 
     private fun confirm(player: Player, buyMissing: Boolean = false, buildBook: Boolean = false) {
-        if (buildBook) ensureBuildBookAvailable(player) else ensureAvailable(player)
-        if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
         val pending = previews[player.uniqueId] ?: throw BuilderUserFailure("errors.expired")
         val plan = pending.plan
+        if (buildBook || plan.kind == BuilderPlanKind.BUILD_BOOK) ensureBuildBookAvailable(player) else ensureAvailable(player)
+        if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
         if (plan.expiresAtMillis <= System.currentTimeMillis()) {
             discardPendingPlan(player.uniqueId)
             throw BuilderUserFailure("errors.expired")
@@ -929,6 +1068,8 @@ internal class BuilderToolsRuntime(
             throw BuilderUserFailure("errors.game-mode-changed")
         }
         revalidatePlan(player, plan)
+        val construction = plannedConstructionProjects[plan.id]
+        if (buyMissing && construction != null) throw BuilderUserFailure("errors.shop-not-supported")
         if (buyMissing) {
             when (val result = shop.procure(player, plan)) {
                 BuilderShopConfirmation.Ready -> Unit
@@ -938,8 +1079,33 @@ internal class BuilderToolsRuntime(
                 )
             }
         }
-        if (!BuilderInventory.canApply(player, plan.costs, plan.rewards, plan.toolFingerprintBase64, plan.toolDamage)) {
+        val immediateCosts = construction?.let { listOf(it.bookCost) } ?: plan.costs
+        val immediateRewards = if (construction == null) plan.rewards else emptyList()
+        val immediateToolFingerprint = if (construction == null) plan.toolFingerprintBase64 else null
+        val immediateToolDamage = if (construction == null) plan.toolDamage else 0
+        if (!BuilderInventory.canApply(
+                player,
+                immediateCosts,
+                immediateRewards,
+                immediateToolFingerprint,
+                immediateToolDamage,
+            )
+        ) {
             throw BuilderUserFailure("errors.inventory")
+        }
+        if (construction != null) {
+            if (constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
+                throw BuilderUserFailure("errors.busy")
+            }
+            previews.remove(player.uniqueId, pending)
+            shop.clear(player.uniqueId)
+            crown.clearAnchor(player.uniqueId)
+            if (plan.bookInstanceId == null) {
+                startConstructionProject(player, construction, pending.gameMode)
+            } else {
+                books.reserveForBuild(player, plan, pending.gameMode)
+            }
+            return
         }
         if (!operationLocks.tryLock(plan)) throw BuilderUserFailure("errors.busy")
         previews.remove(player.uniqueId, pending)
@@ -988,6 +1154,235 @@ internal class BuilderToolsRuntime(
                 )
             },
         )
+    }
+
+    private fun startConstructionProject(
+        player: Player,
+        prepared: BuilderConstructionProjectRecord,
+        plannedMode: GameMode,
+    ) {
+        plannedConstructionProjects.remove(prepared.projectId)
+        if (player.gameMode != plannedMode) {
+            books.releasePlanReservation(prepared.plan)
+            throw BuilderUserFailure("errors.game-mode-changed")
+        }
+        if (constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
+            books.releasePlanReservation(prepared.plan)
+            throw BuilderUserFailure("errors.busy")
+        }
+        var durablePrepared: BuilderConstructionProjectRecord? = null
+        var bookRemoved = false
+        try {
+            check(lockConstruction(prepared)) { "Builder construction area is already locked" }
+            val now = System.currentTimeMillis()
+            durablePrepared = constructionStore.commit(prepared.copy(updatedAtMillis = now))
+            check(BuilderInventory.removeCosts(player.inventory, listOf(prepared.bookCost))) {
+                "Builder construction book disappeared before activation"
+            }
+            bookRemoved = true
+            player.updateInventory()
+            val active = constructionStore.transition(
+                durablePrepared,
+                durablePrepared.activated(System.currentTimeMillis()),
+            )
+            constructionProjects[active.projectId] = active
+            send(
+                player,
+                "construction.started",
+                mapOf("count" to messages.literal(active.steps.size)),
+            )
+        } catch (failure: Throwable) {
+            if (bookRemoved) {
+                runCatching {
+                    check(BuilderInventory.addRewards(player.inventory, listOf(prepared.bookCost))) {
+                        "Builder construction book could not be returned after activation failure"
+                    }
+                    player.updateInventory()
+                }.onFailure { returnFailure -> failure.addSuppressed(returnFailure) }
+            }
+            durablePrepared?.let { record ->
+                runCatching {
+                    constructionStore.transition(record, record.cancelled(System.currentTimeMillis()))
+                }.onFailure { cancelFailure -> failure.addSuppressed(cancelFailure) }
+            }
+            books.releasePlanReservation(prepared.plan)
+            unlockConstruction(prepared)
+            error("Builder construction activation failed for ${prepared.projectId}", failure)
+            throw BuilderUserFailure("book.failed")
+        }
+    }
+
+    private fun loadConstructionProjects() {
+        try {
+            constructionStore.loadAll().forEach { loaded ->
+                val record = if (loaded.state == BuilderConstructionProjectState.DELIVERING_OUTPUT) {
+                    constructionStore.transition(loaded, loaded.recoveryRequired(System.currentTimeMillis()))
+                } else {
+                    loaded
+                }
+                check(record.terminal || lockConstruction(record)) {
+                    "Builder construction area overlaps an existing operation: ${record.projectId}"
+                }
+                constructionProjects[record.projectId] = record
+                when (record.state) {
+                    BuilderConstructionProjectState.COMPLETED -> finalizeConstructionCompletion(record)
+                    BuilderConstructionProjectState.RECOVERY_REQUIRED -> {
+                        Bukkit.getPlayer(record.playerId)?.takeIf(Player::isOnline)?.let {
+                            send(it, "construction.recovery-required")
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        } catch (failure: Throwable) {
+            recoveryBlocked = true
+            error("Builder construction project recovery failed", failure)
+        }
+    }
+
+    private fun tickConstructionProjects() {
+        if (closed) return
+        val now = System.currentTimeMillis()
+        plannedConstructionProjects.entries.removeIf { (_, project) -> project.plan.expiresAtMillis <= now }
+        val candidates = constructionProjects.values.filter { record ->
+            record.state == BuilderConstructionProjectState.ACTIVE ||
+                record.state == BuilderConstructionProjectState.WAITING_MATERIALS ||
+                record.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
+                record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT
+        }
+        candidates.forEach { expected ->
+            if (!constructionWrites.add(expected.projectId)) return@forEach
+            val target = try {
+                BuilderConstructionProjectController.tick(expected, System.currentTimeMillis(), constructionPort)
+            } catch (failure: Throwable) {
+                constructionWrites.remove(expected.projectId)
+                error("Builder construction tick failed for ${expected.projectId}", failure)
+                return@forEach
+            }
+            if (target == null) {
+                constructionWrites.remove(expected.projectId)
+                return@forEach
+            }
+            writeAsync(
+                action = { constructionStore.transition(expected, target) },
+                callback = { durable, failure ->
+                    constructionWrites.remove(expected.projectId)
+                    if (failure != null || durable == null) {
+                        if (
+                            failure is BuilderConstructionProjectTransitionRejectedException &&
+                            expected.state == BuilderConstructionProjectState.DELIVERING_OUTPUT &&
+                            target.state != BuilderConstructionProjectState.WAITING_OUTPUT_SPACE
+                        ) {
+                            recoverRejectedOutputDelivery(expected, failure)
+                            return@writeAsync
+                        }
+                        if (failure is BuilderConstructionProjectUnknownOutcomeException) recoveryBlocked = true
+                        error("Builder construction transition failed for ${expected.projectId}", failure)
+                        return@writeAsync
+                    }
+                    constructionProjects[durable.projectId] = durable
+                    notifyConstructionTransition(expected, durable)
+                    if (durable.state == BuilderConstructionProjectState.COMPLETED) {
+                        finalizeConstructionCompletion(durable)
+                    }
+                },
+            )
+        }
+    }
+
+    private fun recoverRejectedOutputDelivery(
+        expected: BuilderConstructionProjectRecord,
+        failure: Throwable,
+    ) {
+        check(constructionWrites.add(expected.projectId)) {
+            "Builder construction output recovery write is already active"
+        }
+        val recovery = expected.recoveryRequired(System.currentTimeMillis())
+        writeAsync(
+            action = { constructionStore.transition(expected, recovery) },
+            callback = { durable, recoveryFailure ->
+                constructionWrites.remove(expected.projectId)
+                if (recoveryFailure != null || durable == null) {
+                    recoveryBlocked = true
+                    error(
+                        "Builder construction output delivery requires operator recovery for ${expected.projectId}",
+                        recoveryFailure ?: failure,
+                    )
+                    return@writeAsync
+                }
+                constructionProjects[durable.projectId] = durable
+                notifyConstructionTransition(expected, durable)
+            },
+        )
+    }
+
+    private fun notifyConstructionTransition(
+        previous: BuilderConstructionProjectRecord,
+        current: BuilderConstructionProjectRecord,
+    ) {
+        if (previous.state == current.state) return
+        val player = Bukkit.getPlayer(current.playerId)?.takeIf(Player::isOnline) ?: return
+        when (current.state) {
+            BuilderConstructionProjectState.WAITING_MATERIALS -> send(
+                player,
+                "construction.waiting-materials",
+                mapOf(
+                    "count" to messages.literal(current.cursor),
+                    "total" to messages.literal(current.steps.size),
+                    "material" to messages.literal(
+                        checkNotNull(current.steps[current.cursor].requiredMaterial).materialKey.removePrefix("minecraft:"),
+                    ),
+                ),
+            )
+            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE -> send(
+                player,
+                "construction.waiting-output",
+                mapOf(
+                    "count" to messages.literal(current.cursor),
+                    "total" to messages.literal(current.steps.size),
+                ),
+            )
+            BuilderConstructionProjectState.RECOVERY_REQUIRED -> send(player, "construction.recovery-required")
+            else -> Unit
+        }
+    }
+
+    private fun finalizeConstructionCompletion(record: BuilderConstructionProjectRecord) {
+        if (!constructionCompletions.add(record.projectId)) return
+        val completed = {
+            constructionCompletions.remove(record.projectId)
+            unlockConstruction(record)
+            Bukkit.getPlayer(record.playerId)?.takeIf(Player::isOnline)?.let { player ->
+                send(
+                    player,
+                    "construction.completed",
+                    mapOf("count" to messages.literal(record.steps.size)),
+                )
+            }
+            info(
+                debugLine.line(
+                    "event" to "construction_completed",
+                    "operation" to record.projectId,
+                    "player" to record.playerId,
+                    "blocks" to record.steps.size,
+                ),
+            )
+        }
+        if (record.plan.bookInstanceId == null) {
+            completed()
+            return
+        }
+        books.commitPlanReservation(record.plan) { consumed, failure ->
+            if (!consumed) {
+                recoveryBlocked = true
+                error("Builder construction book consumption requires recovery for ${record.projectId}", failure)
+                Bukkit.getPlayer(record.playerId)?.takeIf(Player::isOnline)?.let { player ->
+                    send(player, "construction.recovery-required")
+                }
+                return@commitPlanReservation
+            }
+            completed()
+        }
     }
 
     private fun beginMutation(player: Player, operation: BuilderActiveOperation) {
@@ -1291,11 +1686,23 @@ internal class BuilderToolsRuntime(
 
     private fun showStatus(player: Player) {
         val active = operationLocks.operation(player.uniqueId)
+        val construction = constructionProjects.values
+            .filter { it.playerId == player.uniqueId && !it.terminal }
+            .maxByOrNull(BuilderConstructionProjectRecord::updatedAtMillis)
         val plan = previews.plan(player.uniqueId)
         val selection = selectionOrNull(player)
         val selectionPoints = selections.points(player.uniqueId, player.world.uid)
         when {
             active != null -> send(player, "status.plan", mapOf("kind" to kindLabel(player, active.record.plan.kind), "count" to messages.literal(active.appliedChanges), "total" to messages.literal(active.record.plan.changes.size)))
+            construction != null -> send(
+                player,
+                "construction.status",
+                mapOf(
+                    "state" to messages.literal(construction.state.name.lowercase(Locale.ROOT).replace('_', ' ')),
+                    "count" to messages.literal(construction.cursor),
+                    "total" to messages.literal(construction.steps.size),
+                ),
+            )
             plan != null -> send(player, "status.plan", mapOf("kind" to kindLabel(player, plan.kind), "count" to messages.literal(0), "total" to messages.literal(plan.changes.size)))
             selection != null -> send(player, "status.selection", mapOf("x" to messages.literal(selection.sizeX), "y" to messages.literal(selection.sizeY), "z" to messages.literal(selection.sizeZ), "volume" to messages.literal(selection.volume)))
             selectionPoints.first != null -> send(
@@ -1353,7 +1760,22 @@ internal class BuilderToolsRuntime(
         .asSequence()
         .filter { it.playerId == playerId && it.plan.kind != BuilderPlanKind.UNDO }
         .filter { (it.committedAtMillis ?: 0L) >= now - 3_600_000L }
-        .sumOf { it.plan.changes.size }
+        .sumOf { it.plan.changes.size } + constructionProjects.values
+        .asSequence()
+        .filter { it.playerId == playerId && it.state == BuilderConstructionProjectState.COMPLETED }
+        .filter { (it.completedAtMillis ?: 0L) >= now - 3_600_000L }
+        .sumOf { it.steps.size }
+
+    private fun lockConstruction(record: BuilderConstructionProjectRecord): Boolean {
+        if (record.projectId in constructionLocks) return true
+        if (!operationLocks.tryLock(record.plan)) return false
+        constructionLocks += record.projectId
+        return true
+    }
+
+    private fun unlockConstruction(record: BuilderConstructionProjectRecord) {
+        if (constructionLocks.remove(record.projectId)) operationLocks.unlock(record.plan)
+    }
 
     private fun hourlyLimit(player: Player): Int =
         BuilderPermissionPolicy.hourlyChanges(player::hasPermission, config.baseHourlyChanges)
@@ -1376,9 +1798,36 @@ internal class BuilderToolsRuntime(
         messages.render("kinds.${kind.name.lowercase(Locale.ROOT)}", locale(player))
 
     private fun discardPendingPlan(playerId: UUID) {
+        previews.plan(playerId)?.let { plan -> plannedConstructionProjects.remove(plan.id) }
         previews.discard(playerId)
         shop.clear(playerId)
         crown.clearAnchor(playerId)
+    }
+
+    private fun recoverPreparedConstruction(player: Player) {
+        val prepared = constructionProjects.values.singleOrNull { record ->
+            record.playerId == player.uniqueId && record.state == BuilderConstructionProjectState.PREPARED
+        } ?: return
+        try {
+            val target = if (BuilderInventory.countExact(player, prepared.bookCost) >= prepared.bookCost.amount) {
+                prepared.cancelled(System.currentTimeMillis())
+            } else {
+                prepared.recoveryRequired(System.currentTimeMillis())
+            }
+            val durable = constructionStore.transition(prepared, target)
+            constructionProjects[durable.projectId] = durable
+            if (durable.state == BuilderConstructionProjectState.CANCELLED) {
+                books.releasePlanReservation(durable.plan)
+                unlockConstruction(durable)
+                send(player, "operation.rolled-back")
+            } else {
+                send(player, "construction.recovery-required")
+            }
+        } catch (failure: Throwable) {
+            recoveryBlocked = true
+            error("Builder construction prepared recovery failed for ${prepared.projectId}", failure)
+            send(player, "construction.recovery-required")
+        }
     }
 
     private fun loadRecoveryState() {
@@ -1566,13 +2015,18 @@ internal class BuilderToolsRuntime(
     ) {
         try {
             ensureAvailable(player)
-            if (player.isSneaking) {
+            if (player.isSneaking && data.playerCreated) {
                 BuildBookEditorGui.open(player)
                 return
             }
+            if (data.playerCreated) {
+                if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
+                books.verifySchematic(data)
+            } else if (!systemBuildBookResolver(data)) {
+                throw BuilderUserFailure("book.invalid")
+            }
             val current = BuildingManager.pending(player.uniqueId)
             if (action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
-                books.verifySchematic(data)
                 val opened = BuildingManager.openPreview(player, checkNotNull(clickedLocation), data)
                     ?: throw BuilderUserFailure("book.invalid")
                 if (current?.isExactOpenPreview(player, data) != true) {
@@ -1603,6 +2057,7 @@ internal class BuilderToolsRuntime(
 
     @EventHandler(priority = EventPriority.LOWEST)
     fun onJoin(event: PlayerJoinEvent) {
+        recoverPreparedConstruction(event.player)
         if (!playerRecoveries.onPlayerAvailable(event.player)) books.onPlayerAvailable(event.player)
     }
 
@@ -1714,4 +2169,11 @@ internal class BuilderToolsRuntime(
         const val HEALTH_PUBLISH_PERIOD_TICKS = 20L
         const val STORAGE_SHUTDOWN_TIMEOUT_SECONDS = 5L
     }
+}
+
+private fun loadSystemBuildBookResolver(plugin: JavaPlugin): (BuildBookData) -> Boolean {
+    val path = plugin.dataPath.resolve("modules/system-build-books.yml")
+    require(Files.isRegularFile(path)) { "System build-book catalog is missing" }
+    val catalog = SystemBuildBookCatalog.load(path, BuilderStoragePaths.schematicsRoot())
+    return { data -> catalog.resolve(data) != null }
 }

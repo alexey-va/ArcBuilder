@@ -30,6 +30,9 @@ class BuilderToolsConfig(
     val blocksPerTick: Int get() = config.integer("limits.blocks-per-tick", 16)
     val baseHourlyChanges: Int get() = config.integer("limits.base-hourly-changes", 20_000)
     val maximumRange: Double get() = config.double("limits.maximum-range", 64.0)
+    val constructionContainerRadius: Int get() = config.integer("construction.container-radius", 4)
+    val constructionOnlineInventoryRange: Double get() = config.double("construction.online-inventory-range", 48.0)
+    val constructionTickPeriod: Long get() = config.long("construction.tick-period-ticks", 1L)
     val previewPeriodTicks: Long get() = config.long("preview.period-ticks", 10L)
     val previewRadius: Double get() = config.double("preview.radius", 32.0)
     val previewSpacing: Double get() = config.double("preview.outline-spacing", 0.75)
@@ -86,6 +89,11 @@ class BuilderToolsConfig(
         require(blocksPerTick in 1..256) { "Builder-tools blocks-per-tick is invalid" }
         require(baseHourlyChanges in maxChanges..200_000) { "Builder-tools hourly limit is invalid" }
         require(maximumRange.isFinite() && maximumRange in 8.0..128.0) { "Builder-tools maximum range is invalid" }
+        require(constructionContainerRadius in 1..16) { "Builder construction container radius is invalid" }
+        require(constructionOnlineInventoryRange.isFinite() && constructionOnlineInventoryRange in 1.0..128.0) {
+            "Builder construction online inventory range is invalid"
+        }
+        require(constructionTickPeriod in 1L..100L) { "Builder construction tick period is invalid" }
         require(previewPeriodTicks in 5L..40L) { "Builder-tools preview period is invalid" }
         require(previewRadius.isFinite() && previewRadius in 8.0..64.0) { "Builder-tools preview radius is invalid" }
         require(previewSpacing.isFinite() && previewSpacing in 0.25..2.0) { "Builder-tools preview spacing is invalid" }
@@ -293,6 +301,12 @@ class BuilderToolsConfig(
                 "operation.completed",
                 "operation.paste-again",
                 "operation.rolled-back",
+                "construction.started",
+                "construction.waiting-materials",
+                "construction.waiting-output",
+                "construction.completed",
+                "construction.recovery-required",
+                "construction.status",
                 "items.none",
                 "items.summary",
                 "status.selection",

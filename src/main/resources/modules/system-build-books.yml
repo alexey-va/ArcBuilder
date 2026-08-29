@@ -1,0 +1,46 @@
+# Reviewed physical one-use books backed by the shared ARC schematic root.
+books:
+  - building-id: amogus_1.schem
+    title: Amogus
+    sha256: dae82c701d86e8ac96b329cf2b5dab7021369b3ab456727d158a4f91695f0170
+    player-enabled: true
+  - building-id: bank_samurai.schem
+    title: Банк в японском стиле
+    sha256: a7fe7a1ab5cd138707fb99ad5a8c2f60161324bf175ca7a5a696b9cced739835
+    player-enabled: true
+  - building-id: baton_house.schem
+    title: Дом Baton
+    sha256: 7f67f9111037dc2ad076ad1cdeda6b50cb876d6ffaf1f99072351b47a9dee470
+    player-enabled: true
+  - building-id: baton_house_2.schem
+    title: Дом Baton II
+    sha256: 3604b23122643c8e6e479b2b5a19dff49d76a85dcda085eae1e6a36104c5676b
+    player-enabled: true
+  - building-id: koxae_1.schem
+    title: Дом Koxae
+    sha256: 79d501f0b6759c1ebf4868652c92ef31ac13798b9c8bc18591abc6f88d338821
+    player-enabled: true
+  - building-id: medium_wooden_house.schem
+    title: Средний деревянный дом
+    sha256: 80bc9ff074149dc89e8669906a4a4e1cdacce4f4972863c152bf31b0f7b2402b
+    player-enabled: true
+  - building-id: pagoda_1.schem
+    title: Пагода
+    sha256: 6dddf37f5a8629e4a9ec4d61c979433e97714456f315c48b749626419a24d754
+    player-enabled: true
+  - building-id: schvec_big.schem
+    title: Большой дом Schvec
+    sha256: 0cb8ceee2a387019e0783977d3dcf2febaaae6746f215ca1f236dfbf7b7e65fd
+    player-enabled: true
+  - building-id: shvec_house_1.schem
+    title: Дом Shvec
+    sha256: 6455a027363441223b1741801b628a38960ce3430729fb5172500b42b962031e
+    player-enabled: true
+  - building-id: viking.schem
+    title: Стартовый дом викинга
+    sha256: e1ab6835fb0a6919516199306261bfda85f7a69def36f4bb8b3c1664f451d4de
+    player-enabled: true
+  - building-id: viking2.schem
+    title: Большой дом викинга
+    sha256: 9237fe9b7849f0da03b4bc7fdb3c27327f0c60b23e04fac69e3ec0cde94a3848
+    player-enabled: true

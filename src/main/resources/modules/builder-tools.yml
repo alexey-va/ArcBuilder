@@ -22,6 +22,13 @@ timers:
   undo-ttl: 30m
   journal-retention: 2h
 
+construction:
+  # Ordinary chests, trapped chests and barrels in this shell feed persistent projects.
+  container-radius: 4
+  # An online owner's inventory participates only while they remain near the site.
+  online-inventory-range: 48
+  tick-period-ticks: 1
+
 preview:
   # Refresh twice per second, matching the persistent feel of the old Denizen outline.
   period-ticks: 10
@@ -148,8 +155,8 @@ locales:
       inventory: |-
 
         <prefix><#c42323>Операцию пока нельзя выполнить.
-        <#8c8c8c>   <#e6fff3>Проверьте материалы и свободное место.
-        <#8c8c8c>   <#e6fff3>Убедитесь, что инструмент достаточно прочный.
+        <#8c8c8c>   <#e6fff3>Для этой операции не хватает предметов или свободного места.
+        <#8c8c8c>   <#969696>Строительная книга запускает отдельный проект и принимает ресурсы постепенно.
       protection: |-
 
         <prefix><#c42323>Строительство здесь запрещено.
@@ -616,6 +623,26 @@ locales:
 
         <prefix><#c42323>Операция отменена и полностью восстановлена.
         <#8c8c8c>   <#969696>Мир и инвентарь сохранены.
+    construction:
+      started: |-
+
+        <prefix><#2bba43>Строительный проект запущен: <#d48763><count> <#e6fff3>блоков.
+        <#8c8c8c>   <#e6fff3>Книга использована. Материалы можно докладывать постепенно.
+        <#8c8c8c>   <#e6fff3>Подойдут ваш инвентарь и доступные сундуки рядом со стройкой.
+      waiting-materials: |-
+
+        <prefix><#ff9f0f>Стройка ждёт материал: <#d48763><material>
+        <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total><#e6fff3>. Положите ресурс в доступный сундук рядом.
+      waiting-output: |-
+
+        <prefix><#ff9f0f>Стройке некуда сложить снятые блоки.
+        <#8c8c8c>   <#e6fff3>Освободите место в доступном сундуке рядом. Готово: <#d48763><count>/<total>
+      completed: "<prefix><#2bba43>Строительный проект завершён: <#d48763><count> <#e6fff3>блоков."
+      recovery-required: |-
+
+        <prefix><#c42323>Стройка остановлена из-за изменения мира или прав.
+        <#8c8c8c>   <#e6fff3>Нужна безопасная проверка администратора; проект не продолжает работу вслепую.
+      status: "<prefix><#e6fff3>Стройка: <#d48763><state> <#8c8c8c>— <#e6fff3><count>/<total> блоков."
     items:
       none: "нет"
       summary: "предметов: <items> — видов: <types>"
@@ -715,7 +742,8 @@ locales:
       inventory: |-
 
         <prefix><red>The operation cannot start yet.
-        <dark_gray>   <gray>Check materials, space, and tool durability.
+        <dark_gray>   <gray>This operation lacks required items or free inventory space.
+        <dark_gray>   <gray>Build books start a separate project and accept materials gradually.
       protection: |-
 
         <prefix><red>You cannot build here.
@@ -1151,6 +1179,26 @@ locales:
 
         <prefix><red>The operation was rolled back and restored.
         <dark_gray>   <gray>The world and inventory are safe.
+    construction:
+      started: |-
+
+        <prefix><green>Construction project started: <white><count></white> blocks.
+        <dark_gray>   <gray>The book was consumed. Materials may be supplied gradually.
+        <dark_gray>   <gray>Your nearby inventory and accessible site containers are used.
+      waiting-materials: |-
+
+        <prefix><yellow>Construction is waiting for: <white><material></white>.
+        <dark_gray>   <gray>Progress: <white><count>/<total></white>. Put it in an accessible nearby container.
+      waiting-output: |-
+
+        <prefix><yellow>No room for recovered blocks.
+        <dark_gray>   <gray>Free space in an accessible nearby container. Progress: <white><count>/<total></white>.
+      completed: "<prefix><green>Construction completed: <white><count></white> blocks."
+      recovery-required: |-
+
+        <prefix><red>Construction stopped because the world or permissions changed.
+        <dark_gray>   <gray>An administrator must review it; the project will not continue blindly.
+      status: "<prefix><gray>Construction: <white><state></white> — <white><count>/<total></white> blocks."
     items:
       none: "none"
       summary: "items: <items> — types: <types>"

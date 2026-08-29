@@ -18,10 +18,15 @@ class LandsHook(plugin: Plugin) {
     private val integration = LandsIntegration.of(plugin)
 
     fun canModify(player: Player, block: Block, placing: Material? = null): Boolean {
+        return canModify(player.uniqueId, block, placing)
+    }
+
+    /** Uses Lands' persisted player identity so construction may continue while the owner is offline. */
+    fun canModify(playerId: UUID, block: Block, placing: Material? = null): Boolean {
         val landWorld = integration.getWorld(block.world) ?: return true
         val location = block.location
         if (landWorld.getArea(location) == null) return true
-        val landPlayer = integration.getLandPlayer(player.uniqueId) ?: return false
+        val landPlayer = integration.getLandPlayer(playerId) ?: return false
         val breakAllowed = block.type.isAir ||
             landWorld.hasRoleFlag(landPlayer, location, Flags.BLOCK_BREAK, block.type, false)
         val placeAllowed = placing == null || landWorld.hasRoleFlag(landPlayer, location, Flags.BLOCK_PLACE, placing, false)

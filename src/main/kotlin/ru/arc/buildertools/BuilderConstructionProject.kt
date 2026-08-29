@@ -12,6 +12,7 @@ internal enum class BuilderConstructionProjectState(val terminal: Boolean) {
     ACTIVE(false),
     WAITING_MATERIALS(false),
     WAITING_OUTPUT_SPACE(false),
+    DELIVERING_OUTPUT(false),
     RECOVERY_REQUIRED(false),
     COMPLETED(true),
     CANCELLED(true),
@@ -86,7 +87,7 @@ internal data class BuilderConstructionProjectRecord(
         completedAtMillis?.let {
             require(it == updatedAtMillis) { "Builder construction project completion time is invalid" }
         }
-        require((state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE) == (pendingOutput != null)) {
+        require((state in OUTPUT_STATES) == (pendingOutput != null)) {
             "Builder construction project pending output does not match its state"
         }
         pendingOutput?.validated()
@@ -123,6 +124,13 @@ internal data class BuilderConstructionProjectRecord(
         copy(
             state = BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
             pendingOutput = output.validated(),
+            updatedAtMillis = nowMillis,
+        ),
+    )
+
+    fun deliveringOutput(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+        copy(
+            state = BuilderConstructionProjectState.DELIVERING_OUTPUT,
             updatedAtMillis = nowMillis,
         ),
     )
@@ -171,6 +179,10 @@ internal data class BuilderConstructionProjectRecord(
 
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1
+        private val OUTPUT_STATES = setOf(
+            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
+            BuilderConstructionProjectState.DELIVERING_OUTPUT,
+        )
 
         private fun sameExchange(first: List<BuilderItemAmount>, second: List<BuilderItemAmount>): Boolean =
             normalizedExchange(first) == normalizedExchange(second)
@@ -210,11 +222,18 @@ internal object BuilderConstructionProjectTransitionRules {
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.WAITING_MATERIALS ->
-                after.state == BuilderConstructionProjectState.ACTIVE && sameCursor ||
+                after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
+                    after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
+                    after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ->
-                after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
+                after.state == BuilderConstructionProjectState.DELIVERING_OUTPUT && sameCursor ||
+                    after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
+            BuilderConstructionProjectState.DELIVERING_OUTPUT ->
+                after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
+                    after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
@@ -280,7 +299,20 @@ internal class BuilderConstructionProjectStore(
         val current = journal.loadOrNull(checkedExpected.projectId.toString())
         if (current == checkedTarget) return checkedTarget
         require(current == checkedExpected) { "Builder construction project's durable predecessor changed" }
-        return journal.commit(checkedTarget.projectId.toString(), checkedTarget)
+        return try {
+            journal.commit(checkedTarget.projectId.toString(), checkedTarget)
+        } catch (commitFailure: Throwable) {
+            val afterFailure = try {
+                journal.loadOrNull(checkedExpected.projectId.toString())
+            } catch (readFailure: Throwable) {
+                throw BuilderConstructionProjectUnknownOutcomeException(commitFailure, readFailure)
+            }
+            when (afterFailure) {
+                checkedTarget -> checkedTarget
+                checkedExpected -> throw BuilderConstructionProjectTransitionRejectedException(commitFailure)
+                else -> throw BuilderConstructionProjectUnknownOutcomeException(commitFailure)
+            }
+        }
     }
 
     fun loadAll(): List<BuilderConstructionProjectRecord> =
@@ -288,6 +320,17 @@ internal class BuilderConstructionProjectStore(
 
     fun loadOrNull(projectId: UUID): BuilderConstructionProjectRecord? =
         journal.loadOrNull(projectId.toString())?.validated(maxChanges)
+}
+
+internal class BuilderConstructionProjectTransitionRejectedException(cause: Throwable) : RuntimeException(cause)
+
+internal class BuilderConstructionProjectUnknownOutcomeException(
+    cause: Throwable,
+    readFailure: Throwable? = null,
+) : RuntimeException("Builder construction project's durable transition outcome is unknown", cause) {
+    init {
+        readFailure?.let(::addSuppressed)
+    }
 }
 
 internal interface BuilderConstructionProjectPort {
@@ -313,8 +356,10 @@ internal interface BuilderConstructionProjectPort {
         output: BuilderItemAmount,
     ): Boolean
 
-    fun apply(change: BuilderBlockChange)
+    fun apply(project: BuilderConstructionProjectRecord, change: BuilderBlockChange)
 }
+
+internal class BuilderConstructionTemporarilyUnavailableException : RuntimeException()
 
 internal object BuilderConstructionProjectController {
     /**
@@ -333,22 +378,10 @@ internal object BuilderConstructionProjectController {
             BuilderConstructionProjectState.COMPLETED,
             BuilderConstructionProjectState.CANCELLED,
             -> null
-            BuilderConstructionProjectState.WAITING_MATERIALS -> resumeMaterials(current, nowMillis, port)
-            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE -> deliverOutput(current, nowMillis, port)
+            BuilderConstructionProjectState.WAITING_MATERIALS -> processStep(current, nowMillis, port)
+            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE -> current.deliveringOutput(nowMillis)
+            BuilderConstructionProjectState.DELIVERING_OUTPUT -> deliverOutput(current, nowMillis, port)
             BuilderConstructionProjectState.ACTIVE -> processStep(current, nowMillis, port)
-        }
-    }
-
-    private fun resumeMaterials(
-        record: BuilderConstructionProjectRecord,
-        nowMillis: Long,
-        port: BuilderConstructionProjectPort,
-    ): BuilderConstructionProjectRecord {
-        val step = record.steps[record.cursor]
-        return if (worldMatchesBefore(record, step, port) && canModify(record, step, port)) {
-            record.activated(nowMillis)
-        } else {
-            record.recoveryRequired(nowMillis)
         }
     }
 
@@ -358,13 +391,17 @@ internal object BuilderConstructionProjectController {
         port: BuilderConstructionProjectPort,
     ): BuilderConstructionProjectRecord? {
         val step = record.steps[record.cursor]
-        if (!worldMatchesAfter(record, step, port)) return record.recoveryRequired(nowMillis)
+        when (worldMatchesAfter(step, port)) {
+            null -> return null
+            false -> return record.recoveryRequired(nowMillis)
+            true -> Unit
+        }
         val output = checkNotNull(record.pendingOutput)
         return try {
             if (port.storeOutput(record.playerId, record, output)) {
                 record.outputDelivered(nowMillis)
             } else {
-                null
+                record.waitingForOutput(output, nowMillis)
             }
         } catch (_: Throwable) {
             record.recoveryRequired(nowMillis)
@@ -375,10 +412,17 @@ internal object BuilderConstructionProjectController {
         record: BuilderConstructionProjectRecord,
         nowMillis: Long,
         port: BuilderConstructionProjectPort,
-    ): BuilderConstructionProjectRecord {
+    ): BuilderConstructionProjectRecord? {
         val step = record.steps[record.cursor]
-        if (!worldMatchesBefore(record, step, port) || !canModify(record, step, port)) {
-            return record.recoveryRequired(nowMillis)
+        when (worldMatchesBefore(step, port)) {
+            null -> return null
+            false -> return record.recoveryRequired(nowMillis)
+            true -> Unit
+        }
+        when (canModify(record, step, port)) {
+            null -> return null
+            false -> return record.recoveryRequired(nowMillis)
+            true -> Unit
         }
         val input = step.requiredMaterial
         if (input != null) {
@@ -387,47 +431,55 @@ internal object BuilderConstructionProjectController {
             } catch (_: Throwable) {
                 false
             }
-            if (!removed) return record.waitingForMaterials(nowMillis)
+            if (!removed) {
+                return if (record.state == BuilderConstructionProjectState.WAITING_MATERIALS) {
+                    null
+                } else {
+                    record.waitingForMaterials(nowMillis)
+                }
+            }
         }
         try {
-            port.apply(step.change)
+            port.apply(record, step.change)
         } catch (_: Throwable) {
             input?.let { runCatching { port.returnInput(record.playerId, record, it) } }
             return record.recoveryRequired(nowMillis)
         }
         val output = step.output ?: return record.advanced(nowMillis)
-        return try {
-            if (port.storeOutput(record.playerId, record, output)) {
-                record.advanced(nowMillis)
-            } else {
-                record.waitingForOutput(output, nowMillis)
-            }
-        } catch (_: Throwable) {
-            record.waitingForOutput(output, nowMillis)
-        }
+        return record.waitingForOutput(output, nowMillis)
     }
 
     private fun worldMatchesBefore(
-        record: BuilderConstructionProjectRecord,
         step: BuilderConstructionStep,
         port: BuilderConstructionProjectPort,
-    ): Boolean = runCatching {
+    ): Boolean? = try {
         port.currentBlockData(step.change.position) == step.change.beforeBlockData
-    }.getOrDefault(false)
+    } catch (_: BuilderConstructionTemporarilyUnavailableException) {
+        null
+    } catch (_: Throwable) {
+        false
+    }
 
     private fun worldMatchesAfter(
-        record: BuilderConstructionProjectRecord,
         step: BuilderConstructionStep,
         port: BuilderConstructionProjectPort,
-    ): Boolean = runCatching {
+    ): Boolean? = try {
         port.currentBlockData(step.change.position) == step.change.afterBlockData
-    }.getOrDefault(false)
+    } catch (_: BuilderConstructionTemporarilyUnavailableException) {
+        null
+    } catch (_: Throwable) {
+        false
+    }
 
     private fun canModify(
         record: BuilderConstructionProjectRecord,
         step: BuilderConstructionStep,
         port: BuilderConstructionProjectPort,
-    ): Boolean = runCatching {
+    ): Boolean? = try {
         port.canModify(record.playerId, step.change)
-    }.getOrDefault(false)
+    } catch (_: BuilderConstructionTemporarilyUnavailableException) {
+        null
+    } catch (_: Throwable) {
+        false
+    }
 }

@@ -4,11 +4,10 @@ import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.block.Container
+import org.bukkit.block.DoubleChest
 import org.bukkit.entity.Player
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
-import java.util.Collections
-import java.util.IdentityHashMap
 import java.util.UUID
 
 internal class BuilderConstructionResources(
@@ -106,7 +105,7 @@ internal class BuilderConstructionResources(
     ): List<ResourceInventory> {
         val bounds = ProjectBounds.from(project)
         val world = worldProvider(bounds.worldId) ?: return emptyList()
-        val seen = Collections.newSetFromMap(IdentityHashMap<Inventory, Boolean>())
+        val seen = mutableSetOf<String>()
         val sources = mutableListOf<ResourceInventory>()
         val minY = (bounds.minY - containerRadius).coerceAtLeast(world.minHeight)
         val maxY = (bounds.maxY + containerRadius).coerceAtMost(world.maxHeight - 1)
@@ -118,13 +117,21 @@ internal class BuilderConstructionResources(
                     val block = world.getBlockAt(x, y, z)
                     if (block.type !in SUPPORTED_CONTAINERS) continue
                     val state = block.state as? Container ?: continue
-                    if (!canOpenContainer(playerId, block)) continue
                     val inventory = state.inventory
-                    if (!seen.add(inventory)) continue
+                    val inventoryBlocks = inventoryBlocks(block, inventory)
+                    if (inventoryBlocks.isEmpty()) continue
+                    if (inventoryBlocks.any { !canOpenContainer(playerId, it) }) continue
+                    val key = inventoryBlocks
+                        .map { "${it.world.uid}:${it.x}:${it.y}:${it.z}" }
+                        .sorted()
+                        .joinToString("|")
+                    if (!seen.add(key)) continue
                     sources += ResourceInventory(inventory) {
-                        block.type in SUPPORTED_CONTAINERS &&
-                            block.state is Container &&
-                            canOpenContainer(playerId, block)
+                        inventoryBlocks.all { containerBlock ->
+                            containerBlock.type in SUPPORTED_CONTAINERS &&
+                                containerBlock.state is Container &&
+                                canOpenContainer(playerId, containerBlock)
+                        }
                     }
                 }
             }
@@ -169,6 +176,16 @@ internal class BuilderConstructionResources(
 
     private companion object {
         val SUPPORTED_CONTAINERS = setOf(Material.CHEST, Material.TRAPPED_CHEST, Material.BARREL)
+
+        fun inventoryBlocks(fallback: Block, inventory: Inventory): List<Block> {
+            val holder = inventory.holder
+            if (holder !is DoubleChest) return listOf(fallback)
+            return listOf(holder.leftSide, holder.rightSide)
+                .mapNotNull { (it as? Container)?.block }
+                .distinctBy { listOf(it.world.uid, it.x, it.y, it.z) }
+                .takeIf { it.size == 2 }
+                ?: emptyList()
+        }
 
         fun distanceToRange(value: Double, minimum: Double, maximum: Double): Double = when {
             value < minimum -> minimum - value

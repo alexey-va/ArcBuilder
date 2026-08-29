@@ -17,6 +17,7 @@ and health reporting.
 - Command and permission declarations: `src/main/resources/plugin.yml`
 - Builder policy, limits, and player text: `src/main/resources/modules/builder-tools.yml`
 - Book presentation and behavior: `src/main/resources/modules/auto-build.yml`
+- Reviewed legacy/system book catalogue: `src/main/resources/modules/system-build-books.yml`
 
 `ArcBuilderPlugin` installs the Paper runtime, metrics, and optional hooks,
 initializes `BuilderToolsModule`, publishes health, and closes those owners in
@@ -165,6 +166,31 @@ The book subsystem is larger and should be entered through
   into the correspondingly named coordinators;
 - `BuildingManager` and `ConstructionSite` own interactive book previews and
   transforms.
+
+Confirmed build books do not use the ordinary all-at-once mutation path.
+`BuilderConstructionProject.kt` owns a durable, restart-safe project that
+advances one exact block at a time. Only the physical book is consumed at
+startup. Each step obtains its own material later, applies its prevalidated
+change, and stores any replaced block before advancing the durable cursor.
+Missing material or output space is a waiting state, not a failed build.
+Ambiguous block, permission, persistence, or output-delivery state fails closed
+into `RECOVERY_REQUIRED`.
+
+`BuilderConstructionResources.kt` is the sole material boundary for these
+projects. It searches the online owner's nearby inventory plus vanilla chests,
+trapped chests, and barrels in the configured shell outside the construction
+bounds. Wilderness containers are allowed. A container in a Lands claim is
+included only when the project owner's UUID has `INTERACT_CONTAINER` there;
+that permission is checked once during discovery and again immediately before
+inventory mutation. Never replace this with a check against the construction
+site's claim, because a wilderness project may sit beside somebody else's
+protected chest.
+
+System/legacy physical books are deliberately separate from player-authored
+registered books. `SystemBuildBookCatalog.kt` loads the reviewed catalogue,
+constrains every path to the shared schematic root, and verifies its SHA-256 at
+startup and again on use. Do not make every file in the shared root callable:
+it also contains player schematics and operational test files.
 
 The MySQL integration suite belongs to GitHub Actions and must not be run
 locally.
