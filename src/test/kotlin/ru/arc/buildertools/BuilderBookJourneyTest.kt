@@ -4,6 +4,8 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import net.kyori.adventure.text.minimessage.MiniMessage
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import ru.arc.config.Config
 import java.nio.file.Files
 
@@ -87,12 +89,13 @@ class BuilderBookJourneyTest : FunSpec({
 
         val russianGuide = config.stringList("locales.ru.book.guide").joinToString("\n")
         russianGuide shouldContain "Контур виден постоянно"
-        russianGuide shouldContain "бесплатный черновик"
-        russianGuide shouldContain "смету без оплаты"
+        russianGuide shouldContain "бесплатный"
+        russianGuide shouldContain ">черновик</hover>"
+        russianGuide shouldContain ">смету</hover> без оплаты"
         config.string("locales.ru.book.status.active") shouldContain "Себестоимость копии"
         config.string("locales.en.book.status.active") shouldContain "Copy at stored cost"
-        config.string("locales.ru.book.status.checking") shouldContain "UUID, владельца и поколение"
-        config.string("locales.en.book.status.checking") shouldContain "UUID, owner, and generation"
+        config.string("locales.ru.book.status.checking") shouldContain "подлинность"
+        config.string("locales.en.book.status.checking") shouldContain "authenticity"
         config.string("locales.ru.book.status.changed") shouldContain "/builder book status"
         config.string("locales.en.book.status.changed") shouldContain "/builder book status"
         config.string("locales.ru.book.preview-required") shouldContain "ПКМ"
@@ -105,6 +108,7 @@ class BuilderBookJourneyTest : FunSpec({
 
     test("dense dynamic messages keep one fact per physical chat line") {
         val config = Config(Files.createTempDirectory("arc-builder-message-layout-"), "modules/builder-tools.yml")
+        val messages = BuilderToolsConfig(config).messages()
 
         listOf("ru", "en").forEach { locale ->
             val plan = config.string("locales.$locale.plan.ready").lines()
@@ -112,6 +116,21 @@ class BuilderBookJourneyTest : FunSpec({
             plan.first() shouldBe ""
             plan.single { it.contains("<cost>") }.contains("<reward>") shouldBe false
             plan.single { it.contains("<reward>") }.contains("<cost>") shouldBe false
+            plan.single { it.contains("<cost>") } shouldContain "<hover:show_text:"
+            plan.single { it.contains("<reward>") } shouldContain "<hover:show_text:"
+            plan.count { it.contains("</hover>") } shouldBe 3
+            val renderedPlan = messages.render(
+                "plan.ready",
+                locale,
+                mapOf(
+                    "kind" to messages.literal("Blueprint paste"),
+                    "count" to messages.literal(55),
+                    "cost" to messages.literal("none"),
+                    "reward" to messages.literal("none"),
+                ),
+            )
+            MiniMessage.miniMessage().serialize(renderedPlan)
+                .split("<hover:show_text").size shouldBe 4
 
             val quote = config.string("locales.$locale.book.quote").lines()
             quote.size shouldBe 6
@@ -137,14 +156,57 @@ class BuilderBookJourneyTest : FunSpec({
         }
     }
 
+    test("compact localized summaries explain unfamiliar terms with hover text") {
+        val config = Config(Files.createTempDirectory("arc-builder-hover-glossary-"), "modules/builder-tools.yml")
+        val scalarMinimums = mapOf(
+            "clipboard.saved" to 2,
+            "book.status.active" to 1,
+            "book.quote" to 4,
+            "plan.ready" to 3,
+            "plan.skipped" to 1,
+            "construction.started" to 1,
+            "construction.waiting-materials" to 1,
+            "construction.status" to 1,
+            "items.summary" to 2,
+            "status.plan" to 1,
+            "crown.palette-row" to 1,
+        )
+        val listMinimums = mapOf(
+            "help" to 4,
+            "book.guide" to 6,
+            "crown.status" to 4,
+            "plan.market" to 2,
+        )
+
+        listOf("ru", "en").forEach { locale ->
+            scalarMinimums.forEach { (path, minimum) ->
+                (config.string("locales.$locale.$path")
+                    .split("<hover:show_text").size >= minimum + 1) shouldBe true
+            }
+            listMinimums.forEach { (path, minimum) ->
+                (config.stringList("locales.$locale.$path").joinToString("\n")
+                    .split("<hover:show_text").size >= minimum + 1) shouldBe true
+            }
+            BuilderPlanKind.entries.forEach { kind ->
+                config.string("locales.$locale.kinds.${kind.name.lowercase()}") shouldContain "<hover:show_text:"
+            }
+            BuilderConstructionProjectState.entries.forEach { state ->
+                config.string("locales.$locale.construction.states.${state.name.lowercase()}") shouldContain
+                    "<hover:show_text:"
+            }
+        }
+    }
+
     test("player guidance hides internal state names and capitalizes operation labels") {
         val config = Config(Files.createTempDirectory("arc-builder-wording-"), "modules/builder-tools.yml")
+        val messages = BuilderToolsConfig(config).messages()
+        val plain = PlainTextComponentSerializer.plainText()
 
         config.string("locales.ru.book.quote-expired").lowercase().contains("activate") shouldBe false
         config.string("locales.ru.book.quote-expired").lowercase().contains("copy") shouldBe false
         config.string("locales.en.book.quote-expired").lowercase().contains("activate") shouldBe false
         config.string("locales.en.book.quote-expired").lowercase().contains("copy") shouldBe false
-        config.string("locales.ru.kinds.paste") shouldBe "Вставка чертежа"
-        config.string("locales.en.kinds.paste") shouldBe "Blueprint paste"
+        plain.serialize(messages.render("kinds.paste", "ru")) shouldBe "Вставка чертежа"
+        plain.serialize(messages.render("kinds.paste", "en")) shouldBe "Blueprint paste"
     }
 })

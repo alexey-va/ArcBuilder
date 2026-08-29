@@ -1698,7 +1698,7 @@ internal class BuilderToolsRuntime(
                 player,
                 "construction.status",
                 mapOf(
-                    "state" to messages.literal(construction.state.name.lowercase(Locale.ROOT).replace('_', ' ')),
+                    "state" to constructionStateLabel(player, construction.state),
                     "count" to messages.literal(construction.cursor),
                     "total" to messages.literal(construction.steps.size),
                 ),
@@ -1796,6 +1796,9 @@ internal class BuilderToolsRuntime(
 
     private fun kindLabel(player: Player, kind: BuilderPlanKind): Component =
         messages.render("kinds.${kind.name.lowercase(Locale.ROOT)}", locale(player))
+
+    private fun constructionStateLabel(player: Player, state: BuilderConstructionProjectState): Component =
+        messages.render("construction.states.${state.name.lowercase(Locale.ROOT)}", locale(player))
 
     private fun discardPendingPlan(playerId: UUID) {
         previews.plan(playerId)?.let { plan -> plannedConstructionProjects.remove(plan.id) }

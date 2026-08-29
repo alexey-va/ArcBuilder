@@ -316,6 +316,8 @@ class BuilderToolsConfig(
                 "status.idle",
             ) + BuilderPlanKind.entries.map { kind ->
                 "kinds.${kind.name.lowercase(Locale.ROOT)}"
+            } + BuilderConstructionProjectState.entries.map { state ->
+                "construction.states.${state.name.lowercase(Locale.ROOT)}"
             } + ShopPurchaseStatus.entries.map { status ->
                 "shop.status.${status.name.lowercase(Locale.ROOT).replace('_', '-')}"
             } + setOf(

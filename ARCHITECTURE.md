@@ -206,6 +206,14 @@ belongs in both `locales.ru` and `locales.en` in `builder-tools.yml`.
 Update it when a new key is not already covered by the existing chat or
 fragment globs.
 
+Compact player summaries should use localized MiniMessage hover text for
+domain terms or metrics whose meaning is not obvious from the label alone. The
+visible line remains short; the hover explains what the value includes and how
+it affects the operation. Never put a required action, warning, price, or
+destructive consequence only in hover text. Keep the explanation in both
+supported locales and cover the interactive tags with a focused localization
+test.
+
 ## Tests and build
 
 Controller tests live beside their production feature under

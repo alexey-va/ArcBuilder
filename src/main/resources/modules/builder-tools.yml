@@ -93,16 +93,16 @@ locales:
       - "<#8c8c8c>   <#d48763>/builder fill [блок] <#e6fff3>— заполнить пустоты"
       - "<#8c8c8c>   <#d48763>/builder replace старый новый [confirm] <#e6fff3>— замена"
       - "<#8c8c8c>   <#d48763>/builder disconnect [confirm] <#e6fff3>— без превью"
-      - "<#8c8c8c>   <#d48763>/builder copy <#e6fff3>и <#d48763>/builder paste <#e6fff3>— чертёж"
-      - "<#8c8c8c>   <#d48763>/builder book draft [имя] <#e6fff3>— бесплатный черновик"
-      - "<#8c8c8c>   <#e6fff3>Книгой: ПКМ по блоку — превью; в воздух — дальше"
+      - "<#8c8c8c>   <#d48763>/builder copy <#e6fff3>и <#d48763>/builder paste <#e6fff3>— <hover:show_text:'Временная копия выделенных блоков, которую можно вставлять в другом месте.'>чертёж</hover>"
+      - "<#8c8c8c>   <#d48763>/builder book draft [имя] <#e6fff3>— <hover:show_text:'Бесплатная книга только для выбора места и расчёта цены; строить она ещё не может.'>бесплатный черновик</hover>"
+      - "<#8c8c8c>   <#e6fff3>Книгой: ПКМ по блоку — <hover:show_text:'Личный контур будущих блоков; мир пока не меняется.'>превью</hover>; в воздух — дальше"
       - "<#8c8c8c>   <#d48763>/builder book copy <#e6fff3>— платная копия"
       - "<#8c8c8c>   <#d48763>/builder book sell [цена] <#e6fff3>— продать книгу"
       - "<#8c8c8c>   <#d48763>/builder book <#e6fff3>— инструкция и этап"
       - "<#8c8c8c>   <#d48763>/builder clear <#e6fff3>— убрать выделение и его частицы"
       - "<#8c8c8c>   <#d48763>/builder deconstruct <#e6fff3>— разобрать область"
-      - "<#8c8c8c>   <#d48763>/builder crown <#e6fff3>— создать крону"
-      - "<#8c8c8c>   <#d48763>/builder confirm <#e6fff3>— применить показанный план"
+      - "<#8c8c8c>   <#d48763>/builder crown <#e6fff3>— создать <hover:show_text:'Генерируемая листва дерева вокруг выбранной опоры.'>крону</hover>"
+      - "<#8c8c8c>   <#d48763>/builder confirm <#e6fff3>— применить показанный <hover:show_text:'Точный список изменений, ожидающий вашего подтверждения.'>план</hover>"
       - "<#8c8c8c>   <#d48763>/builder confirm buy <#e6fff3>— докупить недостающее"
       - "<#8c8c8c>   <#d48763>/builder undo <#e6fff3>— подготовить отмену"
     errors:
@@ -261,7 +261,7 @@ locales:
         <prefix><#2bba43>Настройка кроны изменена.
         <#8c8c8c>   <#e6fff3><setting>: <#d48763><value>
       palette-updated: "<prefix><#2bba43>Палитра сохранена: <#d48763><count> <#e6fff3>видов листвы."
-      palette-row: "<#8c8c8c>     <#e6fff3><material>: <#d48763><weight>"
+      palette-row: "<#8c8c8c>     <#e6fff3><material>: <hover:show_text:'Относительная частота этой листвы: больший вес встречается чаще.'><#d48763><weight></hover>"
       labels:
         settings:
           shape: "Форма"
@@ -295,14 +295,14 @@ locales:
         - "<#8c8c8c>   <#969696>В творческом режиме материалы не расходуются."
       status:
         - "<prefix><#e6fff3><bold>Текущая крона"
-        - "<#8c8c8c>   <#e6fff3>Форма: <#d48763><shape> <#8c8c8c>— <#e6fff3>радиус: <#d48763><radius>"
-        - "<#8c8c8c>   <#e6fff3>Густота: <#d48763><density> <#8c8c8c>— <#e6fff3>край: <#d48763><noise>"
+        - "<#8c8c8c>   <hover:show_text:'Общий силуэт генерируемой листвы.'><#e6fff3>Форма</hover>: <#d48763><shape> <#8c8c8c>— <hover:show_text:'Максимальное расстояние листвы от точки опоры.'><#e6fff3>радиус</hover>: <#d48763><radius>"
+        - "<#8c8c8c>   <hover:show_text:'Насколько плотно заполняется крона.'><#e6fff3>Густота</hover>: <#d48763><density> <#8c8c8c>— <hover:show_text:'Насколько ровным или случайным будет внешний край.'><#e6fff3>край</hover>: <#d48763><noise>"
         - "<#8c8c8c>   <#e6fff3>Палитра:"
     clipboard:
       saved: |-
 
-        <prefix><#2bba43>Чертёж <#8c8c8c>— <#e6fff3><count> блоков
-        <#8c8c8c>   Пропущено безопасно: <#969696><skipped>
+        <prefix><#2bba43><hover:show_text:'Временная копия выделенных блоков с точкой привязки.'>Чертёж</hover> <#8c8c8c>— <#e6fff3><count> блоков
+        <#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки не попали в чертёж.'>Пропущено безопасно</hover>: <#969696><skipped>
         <#8c8c8c>   <click:run_command:'/builder paste'><#d48763>[Вставить здесь]</click> <#8c8c8c>— <click:suggest_command:'/builder book draft '><#e6fff3>[Создать книгу]</click>
       retained: "<#d48763>Чертёж сохранён <#8c8c8c>— <#e6fff3>можно вставить снова"
     book:
@@ -325,19 +325,19 @@ locales:
         <#8c8c8c>   <#e6fff3>Скопируйте область ещё раз — лимит не занят.
       guide:
         - "<prefix><#e6fff3><bold>Как создать книгу строительства"
-        - "<#8c8c8c>   1. <click:run_command:'/builder wand'><#d48763>/builder wand</click> <#e6fff3>— получить селектор."
+        - "<#8c8c8c>   1. <click:run_command:'/builder wand'><#d48763>/builder wand</click> <#e6fff3>— получить <hover:show_text:'Инструмент для выбора двух противоположных углов области.'>селектор</hover>."
         - "<#8c8c8c>      <#e6fff3>ЛКМ и ПКМ — два угла. Контур виден постоянно."
-        - "<#8c8c8c>   2. <click:run_command:'/builder copy'><#d48763>/builder copy</click> <#e6fff3>— сохранить чертёж на 15 минут."
+        - "<#8c8c8c>   2. <click:run_command:'/builder copy'><#d48763>/builder copy</click> <#e6fff3>— сохранить <hover:show_text:'Временную копию выделенных блоков с точкой привязки.'>чертёж</hover> на 15 минут."
         - |-
           <#8c8c8c>   3. <#e6fff3>В выживании возьмите обычную книгу.
           <#8c8c8c>      <#e6fff3>В творчестве она не нужна.
-        - "<#8c8c8c>      <click:suggest_command:'/builder book draft '><#d48763>/builder book draft [имя]</click> <#e6fff3>— бесплатный черновик."
-        - "<#8c8c8c>   4. <#e6fff3>ПКМ по блоку — поставить или перенести превью."
+        - "<#8c8c8c>      <click:suggest_command:'/builder book draft '><#d48763>/builder book draft [имя]</click> <#e6fff3>— бесплатный <hover:show_text:'Книга для выбора места и расчёта цены; строить она ещё не может.'>черновик</hover>."
+        - "<#8c8c8c>   4. <#e6fff3>ПКМ по блоку — поставить или перенести <hover:show_text:'Личный контур будущей постройки; мир пока не меняется.'>превью</hover>."
         - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — меню положения."
         - "<#8c8c8c>      <#969696>Черновик — только предпросмотр; он не строит."
-        - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — получить смету без оплаты."
+        - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — получить <hover:show_text:'Расчёт стоимости материалов и работы до списания денег.'>смету</hover> без оплаты."
         - "<#8c8c8c>   6. <#e6fff3>Нажмите <#2bba43>[Подтвердить]<#e6fff3> в сообщении со сметой."
-        - "<#8c8c8c>   7. <click:run_command:'/builder book copy'><#d48763>/builder book copy</click> <#e6fff3>— копия по себестоимости."
+        - "<#8c8c8c>   7. <click:run_command:'/builder book copy'><#d48763>/builder book copy</click> <#e6fff3>— копия по <hover:show_text:'Цена материалов плюс установленная стоимость работы, без наценки продавца.'>себестоимости</hover>."
         - "<#8c8c8c>      <click:suggest_command:'/builder book sell '><#d48763>/builder book sell [цена]</click> <#e6fff3>— продажа."
         - "<#8c8c8c>   <click:run_command:'/builder book status'><#d48763>/builder book status</click> <#e6fff3>— ваш текущий этап."
       status:
@@ -392,7 +392,7 @@ locales:
           <prefix><#ff9f0f>Этап 7/7: реестр выпускает книгу.
           <#8c8c8c>   <#e6fff3>Не перемещайте книгу.
           <#8c8c8c>   <#e6fff3>Выдача продолжится автоматически.
-        checking: "<prefix><#e6fff3>Проверяю UUID, владельца и поколение книги…"
+        checking: "<prefix><#e6fff3>Проверяю подлинность, владельца и актуальность книги…"
         changed: |-
 
           <prefix><#ff9f0f>Книга в руке изменилась во время проверки.
@@ -401,7 +401,7 @@ locales:
 
           <prefix><#2bba43>Книга активна и зарегистрирована.
           <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
-          <#8c8c8c>   <#e6fff3>Себестоимость копии: <#d48763><price>
+          <#8c8c8c>   <hover:show_text:'Цена материалов плюс установленная стоимость работы, без наценки продавца.'><#e6fff3>Себестоимость копии</hover>: <#d48763><price>
           <#8c8c8c>   <#e6fff3>ПКМ по земле — превью.
           <#8c8c8c>   <click:run_command:'/builder book copy'><#d48763>/builder book copy</click> <#e6fff3>— копия.
           <#8c8c8c>   <click:suggest_command:'/builder book sell '><#d48763>/builder book sell [цена]</click> <#e6fff3>— продажа.
@@ -442,8 +442,8 @@ locales:
         <#8c8c8c>   <#e6fff3>Откройте превью и нажмите ПКМ в воздух.
       duplicate: |-
 
-        <prefix><#c42323>Этот UUID уже занят или потрачен.
-        <#8c8c8c>   <#969696>Действие разрешено только одному экземпляру.
+        <prefix><#c42323>Этот экземпляр книги уже используется или был потрачен.
+        <#8c8c8c>   <#969696>Повторно применить его нельзя.
       stale: |-
 
         <prefix><#c42323>Эта физическая копия книги больше не действует.
@@ -461,14 +461,14 @@ locales:
         included: "всё включено в стоимость"
       price-limit: "<prefix><#c42323>Смета превышает безопасный лимит книги."
       quote-kind:
-        activation: "Активация"
-        copy: "Копия"
+        activation: "<hover:show_text:'Первый выпуск рабочей книги из бесплатного черновика.'>Активация</hover>"
+        copy: "<hover:show_text:'Выпуск ещё одного одноразового экземпляра активной книги.'>Копия</hover>"
       quote: |-
 
         <prefix><#ffb142><kind> <#d48763>«<name>»
-        <#8c8c8c>   Из админшопа: <#e6fff3><materials>
-        <#8c8c8c>   Принести с собой: <#d48763><required>
-        <#8c8c8c>   Работа: <#e6fff3><labor> <#8c8c8c>— Итого: <#2bba43><price>
+        <#8c8c8c>   <hover:show_text:'Стоимость материалов, которые продаются в строительном админшопе.'>Из админшопа</hover>: <#e6fff3><materials>
+        <#8c8c8c>   <hover:show_text:'Материалы, которых нет в админшопе; они не входят в денежную цену.'>Принести с собой</hover>: <#d48763><required>
+        <#8c8c8c>   <hover:show_text:'Плата за строительство поверх стоимости материалов.'>Работа</hover>: <#e6fff3><labor> <#8c8c8c>— <hover:show_text:'Сумма материалов из админшопа и работы.'>Итого</hover>: <#2bba43><price>
         <#8c8c8c>   <click:run_command:'/builder book confirm'><#2bba43>[Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[Отмена]</click>
       preview-opened: |-
 
@@ -529,7 +529,7 @@ locales:
 
         <prefix><#2bba43>Новый экземпляр зарегистрирован.
         <#8c8c8c>   <#e6fff3>Исходная книга сохранена.
-        <#8c8c8c>   <#e6fff3>У копии свой одноразовый UUID.
+        <#8c8c8c>   <#e6fff3>Это отдельная одноразовая книга.
         <#8c8c8c>   <click:suggest_command:'/builder book sell '><#d48763>/builder book sell [цена]</click> <#e6fff3>— продажа.
       auction-price: |-
 
@@ -547,7 +547,7 @@ locales:
       auction-listed: |-
 
         <prefix><#2bba43>Книга выставлена за <#d48763><price><#2bba43>.
-        <#8c8c8c>   <#969696>UUID заблокирован до выдачи книги.
+        <#8c8c8c>   <#969696>Экземпляр заблокирован до выдачи книги.
         <#8c8c8c>   <#e6fff3>После выдачи книга активируется у получателя.
       auction-listed-late: |-
 
@@ -562,19 +562,19 @@ locales:
         <prefix><#c42323>Состояние лота проверяется безопасно.
         <#8c8c8c>   <#e6fff3>Не перемещайте книгу.
         <#8c8c8c>   <#e6fff3>Не повторяйте продажу.
-        <#8c8c8c>   <#969696>UUID остаётся заблокирован.
+        <#8c8c8c>   <#969696>Экземпляр остаётся заблокирован.
       auction-returned: "<prefix><#2bba43>Возвращённая с аукциона книга снова активна."
       auction-received: "<prefix><#2bba43>Книга получена с аукциона и снова активна."
     plan:
       ready: |-
 
-        <prefix><#2bba43><kind> <#8c8c8c><#e6fff3><count> блоков
-        <#8c8c8c>   Расход: <#d48763><cost>
-        <#8c8c8c>   Возврат: <#d48763><reward>
+        <prefix><#2bba43><kind> <#8c8c8c><hover:show_text:'Количество блоков, которые изменит этот план.'><#e6fff3><count> блоков</hover>
+        <#8c8c8c>   <hover:show_text:'Предметы, которые операция заберёт для выполнения плана.'>Расход</hover>: <#d48763><cost>
+        <#8c8c8c>   <hover:show_text:'Предметы, которые операция отдаст за снятые или заменённые блоки.'>Возврат</hover>: <#d48763><reward>
         <#8c8c8c>   <click:run_command:'/builder confirm'><#2bba43>[Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[Отмена]</click>
-      skipped: "<#8c8c8c>   Пропущено безопасно: <#969696><count>"
+      skipped: "<#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки план намеренно не меняет.'>Пропущено безопасно</hover>: <#969696><count>"
       market:
-        - "<#8c8c8c>   Смета <#d48763><full_price> <#8c8c8c>— докупить <#e6fff3><missing_price>"
+        - "<#8c8c8c>   <hover:show_text:'Полная цена всех расходуемых материалов по админшопу.'>Смета</hover> <#d48763><full_price> <#8c8c8c>— <hover:show_text:'Цена только тех материалов, которых сейчас не хватает в инвентаре.'>докупить</hover> <#e6fff3><missing_price>"
         - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#d48763>[Купить и построить]</click>"
       market-item: "<#8c8c8c>     <#e6fff3><amount>× <material>"
       market-unavailable: "<prefix><#ff9f0f>В админшопе нет: <#d48763><material>"
@@ -628,11 +628,11 @@ locales:
 
         <prefix><#2bba43>Строительный проект запущен: <#d48763><count> <#e6fff3>блоков.
         <#8c8c8c>   <#e6fff3>Книга использована. Материалы можно докладывать постепенно.
-        <#8c8c8c>   <#e6fff3>Подойдут ваш инвентарь и доступные сундуки рядом со стройкой.
+        <#8c8c8c>   <#e6fff3>Подойдут ваш инвентарь и <hover:show_text:'Сундуки и бочки, которые владелец проекта имеет право открыть.'>доступные сундуки</hover> рядом со стройкой.
       waiting-materials: |-
 
         <prefix><#ff9f0f>Стройка ждёт материал: <#d48763><material>
-        <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total><#e6fff3>. Положите ресурс в доступный сундук рядом.
+        <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total><#e6fff3>. Положите ресурс в <hover:show_text:'Сундук или бочку, которую владелец проекта имеет право открыть.'>доступный сундук</hover> рядом.
       waiting-output: |-
 
         <prefix><#ff9f0f>Стройке некуда сложить снятые блоки.
@@ -642,10 +642,19 @@ locales:
 
         <prefix><#c42323>Стройка остановлена из-за изменения мира или прав.
         <#8c8c8c>   <#e6fff3>Нужна безопасная проверка администратора; проект не продолжает работу вслепую.
-      status: "<prefix><#e6fff3>Стройка: <#d48763><state> <#8c8c8c>— <#e6fff3><count>/<total> блоков."
+      status: "<prefix><#e6fff3>Стройка: <#d48763><state> <#8c8c8c>— <hover:show_text:'Уже обработанные блоки и полный размер проекта.'><#e6fff3><count>/<total> блоков</hover>."
+      states:
+        prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
+        active: "<hover:show_text:'Стройка обрабатывает блоки по одному.'>строится</hover>"
+        waiting_materials: "<hover:show_text:'Следующий блок ждёт нужный ресурс в инвентаре или доступном сундуке.'>ждёт материалы</hover>"
+        waiting_output_space: "<hover:show_text:'Некуда положить предмет, полученный со снятого блока.'>ждёт свободное место</hover>"
+        delivering_output: "<hover:show_text:'Предмет со снятого блока сохраняется в доступный сундук или инвентарь.'>складывает блоки</hover>"
+        recovery_required: "<hover:show_text:'Мир или права изменились; продолжение требует проверки администратора.'>нужна проверка</hover>"
+        completed: "<hover:show_text:'Все блоки проекта обработаны.'>завершена</hover>"
+        cancelled: "<hover:show_text:'Проект остановлен и больше не выполняется.'>отменена</hover>"
     items:
       none: "нет"
-      summary: "предметов: <items> — видов: <types>"
+      summary: "<hover:show_text:'Общее количество единиц всех материалов.'>предметов</hover>: <items> — <hover:show_text:'Количество разных материалов.'>видов</hover>: <types>"
     status:
       selection-first: |-
 
@@ -661,17 +670,17 @@ locales:
 
         <prefix><#e6fff3>Выделено: <#d48763><x> × <y> × <z>
         <#8c8c8c>   <#e6fff3>Объём: <#d48763><volume>
-      plan: "<prefix><#e6fff3><kind>: <#d48763><count>/<total> <#e6fff3>блоков."
+      plan: "<prefix><#e6fff3><kind>: <hover:show_text:'Уже обработанные блоки и полный размер плана.'><#d48763><count>/<total> <#e6fff3>блоков</hover>."
       idle: "<prefix><#e6fff3>Нет выделения. <#8c8c8c>— <#d48763>/builder wand"
     kinds:
-      fill: "Заполнение"
-      replace: "Замена блоков"
-      fence_disconnect: "Разъединение заборов"
-      paste: "Вставка чертежа"
-      build_book: "Строительство по книге"
-      deconstruct: "Демонтаж"
-      crown: "Крона"
-      undo: "Отмена"
+      fill: "<hover:show_text:'Заполняет пустые и заменяемые места выбранным блоком.'>Заполнение</hover>"
+      replace: "<hover:show_text:'Меняет в выделении только указанный старый блок на новый.'>Замена блоков</hover>"
+      fence_disconnect: "<hover:show_text:'Убирает текущие соединения заборов; последующее обновление соседей может соединить их снова.'>Разъединение заборов</hover>"
+      paste: "<hover:show_text:'Размещает сохранённый чертёж относительно вашей текущей позиции.'>Вставка чертежа</hover>"
+      build_book: "<hover:show_text:'Запускает постоянный проект по одноразовой книге и принимает материалы постепенно.'>Строительство по книге</hover>"
+      deconstruct: "<hover:show_text:'Снимает безопасные блоки выделения и возвращает полученные предметы.'>Демонтаж</hover>"
+      crown: "<hover:show_text:'Создаёт сгенерированную листву дерева вокруг выбранной опоры.'>Крона</hover>"
+      undo: "<hover:show_text:'Готовит обратный план для последней завершённой операции.'>Отмена</hover>"
   en:
     prefix: "<white>🛠</white> "
     help:
@@ -680,16 +689,16 @@ locales:
       - "<dark_gray>   <white>/builder fill [block] <gray>— fill using your materials"
       - "<dark_gray>   <white>/builder replace old new [confirm] <gray>— replace"
       - "<dark_gray>   <white>/builder disconnect [confirm] <gray>— no preview"
-      - "<dark_gray>   <white>/builder copy <gray>and <white>/builder paste <gray>— temporary plan"
-      - "<dark_gray>   <white>/builder book draft [name] <gray>— free draft"
-      - "<dark_gray>   <gray>Book: click block for preview; air to continue"
+      - "<dark_gray>   <white>/builder copy <gray>and <white>/builder paste <gray>— <hover:show_text:'A temporary copy of selected blocks that can be placed elsewhere.'>blueprint</hover>"
+      - "<dark_gray>   <white>/builder book draft [name] <gray>— <hover:show_text:'A free positioning and price-check book that cannot build yet.'>free draft</hover>"
+      - "<dark_gray>   <gray>Book: click block for <hover:show_text:'A player-only outline of future blocks; the world is unchanged.'>preview</hover>; air to continue"
       - "<dark_gray>   <white>/builder book sell [price] <gray>— list an active book"
       - "<dark_gray>   <white>/builder book copy <gray>— quote a paid registered copy"
       - "<dark_gray>   <white>/builder book <gray>— guided workflow and current step"
       - "<dark_gray>   <white>/builder clear <gray>— clear selection and particles"
       - "<dark_gray>   <white>/builder deconstruct <gray>— dismantle the area"
-      - "<dark_gray>   <white>/builder crown [leaves] [3–10] <gray>— leaf crown"
-      - "<dark_gray>   <white>/builder confirm <gray>— build with materials you own"
+      - "<dark_gray>   <white>/builder crown [leaves] [3–10] <gray>— <hover:show_text:'Generated tree foliage around the selected anchor.'>leaf crown</hover>"
+      - "<dark_gray>   <white>/builder confirm <gray>— apply the shown <hover:show_text:'The exact list of changes waiting for your confirmation.'>plan</hover>"
       - "<dark_gray>   <white>/builder confirm buy <gray>— buy and build"
       - "<dark_gray>   <white>/builder undo <gray>— revert the latest operation"
     errors:
@@ -833,7 +842,7 @@ locales:
       same-face: "<prefix><yellow>Confirm on the same face with right-click."
       settings-updated: "<prefix><green><white><setting></white> is now <white><value></white>."
       palette-updated: "<prefix><green>Palette updated: <white><count></white> leaf types."
-      palette-row: "<dark_gray>     <gray><material>: <aqua><weight>"
+      palette-row: "<dark_gray>     <gray><material>: <hover:show_text:'Relative frequency of this leaf; a higher weight appears more often.'><aqua><weight></hover>"
       labels:
         settings:
           shape: "Shape"
@@ -867,14 +876,14 @@ locales:
         - "<dark_gray>   <gray>In creative, materials are not consumed."
       status:
         - "<prefix><white>Crown settings:"
-        - "<dark_gray>   <gray>Shape: <aqua><shape></aqua>; radius: <aqua><radius></aqua>"
-        - "<dark_gray>   <gray>Density: <aqua><density></aqua>; edge: <aqua><noise></aqua>"
+        - "<dark_gray>   <hover:show_text:'The overall silhouette of generated foliage.'><gray>Shape</hover>: <aqua><shape></aqua>; <hover:show_text:'The farthest foliage distance from the anchor.'>radius</hover>: <aqua><radius></aqua>"
+        - "<dark_gray>   <hover:show_text:'How tightly the crown is filled.'><gray>Density</hover>: <aqua><density></aqua>; <hover:show_text:'How smooth or irregular the outer edge becomes.'>edge</hover>: <aqua><noise></aqua>"
         - "<dark_gray>   <gray>Palette:"
     clipboard:
       saved: |-
 
-        <prefix><green>Blueprint <dark_gray>— <white><count> blocks
-        <dark_gray>   Skipped safely: <gray><skipped>
+        <prefix><green><hover:show_text:'A temporary copy of selected blocks with an anchor point.'>Blueprint</hover> <dark_gray>— <white><count> blocks
+        <dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks were excluded.'>Skipped safely</hover>: <gray><skipped>
         <dark_gray>   <click:run_command:'/builder paste'><aqua>[Paste here]</aqua></click> <dark_gray>— <click:suggest_command:'/builder book draft '><white>[Create book]</white></click>
       retained: "<aqua>Blueprint retained <dark_gray>— <white>you can paste it again"
     book:
@@ -897,18 +906,18 @@ locales:
         <dark_gray>   <gray>Copy the area again; it did not consume your limit.
       guide:
         - "<prefix><white><bold>Build-book guide"
-        - "<dark_gray>   1. <aqua>/builder wand <gray>— get the selector."
+        - "<dark_gray>   1. <aqua>/builder wand <gray>— get the <hover:show_text:'The tool used to mark two opposite corners of an area.'>selector</hover>."
         - "<dark_gray>      <gray>Mark two corners; the outline stays visible."
-        - "<dark_gray>   2. <aqua>/builder copy <gray>— save it for 15 minutes."
+        - "<dark_gray>   2. <aqua>/builder copy <gray>— save a <hover:show_text:'A temporary copy of selected blocks with an anchor point.'>blueprint</hover> for 15 minutes."
         - |-
           <dark_gray>   3. <gray>In survival, hold a plain book.
           <dark_gray>      <gray>Creative mode does not require one.
-        - "<dark_gray>      <aqua>/builder book draft [name] <gray>— free draft."
-        - "<dark_gray>   4. <gray>Right-click a block to place or move preview."
+        - "<dark_gray>      <aqua>/builder book draft [name] <gray>— free <hover:show_text:'A positioning and price-check book that cannot build yet.'>draft</hover>."
+        - "<dark_gray>   4. <gray>Right-click a block to place or move <hover:show_text:'A player-only outline of the future build; the world is unchanged.'>preview</hover>."
         - "<dark_gray>      <gray>Sneak-click to adjust its transform."
-        - "<dark_gray>   5. <gray>Right-click air for a quote without charge."
+        - "<dark_gray>   5. <gray>Right-click air for a <hover:show_text:'The material and labor price calculated before any charge.'>quote</hover> without charge."
         - "<dark_gray>   6. <gray>Click <green>[Confirm]</green> in the quote."
-        - "<dark_gray>   7. <aqua>/builder book copy <gray>— copy at stored cost."
+        - "<dark_gray>   7. <aqua>/builder book copy <gray>— copy at <hover:show_text:'Material price plus configured labor, without a seller markup.'>stored cost</hover>."
         - "<dark_gray>      <aqua>/builder book sell [price] <gray>— sell."
         - "<dark_gray>   <aqua>/builder book status <gray>— your current step."
       status:
@@ -963,7 +972,7 @@ locales:
           <prefix><yellow>Step 7/7: issuing the book.
           <dark_gray>   <gray>Do not move the book.
           <dark_gray>   <gray>Delivery resumes automatically.
-        checking: "<prefix><gray>Checking the book UUID, owner, and generation…"
+        checking: "<prefix><gray>Checking the book authenticity, owner, and freshness…"
         changed: |-
 
           <prefix><yellow>The held book changed during verification.
@@ -972,7 +981,7 @@ locales:
 
           <prefix><green>The book is active and registered.
           <dark_gray>   <gray>Name: <white><name>
-          <dark_gray>   <gray>Copy at stored cost: <white><price>
+          <dark_gray>   <hover:show_text:'Material price plus configured labor, without a seller markup.'><gray>Copy at stored cost</hover>: <white><price>
           <dark_gray>   <aqua>/builder book copy <gray>— copy.
           <dark_gray>   <aqua>/builder book sell [price] <gray>— sell.
       draft-created: |-
@@ -1015,8 +1024,8 @@ locales:
         <dark_gray>   <gray>Open its preview and right-click the air.
       duplicate: |-
 
-        <prefix><red>This UUID is reserved or already spent.
-        <dark_gray>   <gray>Only one physical instance may act.
+        <prefix><red>This book instance is already in use or was consumed.
+        <dark_gray>   <gray>It cannot be applied again.
       stale: |-
 
         <prefix><red>This physical copy is no longer authoritative.
@@ -1034,14 +1043,14 @@ locales:
         included: "everything is included in the price"
       price-limit: "<prefix><red>The estimate exceeds the safe book-price limit."
       quote-kind:
-        activation: "Activation"
-        copy: "Copy"
+        activation: "<hover:show_text:'The first working book issued from a free draft.'>Activation</hover>"
+        copy: "<hover:show_text:'Another single-use instance issued from an active book.'>Copy</hover>"
       quote: |-
 
         <prefix><gold><kind> <aqua>“<name>”
-        <dark_gray>   From the shop: <white><materials>
-        <dark_gray>   Bring yourself: <aqua><required>
-        <dark_gray>   Work: <white><labor> <dark_gray>— Total: <green><price>
+        <dark_gray>   <hover:show_text:'Cost of materials sold by the building admin shop.'>From the shop</hover>: <white><materials>
+        <dark_gray>   <hover:show_text:'Materials absent from the admin shop and therefore not included in the money price.'>Bring yourself</hover>: <aqua><required>
+        <dark_gray>   <hover:show_text:'The construction fee added to material cost.'>Work</hover>: <white><labor> <dark_gray>— <hover:show_text:'Shop materials plus construction work.'>Total</hover>: <green><price>
         <dark_gray>   <click:run_command:'/builder book confirm'><green>[Confirm]</click>  <click:run_command:'/builder book cancel'><gray>[Cancel]</click>
       preview-opened: |-
 
@@ -1101,7 +1110,7 @@ locales:
 
         <prefix><green>A new instance is registered.
         <dark_gray>   <gray>The source remains yours.
-        <dark_gray>   <gray>The copy has its own one-use UUID.
+        <dark_gray>   <gray>The copy is a separate single-use book.
       auction-price: "<prefix><yellow>Enter a sale price: <aqua>/builder book sell [price]</aqua>."
       auction-unavailable: "<prefix><red>Auction unavailable; your book is unchanged."
       auction-locked: |-
@@ -1115,7 +1124,7 @@ locales:
       auction-listed: |-
 
         <prefix><green>Book listed for <white><price></white>.
-        <dark_gray>   <gray>Its UUID stays locked until delivery or return.
+        <dark_gray>   <gray>The instance stays locked until delivery or return.
       auction-listed-late: "<prefix><green>Delayed listing confirmed; the book is on sale."
       auction-rejected: |-
 
@@ -1124,19 +1133,19 @@ locales:
       auction-review: |-
 
         <prefix><red>The listing is under safe review.
-        <dark_gray>   <gray>Do not move or retry; its UUID stays locked.
+        <dark_gray>   <gray>Do not move or retry; the instance stays locked.
       auction-returned: "<prefix><green>The returned auction book is active again."
       auction-received: "<prefix><green>The auction book was received and is active again."
     plan:
       ready: |-
 
-        <prefix><green><kind> <dark_gray><white><count> blocks
-        <dark_gray>   Cost: <white><cost>
-        <dark_gray>   Return: <white><reward>
+        <prefix><green><kind> <dark_gray><hover:show_text:'The number of blocks this plan will change.'><white><count> blocks</hover>
+        <dark_gray>   <hover:show_text:'Items the operation will consume to execute this plan.'>Cost</hover>: <white><cost>
+        <dark_gray>   <hover:show_text:'Items returned for blocks removed or replaced by the operation.'>Return</hover>: <white><reward>
         <dark_gray>   <click:run_command:'/builder confirm'><green>[Build]</click>  <click:run_command:'/builder cancel'><gray>[Cancel]</click>
-      skipped: "<dark_gray>   Skipped safely: <gray><count>"
+      skipped: "<dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks are deliberately left unchanged.'>Skipped safely</hover>: <gray><count>"
       market:
-        - "<dark_gray>   Estimate <white><full_price> <dark_gray>— missing <gray><missing_price>"
+        - "<dark_gray>   <hover:show_text:'The full admin-shop price of all consumed materials.'>Estimate</hover> <white><full_price> <dark_gray>— <hover:show_text:'The price of only the materials currently missing from your inventory.'>missing</hover> <gray><missing_price>"
         - "<dark_gray>   <click:run_command:'/builder confirm buy'><aqua>[Buy and build]</aqua></click>"
       market-item: "<dark_gray>     <gray>Need <white><amount>×<material></white>"
       market-unavailable: "<prefix><yellow>Shop: unavailable <white><material></white>."
@@ -1184,11 +1193,11 @@ locales:
 
         <prefix><green>Construction project started: <white><count></white> blocks.
         <dark_gray>   <gray>The book was consumed. Materials may be supplied gradually.
-        <dark_gray>   <gray>Your nearby inventory and accessible site containers are used.
+        <dark_gray>   <gray>Your nearby inventory and <hover:show_text:'Chests and barrels the project owner is allowed to open.'>accessible site containers</hover> are used.
       waiting-materials: |-
 
         <prefix><yellow>Construction is waiting for: <white><material></white>.
-        <dark_gray>   <gray>Progress: <white><count>/<total></white>. Put it in an accessible nearby container.
+        <dark_gray>   <gray>Progress: <white><count>/<total></white>. Put it in an <hover:show_text:'A chest or barrel the project owner is allowed to open.'>accessible nearby container</hover>.
       waiting-output: |-
 
         <prefix><yellow>No room for recovered blocks.
@@ -1198,10 +1207,19 @@ locales:
 
         <prefix><red>Construction stopped because the world or permissions changed.
         <dark_gray>   <gray>An administrator must review it; the project will not continue blindly.
-      status: "<prefix><gray>Construction: <white><state></white> — <white><count>/<total></white> blocks."
+      status: "<prefix><gray>Construction: <white><state></white> — <hover:show_text:'Processed blocks and the full project size.'><white><count>/<total></white> blocks</hover>."
+      states:
+        prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"
+        active: "<hover:show_text:'The project is processing one block at a time.'>building</hover>"
+        waiting_materials: "<hover:show_text:'The next block needs a resource from inventory or an accessible container.'>waiting for materials</hover>"
+        waiting_output_space: "<hover:show_text:'There is no room for an item recovered from a removed block.'>waiting for space</hover>"
+        delivering_output: "<hover:show_text:'An item from a removed block is being stored safely.'>storing recovered blocks</hover>"
+        recovery_required: "<hover:show_text:'The world or permissions changed; an administrator must review the project.'>needs review</hover>"
+        completed: "<hover:show_text:'Every project block was processed.'>completed</hover>"
+        cancelled: "<hover:show_text:'The project is stopped and will no longer run.'>cancelled</hover>"
     items:
       none: "none"
-      summary: "items: <items> — types: <types>"
+      summary: "<hover:show_text:'The total number of item units across all materials.'>items</hover>: <items> — <hover:show_text:'The number of distinct materials.'>types</hover>: <types>"
     status:
       selection-first: |-
 
@@ -1217,14 +1235,14 @@ locales:
 
         <prefix><gray>Selected: <white><x>×<y>×<z>
         <dark_gray>   <gray>Volume: <white><volume> <dark_gray>— <gray>no plan ready
-      plan: "<prefix><yellow><white><kind></white> plan: <white><count>/<total></white> blocks."
+      plan: "<prefix><yellow><white><kind></white>: <hover:show_text:'Processed blocks and the full plan size.'><white><count>/<total></white> blocks</hover>."
       idle: "<prefix><gray>No selection or active plan. Start with <white>/builder wand</white>."
     kinds:
-      fill: "Fill"
-      replace: "Block replacement"
-      fence_disconnect: "Fence disconnection"
-      paste: "Blueprint paste"
-      build_book: "Book construction"
-      deconstruct: "Deconstruction"
-      crown: "Crown"
-      undo: "Undo"
+      fill: "<hover:show_text:'Fills empty and replaceable positions with the selected block.'>Fill</hover>"
+      replace: "<hover:show_text:'Changes only the selected source block into the target block.'>Block replacement</hover>"
+      fence_disconnect: "<hover:show_text:'Clears current fence connections; later neighbor updates may reconnect them.'>Fence disconnection</hover>"
+      paste: "<hover:show_text:'Places the saved blueprint relative to your current position.'>Blueprint paste</hover>"
+      build_book: "<hover:show_text:'Starts a persistent single-use book project that accepts materials gradually.'>Book construction</hover>"
+      deconstruct: "<hover:show_text:'Removes safe selected blocks and returns their items.'>Deconstruction</hover>"
+      crown: "<hover:show_text:'Generates tree foliage around the selected anchor.'>Crown</hover>"
+      undo: "<hover:show_text:'Prepares an inverse plan for the last completed operation.'>Undo</hover>"
