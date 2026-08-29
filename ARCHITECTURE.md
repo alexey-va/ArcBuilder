@@ -33,7 +33,7 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 | --- | --- | --- | --- |
 | `wand`, `clear` | `BuilderSelectionController` plus the runtime | none | any builder permission |
 | `fill` | `BuilderFillController` | `FILL` | `arcbuild.fill` |
-| `disconnect` | `BuilderFenceConnectionController` | `FENCE_DISCONNECT` | `arcbuild.disconnect` |
+| `disconnect [confirm]` | `BuilderFenceConnectionController` | `FENCE_DISCONNECT` | `arcbuild.disconnect` |
 | `copy`, `paste` | `BuilderClipboardController` | `PASTE` for paste | `arcbuild.copy`, `arcbuild.paste` |
 | `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
 | `crown` | `BuilderCrownController` | `CROWN` | `arcbuild.crown` |
@@ -106,7 +106,12 @@ from domain values.
 
 ## Fence disconnection
 
-`/builder disconnect` is intentionally a one-shot selection operation:
+`/builder disconnect` is intentionally a one-shot selection operation. The
+plain command prepares a preview; `/builder disconnect confirm` applies the
+same plan immediately. Both forms use the same preflight, revalidation,
+journaling, mutation, CoreProtect, and undo pipeline.
+
+The planner has deliberately narrow scope:
 
 - only vanilla materials whose names end in `_FENCE` are considered;
 - fence gates, walls, panes, custom blocks, and other `MultipleFacing` blocks

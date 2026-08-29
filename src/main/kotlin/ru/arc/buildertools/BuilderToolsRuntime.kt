@@ -470,6 +470,7 @@ internal class BuilderToolsRuntime(
             return filterPrefix(BuilderRootCommand.suggestions(), args[0])
         }
         if (args.size == 2 && args[0].equals("confirm", true)) return filterPrefix(listOf("buy"), args[1])
+        if (args.size == 2 && args[0].equals("disconnect", true)) return filterPrefix(listOf("confirm"), args[1])
         if (args.size == 2 && args[0].equals("paste", true)) return filterPrefix(listOf("rotate", "left", "right"), args[1])
         if (args.size == 2 && args[0].equals("book", true)) {
             return filterPrefix(listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel"), args[1])
@@ -488,7 +489,14 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.WAND -> giveWand(player)
             BuilderRootCommand.CLEAR -> clearSelection(player)
             BuilderRootCommand.FILL -> preparePlan(player, fillController.plan(player, materialArgument(player, args.getOrNull(1))))
-            BuilderRootCommand.DISCONNECT -> preparePlan(player, fenceConnectionController.planDisconnect(player))
+            BuilderRootCommand.DISCONNECT -> {
+                val plan = fenceConnectionController.planDisconnect(player)
+                if (args.getOrNull(1)?.equals("confirm", true) == true) {
+                    confirmImmediately(player, plan)
+                } else {
+                    preparePlan(player, plan)
+                }
+            }
             BuilderRootCommand.COPY -> {
                 val copied = clipboardController.copy(player)
                 send(
@@ -787,6 +795,21 @@ internal class BuilderToolsRuntime(
             send(player, "plan.skipped", mapOf("count" to messages.literal(plan.skippedUnsafeBlocks)))
         }
         shop.preview(player, plan)
+    }
+
+    private fun confirmImmediately(player: Player, plan: BuilderPlan) {
+        preflightPlan(player, plan)
+        crown.clearAnchor(player.uniqueId)
+        shop.clear(player.uniqueId)
+        val pending = BuilderPendingPlan(plan, player.gameMode)
+        previews.store(player.uniqueId, pending)
+        try {
+            confirm(player)
+        } catch (failure: Throwable) {
+            previews.remove(player.uniqueId, pending)
+            shop.clear(player.uniqueId)
+            throw failure
+        }
     }
 
     private fun preflightPlan(player: Player, plan: BuilderPlan) {

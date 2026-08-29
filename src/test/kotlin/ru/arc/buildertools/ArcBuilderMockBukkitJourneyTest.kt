@@ -396,6 +396,38 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("disconnect confirm skips the preview and the applied operation remains undoable") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("DirectFencer", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+
+            val fence = Material.OAK_FENCE.createBlockData() as MultipleFacing
+            fence.setFace(BlockFace.NORTH, true)
+            fence.setFace(BlockFace.EAST, true)
+            world.getBlockAt(0, 64, 0).setBlockData(fence, false)
+
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            journey.paper.server.getCommandTabComplete(player, "builder disconnect c") shouldBe listOf("confirm")
+
+            player.performCommand("builder disconnect confirm") shouldBe true
+
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            journey.awaitSettled(player) {
+                (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces.isEmpty()
+            }
+
+            player.performCommand("builder undo") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) {
+                (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces ==
+                    setOf(BlockFace.NORTH, BlockFace.EAST)
+            }
+        }
+    }
+
     test("cancel and quit remove only the owning player's persistent previews and clipboard") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val owner = journey.builder("PreviewOwner", GameMode.CREATIVE)
