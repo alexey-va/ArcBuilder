@@ -226,7 +226,10 @@ locales:
         <prefix><#2bba43>Инструмент строителя готов.
         <#8c8c8c>   <#e6fff3>ЛКМ — первая точка; ПКМ — вторая.
       inventory-full: "<prefix><#ff9f0f>Освободите слот для инструмента строителя."
-      material-required: "<prefix><#ff9f0f>В выживании держите обычный осколок эха в основной руке."
+      material-required: |-
+
+        <prefix><#ff9f0f>В выживании нужен обычный осколок эха.
+        <#8c8c8c>   <#e6fff3>Держите его в основной руке.
     crown-brush:
       name: "<#d48763><bold>Кисть крон"
       lore:
@@ -300,21 +303,25 @@ locales:
 
         <prefix><#ff9f0f>Сохранённый черновик ожидает безопасной выдачи.
         <#8c8c8c>   <#e6fff3>Возьмите обычную книгу в основную руку.
-        <#8c8c8c>   <click:run_command:'/builder book draft'><#d48763>/builder book draft</click> <#e6fff3>— завершить выдачу; выделять заново не нужно.
+        <#8c8c8c>   <click:run_command:'/builder book draft'><#d48763>/builder book draft</click> <#e6fff3>— завершить выдачу.
+        <#8c8c8c>   <#e6fff3>Выделять область заново не нужно.
       draft-recovering: |-
 
         <prefix><#ff9f0f>Завершаем безопасную запись черновика.
-        <#8c8c8c>   <#e6fff3>Не перемещайте книгу; проверка повторится автоматически.
+        <#8c8c8c>   <#e6fff3>Не перемещайте книгу.
+        <#8c8c8c>   <#e6fff3>Проверка повторится автоматически.
       draft-recovery-failed: |-
 
-        <prefix><#ff9f0f>Незавершённое сохранение не содержало готового чертежа.
+        <prefix><#ff9f0f>Сохранение черновика не завершилось.
         <#8c8c8c>   <#e6fff3>Скопируйте область ещё раз — лимит не занят.
       guide:
         - "<prefix><#e6fff3><bold>Как создать книгу строительства"
         - "<#8c8c8c>   1. <click:run_command:'/builder wand'><#d48763>/builder wand</click> <#e6fff3>— получить селектор."
         - "<#8c8c8c>      <#e6fff3>ЛКМ и ПКМ — два угла. Контур виден постоянно."
         - "<#8c8c8c>   2. <click:run_command:'/builder copy'><#d48763>/builder copy</click> <#e6fff3>— сохранить чертёж на 15 минут."
-        - "<#8c8c8c>   3. <#e6fff3>В выживании возьмите обычную книгу; в творчестве она не нужна."
+        - |-
+          <#8c8c8c>   3. <#e6fff3>В выживании возьмите обычную книгу.
+          <#8c8c8c>      <#e6fff3>В творчестве она не нужна.
         - "<#8c8c8c>      <click:suggest_command:'/builder book draft '><#d48763>/builder book draft [имя]</click> <#e6fff3>— бесплатный черновик."
         - "<#8c8c8c>   4. <#e6fff3>ПКМ по блоку — поставить или перенести превью."
         - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — меню положения."
@@ -348,7 +355,8 @@ locales:
         clipboard: |-
 
           <prefix><#2bba43>Этап 3/7: чертёж готов — <#d48763><count> блоков.
-          <#8c8c8c>   <#e6fff3>В выживании возьмите обычную книгу; в творчестве она не нужна.
+          <#8c8c8c>   <#e6fff3>В выживании возьмите обычную книгу.
+          <#8c8c8c>   <#e6fff3>В творчестве она не нужна.
           <#8c8c8c>   <click:suggest_command:'/builder book draft '><#d48763>/builder book draft [имя]</click> <#e6fff3>— создать черновик.
         draft: |-
 
@@ -394,7 +402,8 @@ locales:
         <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
         <#8c8c8c>   <#e6fff3>Блоков: <#d48763><count> <#8c8c8c>— <#969696>денег пока не списано
         <#8c8c8c>   <#e6fff3>ПКМ по блоку — поставить или перенести превью.
-        <#8c8c8c>   <#e6fff3>ПКМ в воздух — рассчитать смету; Shift + ПКМ — положение.
+        <#8c8c8c>   <#e6fff3>ПКМ в воздух — рассчитать смету.
+        <#8c8c8c>   <#e6fff3>Shift + ПКМ — настроить положение.
       draft-recovered: |-
 
         <prefix><#2bba43>Сохранённый черновик восстановлен.
@@ -841,21 +850,25 @@ locales:
 
         <prefix><yellow>Your saved draft is waiting for safe delivery.
         <dark_gray>   <gray>Hold a plain book in your main hand.
-        <dark_gray>   <click:run_command:'/builder book draft'><aqua>/builder book draft</aqua></click> <gray>— finish delivery; no reselection needed.
+        <dark_gray>   <click:run_command:'/builder book draft'><aqua>/builder book draft</aqua></click> <gray>— finish delivery.
+        <dark_gray>   <gray>You do not need to select the area again.
       draft-recovering: |-
 
         <prefix><yellow>Finishing the durable draft record.
-        <dark_gray>   <gray>Do not move the book; recovery retries automatically.
+        <dark_gray>   <gray>Do not move the book.
+        <dark_gray>   <gray>The check retries automatically.
       draft-recovery-failed: |-
 
-        <prefix><yellow>The interrupted save had no complete blueprint.
+        <prefix><yellow>The draft save did not finish.
         <dark_gray>   <gray>Copy the area again; it did not consume your limit.
       guide:
         - "<prefix><white><bold>Build-book guide"
         - "<dark_gray>   1. <aqua>/builder wand <gray>— get the selector."
         - "<dark_gray>      <gray>Mark two corners; the outline stays visible."
         - "<dark_gray>   2. <aqua>/builder copy <gray>— save it for 15 minutes."
-        - "<dark_gray>   3. <gray>In survival, hold a plain book; creative creates it for you."
+        - |-
+          <dark_gray>   3. <gray>In survival, hold a plain book.
+          <dark_gray>      <gray>Creative mode does not require one.
         - "<dark_gray>      <aqua>/builder book draft [name] <gray>— free draft."
         - "<dark_gray>   4. <gray>Right-click a block to place or move preview."
         - "<dark_gray>      <gray>Sneak-click to adjust its transform."
@@ -888,7 +901,8 @@ locales:
         clipboard: |-
 
           <prefix><green>Step 3/7: <white><count></white> blocks copied.
-          <dark_gray>   <gray>Hold a plain book in survival; creative needs none.
+          <dark_gray>   <gray>Hold a plain book in survival.
+          <dark_gray>   <gray>Creative mode does not require one.
           <dark_gray>   <aqua>/builder book draft [name] <gray>— create draft.
         draft: |-
 
@@ -933,7 +947,8 @@ locales:
         <dark_gray>   <gray>Name: <white><name>
         <dark_gray>   <gray><count> blocks — no charge
         <dark_gray>   <gray>Right-click a block to place or move the preview.
-        <dark_gray>   <gray>Right-click air for the quote; sneak-click to adjust.
+        <dark_gray>   <gray>Right-click air for the quote.
+        <dark_gray>   <gray>Sneak-click to adjust the position.
       draft-recovered: |-
 
         <prefix><green>Saved draft recovered.

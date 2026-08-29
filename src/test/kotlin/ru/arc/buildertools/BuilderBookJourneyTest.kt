@@ -123,6 +123,14 @@ class BuilderBookJourneyTest : FunSpec({
             plan.drop(2).all { line -> line.contains(">   ") } shouldBe true
             quote.drop(2).all { line -> line.contains(">   ") } shouldBe true
 
+            val draftRecovery = config.string("locales.$locale.book.draft-recovering").lines()
+            draftRecovery.size shouldBe 4
+            draftRecovery.first() shouldBe ""
+            draftRecovery.drop(2).all { line -> line.contains(">   ") } shouldBe true
+            val recoveryWords = if (locale == "ru") "книг" to "автоматически" else "book" to "automatic"
+            draftRecovery[2].lowercase() shouldContain recoveryWords.first
+            draftRecovery[3].lowercase() shouldContain recoveryWords.second
+
             config.string("locales.$locale.items.none").isNotBlank() shouldBe true
             config.string("locales.$locale.items.summary") shouldContain "<items>"
             config.string("locales.$locale.items.summary") shouldContain "<types>"

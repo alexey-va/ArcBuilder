@@ -195,5 +195,5 @@ building-gui:
 inactivity-cancel-message: '<white>🛠</white> <#969696>Предпросмотр закрыт из-за неактивности.'
 messages:
   display-limit: '<white>🛠</white> <#ff9f0f>Показана часть чертежа: <#e6fff3><amount>/<max> блоков.'
-  display-limit-2: '<white>🛠</white> <#c42323>Этот чертёж слишком велик для безопасного предпросмотра.'
+  display-limit-2: '<white>🛠</white> <#c42323>Чертёж слишком велик для предпросмотра.'
 cancel-build-message: '<white>🛠</white> <#969696>Постройка отменена.'
