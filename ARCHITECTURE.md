@@ -1,0 +1,194 @@
+# ArcBuilder architecture
+
+Use this file as the starting map for structural work. It describes the
+standalone Paper plugin, its command flow, safety boundaries, persistence, and
+the files that normally change when a builder operation is added.
+
+## Repository boundary
+
+ArcBuilder owns survival-friendly building tools and construction books. It is
+independent from the `ARC` monolith and consumes published `arc-core` modules
+for lifecycle, scheduling, text, player-state snapshots, SQL, logging, metrics,
+and health reporting.
+
+- Paper entry point: `src/main/kotlin/ru/ruscrafting/builder/paper/ArcBuilderPlugin.kt`
+- Builder module binding: `src/main/kotlin/ru/arc/buildertools/BuilderToolsModule.kt`
+- Runtime orchestration: `src/main/kotlin/ru/arc/buildertools/BuilderToolsRuntime.kt`
+- Command and permission declarations: `src/main/resources/plugin.yml`
+- Builder policy, limits, and player text: `src/main/resources/modules/builder-tools.yml`
+- Book presentation and behavior: `src/main/resources/modules/auto-build.yml`
+
+`ArcBuilderPlugin` installs the Paper runtime, metrics, and optional hooks,
+initializes `BuilderToolsModule`, publishes health, and closes those owners in
+reverse order. Startup fails closed if a required runtime invariant is not met.
+
+## Command path
+
+`/builder` is bound by `BuilderToolsModule` and delegated to one
+`BuilderToolsRuntime`. Root literals live in `BuilderRootCommand` inside
+`BuilderToolsExperience.kt`; tab completion and dispatch live in
+`BuilderToolsRuntime`.
+
+| Command | Planner or owner | Plan kind | Permission |
+| --- | --- | --- | --- |
+| `wand`, `clear` | `BuilderSelectionController` plus the runtime | none | any builder permission |
+| `fill` | `BuilderFillController` | `FILL` | `arcbuild.fill` |
+| `disconnect` | `BuilderFenceConnectionController` | `FENCE_DISCONNECT` | `arcbuild.disconnect` |
+| `copy`, `paste` | `BuilderClipboardController` | `PASTE` for paste | `arcbuild.copy`, `arcbuild.paste` |
+| `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
+| `crown` | `BuilderCrownController` | `CROWN` | `arcbuild.crown` |
+| `book` | `BuilderBookLifecycle` and its coordinators | `BUILD_BOOK` when building | book permissions |
+| `confirm`, `cancel`, `undo`, `status` | `BuilderToolsRuntime` | `UNDO` for undo | existing operation context |
+
+`BuilderPermissionPolicy.kt` is the canonical mapping between features and
+permissions. `arcbuild.use` is the umbrella permission; size and hourly tiers
+are resolved there as well.
+
+## Selection and preview
+
+`BuilderSelectionController` owns two in-memory corners per player. The selector
+wand is recognized by persistent item data in `BuilderToolsRuntime`. A complete
+selection becomes the immutable `BuilderSelection` domain value from
+`BuilderToolsDomain.kt`, which provides bounded top-down and bottom-up position
+iteration.
+
+The runtime validates axis and scan-volume limits before a planner sees the
+selection. `BuilderBlockDisplayRenderer` and `BuilderPreviewSessions` render
+player-only selection and plan displays; preview rendering never mutates the
+world. Selection, clipboard, pending plan, and active operation are distinct
+states and must not be collapsed into one session object.
+
+## Plan and mutation transaction
+
+All ordinary world changes use `BuilderPlan` and `BuilderBlockChange` from
+`BuilderToolsDomain.kt`:
+
+1. A feature controller scans the selection on the Paper primary thread. It
+   checks feature permission and protection, then records exact canonical
+   `beforeBlockData` and `afterBlockData`. Planning does not change the world.
+2. `BuilderToolsRuntime.preparePlan` installs a timed preview. The player still
+   owns all materials and the world remains untouched.
+3. `/builder confirm` revalidates the plan, game mode, inventory snapshot,
+   block states, range, loaded chunks, world border, and build protection.
+4. The journal crosses `PREPARED` and `APPLYING` durability barriers before
+   mutation. `BuilderOperationLocks` prevents conflicting player or chunk work.
+5. Changes are applied in bounded per-tick batches with
+   `Block.setBlockData(after, false)`. CoreProtect is notified for each applied
+   change when its bridge is available.
+6. Rewards are delivered and the journal becomes `COMMITTED`. Any failure
+   restores prior block data and player state or leaves an explicit recovery
+   hold instead of guessing about an ambiguous outcome.
+7. `/builder undo` builds a new inverse plan from a committed record; it uses
+   the same preview, confirmation, protection, journal, and recovery path.
+
+`BuilderToolsPaperSupport.kt` contains the local journal, exact item codec and
+inventory exchange, block-safety policy, placement-cost rules, and optional
+CoreProtect bridge. `BuilderPlayerRecoveryCoordinator` owns delayed player-state
+recovery after disconnects or uncertain acknowledgement.
+
+## Safety and integrations
+
+`BuilderBlockSafety` rejects unsafe technical state, tile entities, custom
+Slimefun/ItemsAdder blocks, powered or lit state, occupied beds, waterlogged
+state, and materials without a canonical construction item. Individual
+controllers add operation-specific restrictions.
+
+`BuilderToolsRuntime.ensureMutable` is the shared boundary for range, loaded
+chunks, world border, Lands build permission, and placement checks. Wilderness
+is buildable. WorldGuard is deliberately not a dependency. CoreProtect is
+required by the bundled policy unless the runtime override disables that gate
+for a controlled test environment.
+
+Optional integrations are discovered in `ru.arc.hooks`: Lands, Slimefun,
+ItemsAdder, EconomyShopGUI, RedisEconomy/Vault, and zAuctionHouse. Feature code
+must go through these boundaries rather than linking optional plugins directly
+from domain values.
+
+## Fence disconnection
+
+`/builder disconnect` is intentionally a one-shot selection operation:
+
+- only vanilla materials whose names end in `_FENCE` are considered;
+- fence gates, walls, panes, custom blocks, and other `MultipleFacing` blocks
+  are not changed;
+- every currently connected `MultipleFacing` side is cleared in the planned
+  block state;
+- already disconnected fences are skipped;
+- the operation has no item cost or reward and remains confirmed and undoable;
+- a later neighbor update may reconnect a fence according to vanilla physics.
+
+Do not add coordinate persistence or block-physics listeners to this command.
+Persistent connection suppression would be a separate feature with a separate
+lifecycle and data model.
+
+## Clipboard and construction books
+
+`BuilderClipboardController` copies only safe blocks, stores coordinates
+relative to the selected cuboid and the player's anchor, rotates cloned block
+data, and plans paste at the player's current block position.
+
+The book subsystem is larger and should be entered through
+`BuilderBookLifecycle.kt`:
+
+- `BuilderDraftLifecycle` and `BuilderDraftJournal` own free draft creation and
+  crash recovery;
+- `PlayerBuildBookStore` owns player schematic persistence;
+- `BuilderBookSqlRegistry` is the authoritative MySQL registry for blueprints,
+  instances, minting, ownership generation, and one-time use;
+- claim, mint, release, pricing, wallet, auction, and status behavior is split
+  into the correspondingly named coordinators;
+- `BuildingManager` and `ConstructionSite` own interactive book previews and
+  transforms.
+
+The MySQL integration suite belongs to GitHub Actions and must not be run
+locally.
+
+## Configuration and player-facing text
+
+`BuilderToolsConfig` layers bundled `builder-tools.yml` with the generated
+runtime override `builder-tools-runtime.yml`. It validates numerical bounds and
+requires every locale to contain every plan-kind label. New player-facing text
+belongs in both `locales.ru` and `locales.en` in `builder-tools.yml`.
+
+`visual-preview.yml` maps every localized surface to the gallery renderer.
+Update it when a new key is not already covered by the existing chat or
+fragment globs.
+
+## Tests and build
+
+Controller tests live beside their production feature under
+`src/test/kotlin/ru/arc/buildertools/`. The main end-to-end boundary is
+`ArcBuilderMockBukkitJourneyTest`: it exercises the real command executor,
+events, scheduler, previews, journal, inventory exchange, confirmation, and
+undo while replacing only external persistence.
+
+Allowed local verification:
+
+```bash
+./gradlew --no-daemon test shadowJar
+python3 ../arc-core/scripts/verify_consumer_architecture.py .
+```
+
+Do not run `integrationTest`, Testcontainers, Docker, or the transitive
+integration gate locally. The production artifact is
+`build/libs/ArcBuilder-1.0.0.jar`.
+
+## Adding another selection operation
+
+Use this checklist instead of rediscovering the runtime:
+
+1. Add a focused controller and host interface. The controller may plan exact
+   changes but must not mutate the world.
+2. Add the `BuilderPlanKind`, `BuilderFeature`, and `BuilderRootCommand` entries.
+3. Wire the host and command branch in `BuilderToolsRuntime` through
+   `newPlan` and `preparePlan`.
+4. Declare the permission and umbrella child in `plugin.yml`.
+5. Add both locale labels, help text, and any new validation/preview keys.
+6. Write a failing player-visible or controller test first. Cover the exact
+   block types included, excluded neighbors, no mutation before confirmation,
+   and the relevant bounds or protection behavior.
+7. Run the allowed local verification above and keep MySQL integration in CI.
+8. Update this file if the ownership or transaction flow changed.
+
+Deployment is owned by the sibling operations repository and remains a
+separate fact from a successful build.

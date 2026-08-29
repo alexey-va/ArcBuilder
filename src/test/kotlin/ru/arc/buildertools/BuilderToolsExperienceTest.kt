@@ -18,6 +18,7 @@ class BuilderToolsExperienceTest : FunSpec({
             "wand",
             "clear",
             "fill",
+            "disconnect",
             "copy",
             "book",
             "paste",

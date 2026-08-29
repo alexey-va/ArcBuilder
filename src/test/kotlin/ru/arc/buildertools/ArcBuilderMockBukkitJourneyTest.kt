@@ -9,6 +9,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextDecoration
+import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
@@ -16,6 +17,7 @@ import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.BlockData
+import org.bukkit.block.data.MultipleFacing
 import org.bukkit.block.data.type.Door
 import org.bukkit.block.structure.StructureRotation
 import org.bukkit.entity.Player
@@ -344,6 +346,53 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.countLine(world, Material.STONE) shouldBe 5
             journey.awaitSettled(player) { journey.countLine(world, Material.STONE) == 5 }
             journey.amount(player, Material.STONE) shouldBe 0
+        }
+    }
+
+    test("disconnect previews only fence state changes and the confirmed operation remains undoable") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("FenceBuilder", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+
+            val oak = Material.OAK_FENCE.createBlockData() as MultipleFacing
+            oak.setFace(BlockFace.NORTH, true)
+            oak.setFace(BlockFace.EAST, true)
+            val nether = Material.NETHER_BRICK_FENCE.createBlockData() as MultipleFacing
+            nether.setFace(BlockFace.SOUTH, true)
+            world.getBlockAt(0, 64, 0).setBlockData(oak, false)
+            world.getBlockAt(1, 64, 0).setBlockData(nether, false)
+            world.getBlockAt(2, 64, 0).type = Material.STONE
+
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 2, 64, 0)
+
+            player.performCommand("builder disconnect") shouldBe true
+
+            val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
+            plan.kind.name shouldBe "FENCE_DISCONNECT"
+            plan.changes.map { it.position.x } shouldBe listOf(0, 1)
+            plan.changes.forEach { change ->
+                (Bukkit.createBlockData(change.afterBlockData) as MultipleFacing).faces shouldBe emptySet<BlockFace>()
+            }
+            (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces shouldBe setOf(BlockFace.NORTH, BlockFace.EAST)
+            (world.getBlockAt(1, 64, 0).blockData as MultipleFacing).faces shouldBe setOf(BlockFace.SOUTH)
+            world.getBlockAt(2, 64, 0).type shouldBe Material.STONE
+
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) {
+                (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces.isEmpty() &&
+                    (world.getBlockAt(1, 64, 0).blockData as MultipleFacing).faces.isEmpty()
+            }
+            world.getBlockAt(2, 64, 0).type shouldBe Material.STONE
+
+            player.performCommand("builder undo") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) {
+                (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces == setOf(BlockFace.NORTH, BlockFace.EAST) &&
+                    (world.getBlockAt(1, 64, 0).blockData as MultipleFacing).faces == setOf(BlockFace.SOUTH)
+            }
         }
     }
 

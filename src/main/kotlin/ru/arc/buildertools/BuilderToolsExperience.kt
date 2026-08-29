@@ -29,6 +29,7 @@ internal enum class BuilderRootCommand(
     WAND("wand"),
     CLEAR("clear"),
     FILL("fill"),
+    DISCONNECT("disconnect"),
     COPY("copy"),
     BOOK("book"),
     PASTE("paste"),

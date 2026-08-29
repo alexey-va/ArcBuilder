@@ -119,6 +119,24 @@ internal class BuilderToolsRuntime(
             override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
         },
     )
+    private val fenceConnectionController = BuilderFenceConnectionController(
+        maximumChanges = config.maxChanges,
+        host = object : BuilderFenceConnectionHost {
+            override fun ensurePermission(player: Player) =
+                ensureFeaturePermission(player, BuilderFeature.FENCE_DISCONNECT)
+
+            override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
+
+            override fun world(worldId: UUID): World = requireWorld(worldId)
+
+            override fun ensureMutable(player: Player, block: Block) = this@BuilderToolsRuntime.ensureMutable(player, block)
+
+            override fun createPlan(player: Player, changes: List<BuilderBlockChange>): BuilderPlan =
+                newPlan(player, BuilderPlanKind.FENCE_DISCONNECT, changes, emptyList(), emptyList())
+
+            override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
+        },
+    )
     private val clipboardController = BuilderClipboardController(
         safety = safety,
         selections = selections,
@@ -470,6 +488,7 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.WAND -> giveWand(player)
             BuilderRootCommand.CLEAR -> clearSelection(player)
             BuilderRootCommand.FILL -> preparePlan(player, fillController.plan(player, materialArgument(player, args.getOrNull(1))))
+            BuilderRootCommand.DISCONNECT -> preparePlan(player, fenceConnectionController.planDisconnect(player))
             BuilderRootCommand.COPY -> {
                 val copied = clipboardController.copy(player)
                 send(

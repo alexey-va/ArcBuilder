@@ -1,5 +1,7 @@
 # ArcBuilder
 
+Start structural work with [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Standalone RusCrafting Paper plugin for survival-friendly building assistance:
 selection, fill, copy/paste with player-relative anchors and rotation,
 deconstruction, procedural tree crowns, construction-book drafts, pricing,
@@ -12,6 +14,9 @@ The plugin uses arc-core 2.1.2 and does not depend on the ARC monolith.
 - `/builder wand` gives selection guidance. Left click selects point 1; right
   click selects point 2. Distinct straight BlockDisplay outlines remain visible
   until the selection is cleared or expires.
+- `/builder disconnect` prepares a confirmed, undoable plan that clears the
+  connected sides of vanilla fences in the current selection. Later neighbor
+  updates may reconnect them according to vanilla block physics.
 - `/builder copy` stores the build relative to the player's position and facing.
   `/builder paste` previews it at the player's current position; rotation can be
   adjusted before confirmation.

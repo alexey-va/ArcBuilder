@@ -10,6 +10,7 @@ import kotlin.math.min
 
 enum class BuilderPlanKind {
     FILL,
+    FENCE_DISCONNECT,
     PASTE,
     BUILD_BOOK,
     DECONSTRUCT,
