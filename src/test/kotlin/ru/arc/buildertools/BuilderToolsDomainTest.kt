@@ -739,6 +739,7 @@ class BuilderToolsDomainTest : FunSpec({
         )
         val book = BuilderItemAmount("AAAA", "minecraft:book", 1)
         val stone = BuilderItemAmount("BBBB", "minecraft:stone", 4)
+        val displacedDirt = BuilderItemAmount("CCCC", "minecraft:dirt", 2)
         val ordinary = BuilderPlan(
             id = UUID.randomUUID(),
             playerId = playerId,
@@ -757,6 +758,7 @@ class BuilderToolsDomainTest : FunSpec({
         val builtFromBook = ordinary.copy(
             kind = BuilderPlanKind.BUILD_BOOK,
             costs = listOf(book),
+            rewards = listOf(displacedDirt),
             bookBlueprintId = UUID.randomUUID(),
             bookInstanceId = UUID.randomUUID(),
             bookInstanceGeneration = 1,
@@ -764,7 +766,7 @@ class BuilderToolsDomainTest : FunSpec({
             bookSchematicSha256 = "a".repeat(64),
         )
         BuilderUndoRules.exchangeFor(builtFromBook) shouldBe BuilderUndoExchange(
-            costs = emptyList(),
+            costs = listOf(displacedDirt),
             rewards = emptyList(),
         )
     }

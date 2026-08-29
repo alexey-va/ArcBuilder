@@ -52,6 +52,15 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
+internal sealed interface BuilderBookPlacementResult {
+    data object Unchanged : BuilderBookPlacementResult
+    data object SkippedUnsafe : BuilderBookPlacementResult
+    data class Change(
+        val block: BuilderBlockChange,
+        val refund: ItemStack?,
+    ) : BuilderBookPlacementResult
+}
+
 internal class BuilderToolsRuntime(
     private val plugin: JavaPlugin,
     private val config: BuilderToolsConfig,
@@ -65,6 +74,7 @@ internal class BuilderToolsRuntime(
     blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
     draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
     bookSchematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
+    private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
@@ -620,29 +630,24 @@ internal class BuilderToolsRuntime(
         books.verifySchematic(data)
         if (site.building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
 
+        val rewards = mutableListOf<ItemStack>()
         var skippedUnsafe = 0
         val changes = site.relativePositionsBottomUp().mapNotNull { relative ->
-            val after = BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)).also { blockData ->
-                rotateBlockData(blockData, site.fullRotation)
-            }
-            if (after.material.isAir) return@mapNotNull null
-            val location = site.worldLocation(relative)
-            val block = location.block
-            if (!safety.isSafePlacement(after)) {
-                skippedUnsafe += 1
-                return@mapNotNull null
-            }
-            if (block.blockData.asString == after.asString) return@mapNotNull null
-            if (!safety.isReplaceable(block)) {
-                skippedUnsafe += 1
-                return@mapNotNull null
-            }
-            ensureMutable(player, block, after.material)
-            BuilderBlockChange(
-                BuilderBlockPos(site.world.uid, block.x, block.y, block.z).validated(),
-                block.blockData.asString,
-                after.asString,
+            val after = rotateBlockData(
+                BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)),
+                site.fullRotation,
             )
+            when (val placement = planBuildBookBlock(player, site.worldLocation(relative).block, after)) {
+                BuilderBookPlacementResult.Unchanged -> null
+                BuilderBookPlacementResult.SkippedUnsafe -> {
+                    skippedUnsafe += 1
+                    null
+                }
+                is BuilderBookPlacementResult.Change -> {
+                    placement.refund?.let(rewards::add)
+                    placement.block
+                }
+            }
         }.take(config.maxChanges + 1).toList()
         requireChanges(changes)
         return newPlan(
@@ -650,13 +655,42 @@ internal class BuilderToolsRuntime(
             kind = BuilderPlanKind.BUILD_BOOK,
             changes = changes,
             costs = BuilderBookConstructionCosts.calculate(book, data, player.gameMode),
-            rewards = emptyList(),
+            rewards = BuilderItemCodec.aggregate(rewards),
             bookBlueprintId = checkNotNull(data.blueprintId),
             bookInstanceId = checkNotNull(data.instanceId),
             bookInstanceGeneration = checkNotNull(data.instanceGeneration),
             bookBuildingId = data.buildingId,
             bookSchematicSha256 = checkNotNull(data.schematicSha256),
             skippedUnsafeBlocks = skippedUnsafe,
+        )
+    }
+
+    internal fun planBuildBookBlock(
+        player: Player,
+        block: Block,
+        after: org.bukkit.block.data.BlockData,
+    ): BuilderBookPlacementResult {
+        if (!after.material.isAir && !safety.isSafePlacement(after)) {
+            return BuilderBookPlacementResult.SkippedUnsafe
+        }
+        if (block.blockData.asString == after.asString) return BuilderBookPlacementResult.Unchanged
+        val replaceable = safety.isReplaceable(block)
+        if (!replaceable && !safety.isSafeExisting(block)) {
+            return BuilderBookPlacementResult.SkippedUnsafe
+        }
+        ensureMutable(player, block, after.material.takeUnless(Material::isAir))
+        val refund = if (BuilderGameModePolicy.usesInventory(player.gameMode) && !replaceable) {
+            bookReplacementRefund(block)
+        } else {
+            null
+        }
+        return BuilderBookPlacementResult.Change(
+            BuilderBlockChange(
+                BuilderBlockPos(block.world.uid, block.x, block.y, block.z).validated(),
+                block.blockData.asString,
+                after.asString,
+            ),
+            refund,
         )
     }
 

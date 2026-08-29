@@ -3,6 +3,10 @@ package ru.arc.buildertools
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeSameInstanceAs
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextDecoration
 import org.bukkit.GameMode
@@ -11,7 +15,9 @@ import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.Bisected
+import org.bukkit.block.data.BlockData
 import org.bukkit.block.data.type.Door
+import org.bukkit.block.structure.StructureRotation
 import org.bukkit.entity.Player
 import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
@@ -34,6 +40,7 @@ import ru.arc.config.ConfigManager
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
+import ru.arc.util.BlockUtils.rotateBlockData
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
 import java.time.Duration
 import java.util.UUID
@@ -44,6 +51,57 @@ import java.util.UUID
  * External MySQL contracts deliberately stay in the GitHub-CI integration suite.
  */
 class ArcBuilderMockBukkitJourneyTest : FunSpec({
+    test("block-data rotation never mutates a shared schematic rail state") {
+        val shared = mockk<BlockData>()
+        val firstClone = mockk<BlockData>(relaxed = true)
+        val secondClone = mockk<BlockData>(relaxed = true)
+        every { shared.clone() } returnsMany listOf(firstClone, secondClone)
+
+        val first = rotateBlockData(shared, 90)
+        val second = rotateBlockData(shared, 90)
+
+        first shouldBeSameInstanceAs firstClone
+        second shouldBeSameInstanceAs secondClone
+        verify(exactly = 0) { shared.rotate(any()) }
+        verify(exactly = 1) { firstClone.rotate(StructureRotation.CLOCKWISE_90) }
+        verify(exactly = 1) { secondClone.rotate(StructureRotation.CLOCKWISE_90) }
+    }
+
+    test("build-book plan replaces safe ground, carves source air and skips containers") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("BookGroundBuilder", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 6.5, 64.0, 6.5, 0f, 0f))
+            world.getBlockAt(6, 64, 6).type = Material.DIRT
+            world.getBlockAt(7, 64, 6).type = Material.DIRT
+            world.getBlockAt(8, 64, 6).type = Material.CHEST
+
+            val replacement = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(6, 64, 6),
+                Material.STONE.createBlockData(),
+            ) as BuilderBookPlacementResult.Change
+            val carving = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(7, 64, 6),
+                Material.AIR.createBlockData(),
+            ) as BuilderBookPlacementResult.Change
+            val container = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(8, 64, 6),
+                Material.AIR.createBlockData(),
+            )
+
+            replacement.block.beforeBlockData to replacement.block.afterBlockData shouldBe
+                ("minecraft:dirt" to "minecraft:stone")
+            carving.block.beforeBlockData to carving.block.afterBlockData shouldBe
+                ("minecraft:dirt" to "minecraft:air")
+            replacement.refund?.type shouldBe Material.DIRT
+            carving.refund?.type shouldBe Material.DIRT
+            container shouldBe BuilderBookPlacementResult.SkippedUnsafe
+        }
+    }
+
     test("survival player copies, previews, confirms and undoes a build") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("SurvivalBuilder", GameMode.SURVIVAL)
@@ -490,6 +548,9 @@ private class ArcBuilderJourney private constructor(
 
     fun activeLeases(): Int = runtime.runtimeHealthContribution().activeLeases
 
+    fun planBuildBookBlock(player: Player, block: org.bukkit.block.Block, after: BlockData): BuilderBookPlacementResult =
+        runtime.planBuildBookBlock(player, block, after)
+
     fun await(description: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos()
         while (System.nanoTime() < deadline) {
@@ -530,6 +591,7 @@ private class ArcBuilderJourney private constructor(
                     blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
                     draftStorage = InMemoryBuilderDraftStorage(),
                     bookSchematicVerifier = BuilderBookSchematicVerifier { true },
+                    bookReplacementRefund = { block -> ItemStack(block.type) },
                 )
                 checkNotNull(plugin.getCommand("builder")).apply {
                     setExecutor(runtime)
