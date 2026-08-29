@@ -7,6 +7,7 @@ internal enum class BuilderFeature(
     val canonicalPermission: String,
 ) {
     FILL("arcbuild.fill"),
+    REPLACE("arcbuild.replace"),
     FENCE_DISCONNECT("arcbuild.disconnect"),
     COPY("arcbuild.copy"),
     PASTE("arcbuild.paste"),

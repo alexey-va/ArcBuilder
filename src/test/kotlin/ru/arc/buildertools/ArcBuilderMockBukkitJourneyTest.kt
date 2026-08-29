@@ -19,6 +19,7 @@ import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.BlockData
 import org.bukkit.block.data.MultipleFacing
 import org.bukkit.block.data.type.Door
+import org.bukkit.block.data.type.Stairs
 import org.bukkit.block.structure.StructureRotation
 import org.bukkit.entity.Player
 import org.bukkit.event.block.Action
@@ -345,6 +346,84 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.paper.performTicks(1)
             journey.countLine(world, Material.STONE) shouldBe 5
             journey.awaitSettled(player) { journey.countLine(world, Material.STONE) == 5 }
+            journey.amount(player, Material.STONE) shouldBe 0
+        }
+    }
+
+    test("replace previews an exact survival exchange preserves state and remains undoable") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("StateReplacer", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+
+            val oak = Material.OAK_STAIRS.createBlockData() as Stairs
+            oak.facing = BlockFace.WEST
+            oak.half = Bisected.Half.TOP
+            oak.shape = Stairs.Shape.OUTER_RIGHT
+            world.getBlockAt(0, 64, 0).setBlockData(oak, false)
+            world.getBlockAt(1, 64, 0).type = Material.OAK_PLANKS
+
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
+            player.inventory.addItem(ItemStack(Material.SPRUCE_STAIRS))
+
+            player.performCommand("builder replace oak_stairs spruce_stairs") shouldBe true
+
+            val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
+            plan.kind shouldBe BuilderPlanKind.REPLACE
+            plan.changes.size shouldBe 1
+            world.getBlockAt(0, 64, 0).blockData.asString shouldBe oak.asString
+            journey.amount(player, Material.SPRUCE_STAIRS) shouldBe 1
+
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.SPRUCE_STAIRS }
+            val spruce = world.getBlockAt(0, 64, 0).blockData as Stairs
+            spruce.facing shouldBe BlockFace.WEST
+            spruce.half shouldBe Bisected.Half.TOP
+            spruce.shape shouldBe Stairs.Shape.OUTER_RIGHT
+            world.getBlockAt(1, 64, 0).type shouldBe Material.OAK_PLANKS
+            journey.amount(player, Material.SPRUCE_STAIRS) shouldBe 0
+            journey.amount(player, Material.OAK_STAIRS) shouldBe 1
+
+            player.performCommand("builder undo") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.OAK_STAIRS }
+            world.getBlockAt(0, 64, 0).blockData.asString shouldBe oak.asString
+            journey.amount(player, Material.OAK_STAIRS) shouldBe 0
+            journey.amount(player, Material.SPRUCE_STAIRS) shouldBe 1
+        }
+    }
+
+    test("replace confirm applies immediately only when confirm is the final argument") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("DirectReplace", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            player.performCommand("builder replace stone deepslate nope") shouldBe true
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            player.inventory.addItem(ItemStack(Material.DEEPSLATE))
+            journey.paper.server.getCommandTabComplete(
+                player,
+                "builder replace stone deepslate c",
+            ) shouldBe listOf("confirm")
+
+            player.performCommand("builder replace stone deepslate confirm") shouldBe true
+
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.DEEPSLATE }
+            journey.amount(player, Material.DEEPSLATE) shouldBe 0
+            journey.amount(player, Material.STONE) shouldBe 1
+            player.performCommand("builder undo") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE }
+            journey.amount(player, Material.DEEPSLATE) shouldBe 1
             journey.amount(player, Material.STONE) shouldBe 0
         }
     }

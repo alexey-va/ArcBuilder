@@ -84,6 +84,7 @@ locales:
       - "<prefix><#e6fff3>Инструменты строителя"
       - "<#8c8c8c>   <#d48763>/builder wand <#e6fff3>— выделить область"
       - "<#8c8c8c>   <#d48763>/builder fill [блок] <#e6fff3>— заполнить пустоты"
+      - "<#8c8c8c>   <#d48763>/builder replace старый новый [confirm] <#e6fff3>— замена"
       - "<#8c8c8c>   <#d48763>/builder disconnect [confirm] <#e6fff3>— без превью"
       - "<#8c8c8c>   <#d48763>/builder copy <#e6fff3>и <#d48763>/builder paste <#e6fff3>— чертёж"
       - "<#8c8c8c>   <#d48763>/builder book draft [имя] <#e6fff3>— бесплатный черновик"
@@ -637,6 +638,7 @@ locales:
       idle: "<prefix><#e6fff3>Нет выделения. <#8c8c8c>— <#d48763>/builder wand"
     kinds:
       fill: "Заполнение"
+      replace: "Замена блоков"
       fence_disconnect: "Разъединение заборов"
       paste: "Вставка чертежа"
       build_book: "Строительство по книге"
@@ -649,6 +651,7 @@ locales:
       - "<prefix><white>Builder tools"
       - "<dark_gray>   <white>/builder wand <gray>— prepare the selector"
       - "<dark_gray>   <white>/builder fill [block] <gray>— fill using your materials"
+      - "<dark_gray>   <white>/builder replace old new [confirm] <gray>— replace"
       - "<dark_gray>   <white>/builder disconnect [confirm] <gray>— no preview"
       - "<dark_gray>   <white>/builder copy <gray>and <white>/builder paste <gray>— temporary plan"
       - "<dark_gray>   <white>/builder book draft [name] <gray>— free draft"
@@ -1170,6 +1173,7 @@ locales:
       idle: "<prefix><gray>No selection or active plan. Start with <white>/builder wand</white>."
     kinds:
       fill: "Fill"
+      replace: "Block replacement"
       fence_disconnect: "Fence disconnection"
       paste: "Blueprint paste"
       build_book: "Book construction"

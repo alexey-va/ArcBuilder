@@ -119,6 +119,39 @@ internal class BuilderToolsRuntime(
             override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
         },
     )
+    private val replaceController = BuilderReplaceController(
+        safety = safety,
+        maximumChanges = config.maxChanges,
+        host = object : BuilderReplaceHost {
+            override fun ensurePermission(player: Player) = ensureFeaturePermission(player, BuilderFeature.REPLACE)
+
+            override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
+
+            override fun world(worldId: UUID): World = requireWorld(worldId)
+
+            override fun placementData(material: Material) = this@BuilderToolsRuntime.placementData(material)
+
+            override fun ensurePlacement(player: Player, block: Block, material: Material) =
+                this@BuilderToolsRuntime.ensureMutable(player, block, material)
+
+            override fun createPlan(
+                player: Player,
+                changes: List<BuilderBlockChange>,
+                costs: List<BuilderItemAmount>,
+                rewards: List<BuilderItemAmount>,
+                skippedUnsafeBlocks: Int,
+            ): BuilderPlan = newPlan(
+                player = player,
+                kind = BuilderPlanKind.REPLACE,
+                changes = changes,
+                costs = costs,
+                rewards = rewards,
+                skippedUnsafeBlocks = skippedUnsafeBlocks,
+            )
+
+            override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
+        },
+    )
     private val fenceConnectionController = BuilderFenceConnectionController(
         maximumChanges = config.maxChanges,
         host = object : BuilderFenceConnectionHost {
@@ -471,6 +504,10 @@ internal class BuilderToolsRuntime(
         }
         if (args.size == 2 && args[0].equals("confirm", true)) return filterPrefix(listOf("buy"), args[1])
         if (args.size == 2 && args[0].equals("disconnect", true)) return filterPrefix(listOf("confirm"), args[1])
+        if (args.firstOrNull().equals("replace", true)) {
+            if (args.size == 2 || args.size == 3) return filterPrefix(safeMaterialNames(), args.last())
+            if (args.size == 4) return filterPrefix(listOf("confirm"), args[3])
+        }
         if (args.size == 2 && args[0].equals("paste", true)) return filterPrefix(listOf("rotate", "left", "right"), args[1])
         if (args.size == 2 && args[0].equals("book", true)) {
             return filterPrefix(listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel"), args[1])
@@ -489,6 +526,11 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.WAND -> giveWand(player)
             BuilderRootCommand.CLEAR -> clearSelection(player)
             BuilderRootCommand.FILL -> preparePlan(player, fillController.plan(player, materialArgument(player, args.getOrNull(1))))
+            BuilderRootCommand.REPLACE -> {
+                val request = replaceRequest(args)
+                val plan = replaceController.plan(player, request.source, request.target)
+                if (request.confirmed) confirmImmediately(player, plan) else preparePlan(player, plan)
+            }
             BuilderRootCommand.DISCONNECT -> {
                 val plan = fenceConnectionController.planDisconnect(player)
                 if (args.getOrNull(1)?.equals("confirm", true) == true) {
@@ -733,6 +775,21 @@ internal class BuilderToolsRuntime(
         if (raw == null) return player.inventory.itemInMainHand.type.takeUnless(Material::isAir) ?: throw BuilderUserFailure("errors.material")
         return Material.matchMaterial(raw) ?: Material.matchMaterial(raw.uppercase(Locale.ROOT)) ?: throw BuilderUserFailure("errors.material")
     }
+
+    private fun replaceRequest(args: Array<out String>): ReplaceRequest {
+        if (args.size !in 3..4 || args.size == 4 && !args[3].equals("confirm", true)) {
+            throw BuilderUserFailure("errors.material")
+        }
+        return ReplaceRequest(
+            source = explicitMaterialArgument(args[1]),
+            target = explicitMaterialArgument(args[2]),
+            confirmed = args.size == 4,
+        )
+    }
+
+    private fun explicitMaterialArgument(raw: String): Material =
+        Material.matchMaterial(raw) ?: Material.matchMaterial(raw.uppercase(Locale.ROOT))
+        ?: throw BuilderUserFailure("errors.material")
 
     private fun newPlan(
         player: Player,
@@ -1458,6 +1515,12 @@ internal class BuilderToolsRuntime(
     }
 
     private fun safeMaterialNames(): List<String> = Material.entries.asSequence().filter(safety::isSafeMaterial).map { it.name.lowercase(Locale.ROOT) }.toList()
+
+    private data class ReplaceRequest(
+        val source: Material,
+        val target: Material,
+        val confirmed: Boolean,
+    )
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onInteract(event: PlayerInteractEvent) {

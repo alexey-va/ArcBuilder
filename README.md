@@ -3,9 +3,9 @@
 Start structural work with [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Standalone RusCrafting Paper plugin for survival-friendly building assistance:
-selection, fill, copy/paste with player-relative anchors and rotation,
-deconstruction, procedural tree crowns, construction-book drafts, pricing,
-activation, copying, selling, and one-time-use protection.
+selection, fill, exact block replacement, copy/paste with player-relative
+anchors and rotation, deconstruction, procedural tree crowns, construction-book
+drafts, pricing, activation, copying, selling, and one-time-use protection.
 
 The plugin uses arc-core 2.1.2 and does not depend on the ARC monolith.
 
@@ -18,6 +18,11 @@ The plugin uses arc-core 2.1.2 and does not depend on the ARC monolith.
   sides of vanilla fences in the current selection. Add `confirm` to apply the
   same plan immediately without a preview. Later neighbor updates may reconnect
   fences according to vanilla block physics.
+- `/builder replace <old> <new>` previews an exact-material replacement inside
+  the selection. Compatible state such as stair orientation, slab type, log
+  axis, and fence sides is preserved. Add final `confirm` to apply immediately.
+  Survival consumes the new blocks and returns the old ones; creative does not
+  exchange inventory.
 - `/builder copy` stores the build relative to the player's position and facing.
   `/builder paste` previews it at the player's current position; rotation can be
   adjusted before confirmation.

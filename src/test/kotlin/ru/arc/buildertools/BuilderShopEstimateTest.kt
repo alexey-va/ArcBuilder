@@ -23,6 +23,7 @@ class BuilderShopEstimateTest : FunSpec({
 
     test("auto-buy is limited to material-backed construction plans") {
         BuilderShopEstimateRules.supportsAutoBuy(BuilderPlanKind.FILL) shouldBe true
+        BuilderShopEstimateRules.supportsAutoBuy(BuilderPlanKind.REPLACE) shouldBe true
         BuilderShopEstimateRules.supportsAutoBuy(BuilderPlanKind.PASTE) shouldBe true
         BuilderShopEstimateRules.supportsAutoBuy(BuilderPlanKind.CROWN) shouldBe true
         BuilderShopEstimateRules.supportsAutoBuy(BuilderPlanKind.DECONSTRUCT) shouldBe false

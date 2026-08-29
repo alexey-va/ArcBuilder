@@ -35,7 +35,12 @@ internal enum class BuilderShopEstimateComparison {
 }
 
 internal object BuilderShopEstimateRules {
-    private val BUYABLE_KINDS = setOf(BuilderPlanKind.FILL, BuilderPlanKind.PASTE, BuilderPlanKind.CROWN)
+    private val BUYABLE_KINDS = setOf(
+        BuilderPlanKind.FILL,
+        BuilderPlanKind.REPLACE,
+        BuilderPlanKind.PASTE,
+        BuilderPlanKind.CROWN,
+    )
 
     fun supportsAutoBuy(kind: BuilderPlanKind): Boolean = kind in BUYABLE_KINDS
 

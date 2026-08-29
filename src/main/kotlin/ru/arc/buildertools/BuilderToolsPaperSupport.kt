@@ -21,6 +21,7 @@ import org.bukkit.block.data.type.FlowerBed
 import org.bukkit.block.data.type.SeaPickle
 import org.bukkit.block.data.type.Slab
 import org.bukkit.block.data.type.Snow
+import org.bukkit.block.data.type.Stairs
 import org.bukkit.block.data.type.TrapDoor
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
@@ -89,7 +90,7 @@ internal object BuilderItemCodec {
 internal object BuilderPlacementCost {
     fun itemOrNull(data: BlockData): ItemStack? {
         if (data is Bed && data.part == Bed.Part.HEAD) return null
-        if (data is Bisected && data !is TrapDoor && data.half == Bisected.Half.TOP) return null
+        if (data is Bisected && data !is Stairs && data !is TrapDoor && data.half == Bisected.Half.TOP) return null
         val material = constructionItem(data.material) ?: return null
         val amount = when (data) {
             is Slab -> if (data.type == Slab.Type.DOUBLE) 2 else 1

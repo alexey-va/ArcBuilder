@@ -424,6 +424,7 @@ class BuilderToolsDomainTest : FunSpec({
         fun permissions(vararg nodes: String): (String) -> Boolean = nodes.toSet()::contains
 
         BuilderPermissionPolicy.canUse(BuilderFeature.FILL, permissions("arcbuild.fill")) shouldBe true
+        BuilderPermissionPolicy.canUse(BuilderFeature.REPLACE, permissions("arcbuild.replace")) shouldBe true
         BuilderPermissionPolicy.canUse(BuilderFeature.COPY, permissions("arcbuild.copy")) shouldBe true
         BuilderPermissionPolicy.canUse(BuilderFeature.FILL, permissions("arc.builder.tools.fill")) shouldBe false
         BuilderPermissionPolicy.canUse(BuilderFeature.PASTE, permissions("arc.buildertools.paste")) shouldBe false

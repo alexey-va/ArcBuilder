@@ -18,13 +18,14 @@ softdepend:
 commands:
   builder:
     description: Survival-friendly builder tools
-    usage: /builder [help|wand|fill|disconnect|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status]
+    usage: /builder [help|wand|fill|replace|disconnect|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status]
 permissions:
   arcbuild.use:
     description: Use survival-friendly ArcBuilder tools
     default: false
     children:
       arcbuild.fill: true
+      arcbuild.replace: true
       arcbuild.disconnect: true
       arcbuild.copy: true
       arcbuild.paste: true
@@ -32,6 +33,8 @@ permissions:
       arcbuild.crown: true
       arcbuild.book.create: true
   arcbuild.fill:
+    default: false
+  arcbuild.replace:
     default: false
   arcbuild.disconnect:
     default: false

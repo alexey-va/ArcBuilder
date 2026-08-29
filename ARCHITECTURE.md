@@ -33,6 +33,7 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 | --- | --- | --- | --- |
 | `wand`, `clear` | `BuilderSelectionController` plus the runtime | none | any builder permission |
 | `fill` | `BuilderFillController` | `FILL` | `arcbuild.fill` |
+| `replace <old> <new> [confirm]` | `BuilderReplaceController` | `REPLACE` | `arcbuild.replace` |
 | `disconnect [confirm]` | `BuilderFenceConnectionController` | `FENCE_DISCONNECT` | `arcbuild.disconnect` |
 | `copy`, `paste` | `BuilderClipboardController` | `PASTE` for paste | `arcbuild.copy`, `arcbuild.paste` |
 | `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
@@ -125,6 +126,26 @@ The planner has deliberately narrow scope:
 Do not add coordinate persistence or block-physics listeners to this command.
 Persistent connection suppression would be a separate feature with a separate
 lifecycle and data model.
+
+## Exact block replacement
+
+`/builder replace <old> <new>` scans the current selection for one exact vanilla
+material. The plain command prepares a preview; adding `confirm` as the final
+argument applies the same plan immediately. Both paths use the ordinary
+preflight, inventory, journal, CoreProtect, and undo transaction.
+
+`BuilderReplaceController` copies only block-data properties supported by both
+source and target through `BuilderCompatibleBlockState`. This preserves useful
+state such as direction, rotation, stair half and shape, slab type, log axis,
+fence faces, candle count, lantern suspension, snow cover, and walls without
+copying unrelated state. Unsafe containers and custom blocks are skipped.
+Coupled multi-block sources such as doors, beds, and tall bisected blocks are
+skipped, while coupled targets are rejected, so the operation never creates or
+replaces a single incomplete half.
+
+In survival, every changed block consumes the target construction item and
+returns the source construction item. Creative plans carry no item exchange.
+Replacing with air remains unsupported; removal belongs to `deconstruct`.
 
 ## Clipboard and construction books
 
