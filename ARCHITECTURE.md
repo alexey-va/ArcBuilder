@@ -8,8 +8,8 @@ the files that normally change when a builder operation is added.
 
 ArcBuilder owns survival-friendly building tools and construction books. It is
 independent from the `ARC` monolith and consumes published `arc-core` modules
-for lifecycle, scheduling, text, player-state snapshots, SQL, logging, metrics,
-and health reporting.
+for lifecycle, scheduling, text, player-state snapshots, SQL, logging, and
+health reporting.
 
 - Paper entry point: `src/main/kotlin/ru/ruscrafting/builder/paper/ArcBuilderPlugin.kt`
 - Builder module binding: `src/main/kotlin/ru/arc/buildertools/BuilderToolsModule.kt`
@@ -19,7 +19,7 @@ and health reporting.
 - Book presentation and behavior: `src/main/resources/modules/auto-build.yml`
 - Reviewed legacy/system book catalogue: `src/main/resources/modules/system-build-books.yml`
 
-`ArcBuilderPlugin` installs the Paper runtime, metrics, and optional hooks,
+`ArcBuilderPlugin` installs the Paper runtime and optional hooks,
 initializes `BuilderToolsModule`, publishes health, and closes those owners in
 reverse order. Startup fails closed if a required runtime invariant is not met.
 

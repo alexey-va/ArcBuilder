@@ -7,7 +7,6 @@ capabilities = [
   "health",
   "localized-text",
   "logging",
-  "metrics",
   "one-time-use",
   "paper-testing",
   "player-state",
