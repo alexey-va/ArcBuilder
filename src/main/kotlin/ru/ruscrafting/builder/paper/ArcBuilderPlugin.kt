@@ -7,9 +7,6 @@ import ru.arc.core.PaperArcRuntime
 import ru.arc.core.Tasks
 import ru.arc.buildertools.BuilderToolsModule
 import ru.arc.hooks.HookRegistry
-import ru.arc.metrics.core.ArcMetricsRuntime
-import ru.arc.metrics.core.MetricsConfig
-import ru.arc.metrics.core.MetricsIdentity
 import ru.arc.paper.runtime.PaperPluginRuntime
 import java.nio.file.Files
 import java.util.logging.Level
@@ -20,7 +17,6 @@ open class ArcBuilderPlugin : JavaPlugin() {
     override fun onEnable() {
         saveResourceIfMissing("modules/builder-tools.yml")
         saveResourceIfMissing("modules/auto-build.yml")
-        saveResourceIfMissing("modules/metrics.yml")
         saveResourceIfMissing("modules/system-build-books.yml")
         PaperArcRuntime.installScheduling(this)
         val runtime = PaperPluginRuntime(this, "arc-builder").also {
@@ -36,20 +32,6 @@ open class ArcBuilderPlugin : JavaPlugin() {
                 server.name.ifBlank { "survival" }
             }
             ARC.install(this, serverId)
-            runtime.own(
-                ArcMetricsRuntime(
-                    config = MetricsConfig(ConfigManager.ofModule(dataPath, "metrics.yml")),
-                    identity = MetricsIdentity(
-                        application = "ArcBuilder",
-                        platform = "paper",
-                        serverName = serverId,
-                        version = pluginMeta.version,
-                    ),
-                    dataPath = dataPath,
-                ).also { metrics ->
-                    if (metrics.enabled) metrics.start()
-                },
-            )
             HookRegistry.start(this)
             BuilderToolsModule.init()
             runtime.registerHealth("builder") { BuilderToolsModule.runtimeHealthContribution() }

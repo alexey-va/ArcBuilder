@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.0"
+version = "1.0.1"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -33,7 +33,6 @@ dependencies {
     implementation(kotlin("stdlib"))
     implementation("ru.ruscrafting.arc:arc-core:2.1.2")
     implementation("ru.ruscrafting.arc:arc-core-logging:2.1.2")
-    implementation("ru.ruscrafting.arc:arc-core-metrics:2.1.2")
     implementation("ru.ruscrafting.arc:arc-core-paper:2.1.2")
     implementation("ru.ruscrafting.arc:arc-core-sql:2.1.2")
     implementation("com.google.code.gson:gson:2.11.0")
