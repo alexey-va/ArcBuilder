@@ -290,6 +290,7 @@ class BuilderToolsConfig(
                 "book.auction-returned",
                 "book.auction-received",
                 "plan.ready",
+                "plan.actions.ready",
                 "plan.skipped",
                 "plan.market-item",
                 "plan.market-unavailable",

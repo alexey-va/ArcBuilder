@@ -52,6 +52,29 @@ class BuilderClipboardControllerTest : FunSpec({
         }
     }
 
+    test("copy skips reward ores and ancient debris instead of storing placeable duplicates") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderClipboardOreFilterTest")
+            val world = paper.addSimpleWorld("clipboard-ore-filter")
+            val player = paper.addPlayer("ClipboardOreFilterOwner")
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.DIAMOND_ORE
+            world.getBlockAt(2, 64, 0).type = Material.ANCIENT_DEBRIS
+            val harness = ClipboardHarness(plugin)
+            harness.select(player, world, 0, 64, 0, 2, 64, 0)
+
+            harness.controller.use { controller ->
+                val copied = controller.copy(player)
+
+                copied.blocks.map { Bukkit.createBlockData(it.blockData).material } shouldContainExactly
+                    listOf(Material.STONE)
+                copied.skippedUnsafeBlocks shouldBe 2
+                harness.protectedBlocks shouldBe 1
+            }
+        }
+    }
+
     test("paste charges exact survival materials and stays free in creative") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderClipboardPasteTest")

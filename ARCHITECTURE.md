@@ -92,8 +92,11 @@ recovery after disconnects or uncertain acknowledgement.
 
 `BuilderBlockSafety` rejects unsafe technical state, tile entities, custom
 Slimefun/ItemsAdder blocks, powered or lit state, occupied beds, waterlogged
-state, and materials without a canonical construction item. Individual
-controllers add operation-specific restrictions.
+state, materials without a canonical construction item, every current
+`*_ORE` material, and ancient debris. Treating reward-bearing ores as unsafe
+also excludes them from clipboard capture and makes both ordinary-plan and
+durable construction-book revalidation fail closed. Individual controllers add
+operation-specific restrictions.
 
 `BuilderToolsRuntime.ensureMutable` is the shared boundary for range, loaded
 chunks, world border, Lands build permission, and placement checks. Wilderness

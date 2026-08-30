@@ -334,6 +334,15 @@ internal object BuilderInventory {
     }
 }
 
+/**
+ * Blocks whose placement would let builder operations bypass AuraSkills'
+ * player-placement tracking and turn a reusable block into a mining reward.
+ */
+internal object BuilderRewardOrePolicy {
+    fun isBlocked(material: Material): Boolean =
+        !material.isLegacy && (material == Material.ANCIENT_DEBRIS || material.name.endsWith("_ORE"))
+}
+
 internal class BuilderBlockSafety(
     private val plugin: Plugin,
     replaceableNames: Set<String>,
@@ -357,6 +366,7 @@ internal class BuilderBlockSafety(
 
     fun isSafeMaterial(material: Material): Boolean {
         if (!material.isBlock || material.isAir || BuilderPlacementCost.constructionItem(material) == null) return false
+        if (BuilderRewardOrePolicy.isBlocked(material)) return false
         if (material in UNSAFE_MATERIALS) return false
         val name = material.name
         if (UNSAFE_FRAGMENTS.any(name::contains)) return false

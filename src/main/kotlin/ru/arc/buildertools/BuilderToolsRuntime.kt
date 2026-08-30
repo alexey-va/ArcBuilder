@@ -996,7 +996,8 @@ internal class BuilderToolsRuntime(
                 ),
             )
         }
-        if (includeShop) shop.preview(player, plan)
+        val marketShown = includeShop && shop.preview(player, plan)
+        if (!marketShown) send(player, "plan.actions.ready")
     }
 
     private fun confirmImmediately(player: Player, plan: BuilderPlan) {
@@ -1990,7 +1991,10 @@ internal class BuilderToolsRuntime(
         return values.filter { it.startsWith(prefix) }.take(100)
     }
 
-    private fun safeMaterialNames(): List<String> = Material.entries.asSequence().filter(safety::isSafeMaterial).map { it.name.lowercase(Locale.ROOT) }.toList()
+    private fun safeMaterialNames(): List<String> = Material.entries.asSequence()
+        .filter(safety::isSafeMaterial)
+        .map { it.name.lowercase(Locale.ROOT) }
+        .toList()
 
     private data class ReplaceRequest(
         val source: Material,

@@ -163,7 +163,7 @@ class BuilderShopEstimateTest : FunSpec({
                 serviceProvider = { service },
                 materialLabel = { _, _ -> Component.text("Oak planks") },
             ).use { coordinator ->
-                coordinator.preview(player, plan)
+                coordinator.preview(player, plan) shouldBe true
                 repeat(2) { checkNotNull(player.nextComponentMessage()) }
 
                 val result = coordinator.procure(player, plan) as BuilderShopConfirmation.Rejected
@@ -181,6 +181,42 @@ class BuilderShopEstimateTest : FunSpec({
                 detail shouldNotContain "out_of_stock"
                 PlainTextComponentSerializer.plainText().serialize(checkNotNull(result.values["material"])) shouldBe
                     "Oak planks"
+            }
+        }
+    }
+
+    test("preview omits the market estimate and buy action when no materials are missing") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val player = paper.server.addPlayer("FullyStockedBuilder")
+            val world = paper.addSimpleWorld("fully-stocked-shop")
+            val service = FakeShopPurchaseService()
+            service.quotes[Material.STONE] = quote(Material.STONE, 1, 2.0)
+            player.inventory.addItem(ItemStack(Material.STONE))
+            val cost = BuilderItemCodec.aggregate(listOf(ItemStack(Material.STONE))).single()
+            val now = System.currentTimeMillis()
+            val plan = BuilderPlan(
+                id = UUID.randomUUID(),
+                playerId = player.uniqueId,
+                kind = BuilderPlanKind.FILL,
+                changes = listOf(
+                    BuilderBlockChange(
+                        BuilderBlockPos(world.uid, 0, 64, 0),
+                        Material.AIR.createBlockData().asString,
+                        Material.STONE.createBlockData().asString,
+                    ),
+                ),
+                costs = listOf(cost),
+                rewards = emptyList(),
+                createdAtMillis = now,
+                expiresAtMillis = now + 30_000L,
+            ).validated()
+            val config = BuilderToolsConfig(
+                Config(Files.createTempDirectory("arc-builder-stocked-preview-"), "modules/builder-tools.yml"),
+            )
+
+            BuilderShopCoordinator(config, config.messages(), serviceProvider = { service }).use { coordinator ->
+                coordinator.preview(player, plan) shouldBe false
+                player.nextComponentMessage() shouldBe null
             }
         }
     }

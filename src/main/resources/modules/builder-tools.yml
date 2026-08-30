@@ -155,8 +155,9 @@ locales:
       inventory: |-
 
         <prefix><#c42323>Операцию пока нельзя выполнить.
-        <#8c8c8c>   <#e6fff3>Для этой операции не хватает предметов или свободного места.
-        <#8c8c8c>   <#969696>Строительная книга запускает отдельный проект и принимает ресурсы постепенно.
+        <#8c8c8c>   <#e6fff3>Не хватает предметов или свободного места.
+        <#8c8c8c>   <#969696>Книга запускает отдельный проект:
+        <#8c8c8c>   <#969696>материалы можно докладывать постепенно.
       protection: |-
 
         <prefix><#c42323>Строительство здесь запрещено.
@@ -337,7 +338,9 @@ locales:
         - "<#8c8c8c>      <#969696>Черновик — только предпросмотр; он не строит."
         - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — получить <hover:show_text:'Расчёт стоимости материалов и работы до списания денег.'>смету</hover> без оплаты."
         - "<#8c8c8c>   6. <#e6fff3>Нажмите <#2bba43>[Подтвердить]<#e6fff3> в сообщении со сметой."
-        - "<#8c8c8c>   7. <#e6fff3>Автор может выпустить <hover:show_text:'Отдельный оплачиваемый экземпляр той же книги; каждую книгу можно использовать один раз.'>новую одноразовую копию</hover> кнопкой в настройках или командой <click:run_command:'/builder book copy'><#d48763>/builder book copy</click>."
+        - |-
+          <#8c8c8c>   7. <#e6fff3>Автор может выпустить <hover:show_text:'Отдельный оплачиваемый экземпляр той же книги; каждую книгу можно использовать один раз.'>новую одноразовую копию</hover>.
+          <#8c8c8c>      <#e6fff3>Используйте настройки или <click:run_command:'/builder book copy'><#d48763>/builder book copy</click>.
         - "<#8c8c8c>      <click:suggest_command:'/builder book sell '><#d48763>/builder book sell [цена]</click> <#e6fff3>— продажа."
         - "<#8c8c8c>   <click:run_command:'/builder book status'><#d48763>/builder book status</click> <#e6fff3>— ваш текущий этап."
       status:
@@ -435,15 +438,18 @@ locales:
         <prefix><#ff9f0f>Сначала разместите превью книги.
         <#8c8c8c>   <#e6fff3>Нажмите ПКМ книгой по опорному блоку.
       active-required: "<prefix><#ff9f0f>Держите активную книгу в основной руке."
-      creator-only: "<prefix><#ff9f0f>Активировать черновик и выпускать новые копии может только автор книги."
+      creator-only: |-
+
+        <prefix><#ff9f0f>Только автор книги может активировать черновик
+        <#8c8c8c>   <#e6fff3>и выпускать новые копии.
       unactivated: |-
 
         <prefix><#ff9f0f>Это только черновик — по нему нельзя строить.
         <#8c8c8c>   <#e6fff3>Откройте превью и нажмите ПКМ в воздух.
       duplicate: |-
 
-        <prefix><#c42323>Этот экземпляр книги уже используется или был потрачен.
-        <#8c8c8c>   <#969696>Повторно применить его нельзя.
+        <prefix><#c42323>Эта книга уже используется или потрачена.
+        <#8c8c8c>   <#969696>Повторно применить её нельзя.
       stale: |-
 
         <prefix><#c42323>Эта физическая копия книги больше не действует.
@@ -473,7 +479,8 @@ locales:
       preview-opened: |-
 
         <prefix><#d48763>«<name>» <#8c8c8c>— <state>
-        <#8c8c8c>   ПКМ по блоку — переставить предпросмотр; ПКМ в воздух — подготовить план
+        <#8c8c8c>   ПКМ по блоку — переставить предпросмотр.
+        <#8c8c8c>   ПКМ в воздух — подготовить план.
       preview:
         title: "<#ffb142>Предпросмотр размещён"
         subtitle: "<#e6fff3>ПКМ в воздух — подготовить план"
@@ -574,11 +581,12 @@ locales:
         <prefix><#2bba43><kind> <#8c8c8c><hover:show_text:'Количество блоков, которые изменит этот план.'><#e6fff3><count> блоков</hover>
         <#8c8c8c>   <hover:show_text:'Предметы, которые операция заберёт для выполнения плана.'>Расход</hover>: <#d48763><cost>
         <#8c8c8c>   <hover:show_text:'Предметы, которые операция отдаст за снятые или заменённые блоки.'>Возврат</hover>: <#d48763><reward>
-        <#8c8c8c>   <click:run_command:'/builder confirm'><#2bba43>[Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[Отмена]</click>
+      actions:
+        ready: "<#8c8c8c>   <click:run_command:'/builder confirm'><#92bed8>[▶ Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[Отмена]</click>"
       skipped: "<#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки план намеренно не меняет.'>Пропущено безопасно</hover>: <#969696><count>"
       market:
         - "<#8c8c8c>   <hover:show_text:'Полная цена всех расходуемых материалов по админшопу.'>Смета</hover> <#d48763><full_price> <#8c8c8c>— <hover:show_text:'Цена только тех материалов, которых сейчас не хватает в инвентаре.'>докупить</hover> <#e6fff3><missing_price>"
-        - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#d48763>[Купить и построить]</click>"
+        - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Купить и построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[Отмена]</click>"
       market-item: "<#8c8c8c>     <#e6fff3><amount>× <material>"
       market-unavailable: "<prefix><#ff9f0f>В админшопе нет: <#d48763><material>"
       market-more: "<#8c8c8c>     <#969696>Ещё материалов: <count>"
@@ -630,21 +638,26 @@ locales:
       started: |-
 
         <prefix><#2bba43>Строительный проект запущен: <#d48763><count> <#e6fff3>блоков.
-        <#8c8c8c>   <#e6fff3>Книга использована. Материалы можно докладывать постепенно.
-        <#8c8c8c>   <#e6fff3>Подойдут ваш инвентарь и <hover:show_text:'Сундуки и бочки, которые владелец проекта имеет право открыть.'>доступные сундуки</hover> рядом со стройкой.
+        <#8c8c8c>   <#e6fff3>Книга использована.
+        <#8c8c8c>   <#e6fff3>Материалы можно докладывать постепенно.
+        <#8c8c8c>   <#e6fff3>Подойдут ваш инвентарь
+        <#8c8c8c>   <#e6fff3>и <hover:show_text:'Сундуки и бочки, которые владелец проекта имеет право открыть.'>доступные сундуки</hover> рядом со стройкой.
       waiting-materials: |-
 
-        <prefix><#ff9f0f>Стройка ждёт материал: <#d48763><material>
-        <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total><#e6fff3>. Положите ресурс в <hover:show_text:'Сундук или бочку, которую владелец проекта имеет право открыть.'>доступный сундук</hover> рядом.
+        <prefix><#ff9f0f>Стройке не хватает: <#d48763><material>
+        <#8c8c8c>   <#e6fff3>Положите их в <hover:show_text:'Сундук или бочку, которую владелец проекта имеет право открыть.'>доступный сундук</hover> рядом.
+        <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total> <#e6fff3>блоков.
       waiting-output: |-
 
         <prefix><#ff9f0f>Стройке некуда сложить снятые блоки.
-        <#8c8c8c>   <#e6fff3>Освободите место в доступном сундуке рядом. Готово: <#d48763><count>/<total>
+        <#8c8c8c>   <#e6fff3>Освободите место в доступном сундуке рядом.
+        <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total> <#e6fff3>блоков.
       completed: "<prefix><#2bba43>Строительный проект завершён: <#d48763><count> <#e6fff3>блоков."
       recovery-required: |-
 
         <prefix><#c42323>Стройка остановлена из-за изменения мира или прав.
-        <#8c8c8c>   <#e6fff3>Нужна безопасная проверка администратора; проект не продолжает работу вслепую.
+        <#8c8c8c>   <#e6fff3>Нужна безопасная проверка администратора.
+        <#8c8c8c>   <#e6fff3>Проект не продолжает работу вслепую.
       status: "<prefix><#e6fff3>Стройка: <#d48763><state> <#8c8c8c>— <hover:show_text:'Уже обработанные блоки и полный размер проекта.'><#e6fff3><count>/<total> блоков</hover>."
       states:
         prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
@@ -754,8 +767,9 @@ locales:
       inventory: |-
 
         <prefix><red>The operation cannot start yet.
-        <dark_gray>   <gray>This operation lacks required items or free inventory space.
-        <dark_gray>   <gray>Build books start a separate project and accept materials gradually.
+        <dark_gray>   <gray>Required items or free inventory space are missing.
+        <dark_gray>   <gray>Build books start a separate project:
+        <dark_gray>   <gray>materials can be supplied gradually.
       protection: |-
 
         <prefix><red>You cannot build here.
@@ -920,7 +934,9 @@ locales:
         - "<dark_gray>      <gray>Sneak-click to open detailed settings."
         - "<dark_gray>   5. <gray>Right-click air for a <hover:show_text:'The material and labor price calculated before any charge.'>quote</hover> without charge."
         - "<dark_gray>   6. <gray>Click <green>[Confirm]</green> in the quote."
-        - "<dark_gray>   7. <gray>The author can issue a <hover:show_text:'A separately paid instance of the same book; each physical book is single-use.'>new single-use copy</hover> from settings or with <aqua>/builder book copy</aqua>."
+        - |-
+          <dark_gray>   7. <gray>The author can issue a <hover:show_text:'A separately paid instance of the same book; each physical book is single-use.'>new single-use copy</hover>.
+          <dark_gray>      <gray>Use the settings or <aqua>/builder book copy</aqua>.
         - "<dark_gray>      <aqua>/builder book sell [price] <gray>— sell."
         - "<dark_gray>   <aqua>/builder book status <gray>— your current step."
       status:
@@ -1020,14 +1036,17 @@ locales:
         <prefix><yellow>Place the book preview first.
         <dark_gray>   <gray>Right-click an anchor block while holding the book.
       active-required: "<prefix><yellow>Hold a registered build book in your main hand."
-      creator-only: "<prefix><yellow>Only the book author may activate its draft or issue new copies."
+      creator-only: |-
+
+        <prefix><yellow>Only the book author may activate its draft
+        <dark_gray>   <gray>or issue new copies.
       unactivated: |-
 
         <prefix><yellow>This draft is preview-only.
         <dark_gray>   <gray>Open its preview and right-click the air.
       duplicate: |-
 
-        <prefix><red>This book instance is already in use or was consumed.
+        <prefix><red>This book is already in use or was consumed.
         <dark_gray>   <gray>It cannot be applied again.
       stale: |-
 
@@ -1058,7 +1077,8 @@ locales:
       preview-opened: |-
 
         <prefix><aqua>“<name>” <dark_gray>— <state>
-        <dark_gray>   Right-click a block to reposition; right-click air to prepare the build plan
+        <dark_gray>   Right-click a block to reposition the preview.
+        <dark_gray>   Right-click air to prepare the build plan.
       preview:
         title: "<gold>Preview placed"
         subtitle: "<white>Right-click air to prepare the plan"
@@ -1148,11 +1168,12 @@ locales:
         <prefix><green><kind> <dark_gray><hover:show_text:'The number of blocks this plan will change.'><white><count> blocks</hover>
         <dark_gray>   <hover:show_text:'Items the operation will consume to execute this plan.'>Cost</hover>: <white><cost>
         <dark_gray>   <hover:show_text:'Items returned for blocks removed or replaced by the operation.'>Return</hover>: <white><reward>
-        <dark_gray>   <click:run_command:'/builder confirm'><green>[Build]</click>  <click:run_command:'/builder cancel'><gray>[Cancel]</click>
+      actions:
+        ready: "<dark_gray>   <click:run_command:'/builder confirm'><#92bed8>[▶ Build]</click>  <click:run_command:'/builder cancel'><gray>[Cancel]</click>"
       skipped: "<dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks are deliberately left unchanged.'>Skipped safely</hover>: <gray><count>"
       market:
         - "<dark_gray>   <hover:show_text:'The full admin-shop price of all consumed materials.'>Estimate</hover> <white><full_price> <dark_gray>— <hover:show_text:'The price of only the materials currently missing from your inventory.'>missing</hover> <gray><missing_price>"
-        - "<dark_gray>   <click:run_command:'/builder confirm buy'><aqua>[Buy and build]</aqua></click>"
+        - "<dark_gray>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Buy and build]</click>  <click:run_command:'/builder cancel'><gray>[Cancel]</click>"
       market-item: "<dark_gray>     <gray>Need <white><amount>×<material></white>"
       market-unavailable: "<prefix><yellow>Shop: unavailable <white><material></white>."
       market-more: "<prefix><gray>More lines: <white><count></white>."
@@ -1198,21 +1219,25 @@ locales:
       started: |-
 
         <prefix><green>Construction project started: <white><count></white> blocks.
-        <dark_gray>   <gray>The book was consumed. Materials may be supplied gradually.
-        <dark_gray>   <gray>Your nearby inventory and <hover:show_text:'Chests and barrels the project owner is allowed to open.'>accessible site containers</hover> are used.
+        <dark_gray>   <gray>The book was consumed.
+        <dark_gray>   <gray>Materials may be supplied gradually.
+        <dark_gray>   <gray>Your inventory and <hover:show_text:'Chests and barrels the project owner is allowed to open.'>accessible site containers</hover> are used.
       waiting-materials: |-
 
-        <prefix><yellow>Construction is waiting for: <white><material></white>.
-        <dark_gray>   <gray>Progress: <white><count>/<total></white>. Put it in an <hover:show_text:'A chest or barrel the project owner is allowed to open.'>accessible nearby container</hover>.
+        <prefix><yellow>Construction needs: <white><material></white>.
+        <dark_gray>   <gray>Put them in an <hover:show_text:'A chest or barrel the project owner is allowed to open.'>accessible nearby container</hover>.
+        <dark_gray>   <gray>Progress: <white><count>/<total></white> blocks.
       waiting-output: |-
 
         <prefix><yellow>No room for recovered blocks.
-        <dark_gray>   <gray>Free space in an accessible nearby container. Progress: <white><count>/<total></white>.
+        <dark_gray>   <gray>Free space in an accessible nearby container.
+        <dark_gray>   <gray>Progress: <white><count>/<total></white> blocks.
       completed: "<prefix><green>Construction completed: <white><count></white> blocks."
       recovery-required: |-
 
         <prefix><red>Construction stopped because the world or permissions changed.
-        <dark_gray>   <gray>An administrator must review it; the project will not continue blindly.
+        <dark_gray>   <gray>An administrator must review it.
+        <dark_gray>   <gray>The project will not continue blindly.
       status: "<prefix><gray>Construction: <white><state></white> — <hover:show_text:'Processed blocks and the full project size.'><white><count>/<total></white> blocks</hover>."
       states:
         prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"

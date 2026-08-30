@@ -31,14 +31,21 @@ internal class BuilderShopCoordinator(
 ) : AutoCloseable {
     private val estimates = mutableMapOf<UUID, BuilderShopEstimate>()
 
-    fun preview(player: Player, plan: BuilderPlan) {
-        val estimate = createEstimate(player, plan)
+    /** Returns true only when a missing-material estimate and buy action were shown. */
+    fun preview(player: Player, plan: BuilderPlan): Boolean {
+        val missing = BuilderInventory.missingCosts(player, plan.costs)
+        if (missing.isEmpty()) {
+            estimates.remove(player.uniqueId)
+            return false
+        }
+        val estimate = createEstimate(player, plan, missing)
         if (estimate == null) {
             estimates.remove(player.uniqueId)
-            return
+            return false
         }
         estimates[player.uniqueId] = estimate
         sendEstimate(player, estimate)
+        return true
     }
 
     fun clear(playerId: UUID) {

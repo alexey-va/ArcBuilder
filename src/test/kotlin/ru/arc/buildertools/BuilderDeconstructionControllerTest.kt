@@ -41,7 +41,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
         }
     }
 
-    test("survival refunds deterministic construction items without Fortune amplification") {
+    test("survival skips reward ores and refunds other construction items without Fortune amplification") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderDeconstructionRefundTest")
             val world = paper.addSimpleWorld("deconstruction-refund")
@@ -65,13 +65,14 @@ class BuilderDeconstructionControllerTest : FunSpec({
             val second = harness.controller.plan(player)
 
             first.kind shouldBe BuilderPlanKind.DECONSTRUCT
-            first.changes.size shouldBe 2
-            first.rewards.materialAmounts() shouldBe mapOf(Material.DIAMOND_ORE to 1, Material.STONE_SLAB to 2)
+            first.changes.size shouldBe 1
+            first.rewards.materialAmounts() shouldBe mapOf(Material.STONE_SLAB to 2)
+            first.skippedUnsafeBlocks shouldBe 1
             second.rewards shouldBe first.rewards
-            first.toolDamage shouldBe 2
+            first.toolDamage shouldBe 1
             BuilderItemCodec.decodePrototype(checkNotNull(first.toolFingerprintBase64)).isSimilar(tool) shouldBe true
             harness.permissions shouldBe 2
-            harness.mutableBlocks shouldBe 4
+            harness.mutableBlocks shouldBe 2
             world.getBlockAt(0, 64, 0).type shouldBe Material.DIAMOND_ORE
             (world.getBlockAt(1, 64, 0).blockData as Slab).type shouldBe Slab.Type.DOUBLE
         }

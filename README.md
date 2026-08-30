@@ -28,6 +28,8 @@ The plugin uses arc-core 2.1.2 and does not depend on the ARC monolith.
   adjusted before confirmation.
 - Fill, paste, deconstruction, crowns, and books silently skip containers,
   technical blocks, custom Slimefun/ItemsAdder blocks, and other unsafe state.
+  Reward-bearing ore blocks (every `*_ORE` block plus ancient debris) are also
+  skipped so builder operations cannot bypass placed-block reward tracking.
   Ordinary stone, sand, and concrete powder are supported.
 - Wilderness is buildable. Inside a Lands claim the normal place/break checks
   still apply. WorldGuard is not a dependency.

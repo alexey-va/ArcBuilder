@@ -76,7 +76,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         verify(exactly = 1) { secondClone.rotate(StructureRotation.CLOCKWISE_90) }
     }
 
-    test("build-book plan replaces safe ground, carves source air and skips containers") {
+    test("build-book plan replaces safe ground, carves source air and skips containers and reward ores") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("BookGroundBuilder", GameMode.SURVIVAL)
             val world = journey.world
@@ -100,6 +100,11 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 world.getBlockAt(8, 64, 6),
                 Material.AIR.createBlockData(),
             )
+            val ore = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(9, 64, 6),
+                Material.ANCIENT_DEBRIS.createBlockData(),
+            )
 
             replacement.block.beforeBlockData to replacement.block.afterBlockData shouldBe
                 ("minecraft:dirt" to "minecraft:stone")
@@ -108,6 +113,23 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             replacement.refund?.type shouldBe Material.DIRT
             carving.refund?.type shouldBe Material.DIRT
             container shouldBe BuilderBookPlacementResult.SkippedUnsafe
+            ore shouldBe BuilderBookPlacementResult.SkippedUnsafe
+        }
+    }
+
+    test("fill rejects reward ore materials before creating a plan") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("OreFillBuilder", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+
+            player.performCommand("builder fill ancient_debris") shouldBe true
+
+            journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
+            world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
         }
     }
 

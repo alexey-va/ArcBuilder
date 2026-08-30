@@ -400,7 +400,7 @@ class BuilderToolsDomainTest : FunSpec({
         bundled.contains("разрешена WorldGuard") shouldBe false
     }
 
-    test("bundled builder messages isolate the full-color builder mark and keep continuation indentation") {
+    test("bundled builder messages isolate the mark and give primary plan actions a distinct accent") {
         val tools = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
             .bufferedReader()
             .use { it.readText() }
@@ -412,8 +412,10 @@ class BuilderToolsDomainTest : FunSpec({
         books.contains("<white>🛠</white> ") shouldBe true
         tools.contains("<#8c8c8c>   <#d48763>/builder wand") shouldBe true
         books.contains("<#8c8c8c>   ПКМ по блоку") shouldBe true
+        tools.contains("<#92bed8>[▶ Построить]") shouldBe true
+        tools.contains("<#92bed8>[▶ Купить и построить]") shouldBe true
+        books.contains("#92bed8", ignoreCase = true) shouldBe false
         listOf(tools, books).forEach { bundled ->
-            bundled.contains("#92bed8", ignoreCase = true) shouldBe false
             bundled.contains("#d48763", ignoreCase = true) shouldBe true
             bundled.contains("◇") shouldBe false
             bundled.contains("•") shouldBe false
@@ -556,6 +558,36 @@ class BuilderToolsDomainTest : FunSpec({
             safety.isSafeMaterial(Material.PISTON) shouldBe false
             safety.isSafeMaterial(Material.HOPPER) shouldBe false
             safety.isSafeMaterial(Material.CHEST) shouldBe false
+
+            val rewardOres = Material.entries.filter(BuilderRewardOrePolicy::isBlocked).toSet()
+            rewardOres shouldBe setOf(
+                Material.COAL_ORE,
+                Material.DEEPSLATE_COAL_ORE,
+                Material.COPPER_ORE,
+                Material.DEEPSLATE_COPPER_ORE,
+                Material.IRON_ORE,
+                Material.DEEPSLATE_IRON_ORE,
+                Material.GOLD_ORE,
+                Material.DEEPSLATE_GOLD_ORE,
+                Material.REDSTONE_ORE,
+                Material.DEEPSLATE_REDSTONE_ORE,
+                Material.LAPIS_ORE,
+                Material.DEEPSLATE_LAPIS_ORE,
+                Material.DIAMOND_ORE,
+                Material.DEEPSLATE_DIAMOND_ORE,
+                Material.EMERALD_ORE,
+                Material.DEEPSLATE_EMERALD_ORE,
+                Material.NETHER_GOLD_ORE,
+                Material.NETHER_QUARTZ_ORE,
+                Material.ANCIENT_DEBRIS,
+            )
+            rewardOres.all { !safety.isSafeMaterial(it) } shouldBe true
+            safety.isSafeMaterial(Material.STONE) shouldBe true
+            safety.isSafeMaterial(Material.OBSIDIAN) shouldBe true
+            safety.isSafeMaterial(Material.AMETHYST_BLOCK) shouldBe true
+            val oreBlock = paper.addSimpleWorld("reward-ore-safety").getBlockAt(0, 64, 0)
+            oreBlock.type = Material.DIAMOND_ORE
+            safety.isSafeExisting(oreBlock) shouldBe false
 
             val waterlogged = paper.server.createBlockData(Material.OAK_STAIRS) as Waterlogged
             waterlogged.isWaterlogged = true

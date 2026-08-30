@@ -8,8 +8,24 @@ import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import ru.arc.config.Config
 import java.nio.file.Files
+import java.nio.file.Path
 
 class BuilderBookJourneyTest : FunSpec({
+    test("visual preview keeps block totals separate from currency placeholders") {
+        val projectDir = Path.of(checkNotNull(System.getProperty("arcbuilder.projectDir")))
+        val placeholders = Files.readString(projectDir.resolve("visual-preview.yml"))
+            .substringBefore("glyphs:")
+            .lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toList()
+
+        placeholders.single { it.startsWith("total:") } shouldBe "total: '1 920'"
+        listOf("balance", "full_price", "labor", "materials", "missing_price", "price").forEach { key ->
+            placeholders.single { it.startsWith("$key:") } shouldContain "💰"
+        }
+    }
+
     test("status resolver follows the complete guided creation journey") {
         val cases = listOf(
             BuilderBookJourneySnapshot() to BuilderBookJourneyStage.START,
@@ -112,7 +128,7 @@ class BuilderBookJourneyTest : FunSpec({
 
         listOf("ru", "en").forEach { locale ->
             val plan = config.string("locales.$locale.plan.ready").lines()
-            plan.size shouldBe 5
+            plan.size shouldBe 4
             plan.first() shouldBe ""
             plan.single { it.contains("<cost>") }.contains("<reward>") shouldBe false
             plan.single { it.contains("<reward>") }.contains("<cost>") shouldBe false
@@ -140,6 +156,14 @@ class BuilderBookJourneyTest : FunSpec({
             quote.single { it.contains("<labor>") }.contains("<materials>") shouldBe false
 
             plan.drop(2).all { line -> line.contains(">   ") } shouldBe true
+            plan.none { it.contains("/builder confirm") } shouldBe true
+            val readyAction = config.string("locales.$locale.plan.actions.ready")
+            readyAction shouldContain "/builder confirm"
+            readyAction shouldContain "<color:#92bed8>[▶ "
+            readyAction shouldContain "/builder cancel"
+            val marketAction = config.stringList("locales.$locale.plan.market").single { it.contains("confirm buy") }
+            marketAction shouldContain "<color:#92bed8>[▶ "
+            marketAction shouldContain "/builder cancel"
             quote.drop(2).all { line -> line.contains(">   ") } shouldBe true
 
             val draftRecovery = config.string("locales.$locale.book.draft-recovering").lines()
@@ -153,6 +177,9 @@ class BuilderBookJourneyTest : FunSpec({
             config.string("locales.$locale.items.none").isNotBlank() shouldBe true
             config.string("locales.$locale.items.summary") shouldContain "<items>"
             config.string("locales.$locale.items.summary") shouldContain "<types>"
+            val waitingMaterials = config.string("locales.$locale.construction.waiting-materials")
+            waitingMaterials shouldContain "<count>/<total>"
+            waitingMaterials shouldContain if (locale == "ru") "блоков" else "blocks"
         }
     }
 
