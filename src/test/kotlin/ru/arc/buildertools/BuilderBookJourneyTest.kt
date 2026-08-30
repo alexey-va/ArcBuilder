@@ -183,20 +183,47 @@ class BuilderBookJourneyTest : FunSpec({
         }
     }
 
-    test("selection actions use distinct semantic button glyphs") {
-        val config = Config(Files.createTempDirectory("arc-builder-selection-actions-"), "modules/builder-tools.yml")
+    test("chat action controls use one semantic button language") {
+        val config = Config(Files.createTempDirectory("arc-builder-chat-actions-"), "modules/builder-tools.yml")
 
         val russian = config.string("locales.ru.selection.complete")
         russian shouldContain "<click:run_command:'/builder copy'>"
         russian shouldContain "<click:run_command:'/builder clear'>"
         russian shouldContain "<color:#92bed8>[▶ Скопировать]"
-        russian shouldContain "<color:#969696>[✘ Сбросить]"
+        russian shouldContain "<color:#969696>[✖ Сбросить]"
 
         val english = config.string("locales.en.selection.complete")
         english shouldContain "<click:run_command:'/builder copy'>"
         english shouldContain "<click:run_command:'/builder clear'>"
         english shouldContain "<color:#92bed8>[▶ Copy]"
-        english shouldContain "<color:#969696>[✘ Reset]"
+        english shouldContain "<color:#969696>[✖ Reset]"
+
+        val russianClipboard = config.string("locales.ru.clipboard.saved")
+        russianClipboard shouldContain "<color:#92bed8>[▶ Вставить здесь]"
+        russianClipboard shouldContain "<color:#92bed8>[▶ Создать книгу]"
+
+        val englishClipboard = config.string("locales.en.clipboard.saved")
+        englishClipboard shouldContain "<color:#92bed8>[▶ Paste here]"
+        englishClipboard shouldContain "<color:#92bed8>[▶ Create book]"
+
+        listOf("ru", "en").forEach { locale ->
+            val buttonSurfaces = listOf(
+                config.string("locales.$locale.selection.complete"),
+                config.string("locales.$locale.clipboard.saved"),
+                config.string("locales.$locale.book.status.quote"),
+                config.string("locales.$locale.book.quote"),
+                config.string("locales.$locale.plan.actions.ready"),
+                config.stringList("locales.$locale.plan.market").single { it.contains("confirm buy") },
+                config.string("locales.$locale.operation.paste-again"),
+            )
+            val buttonLabel = Regex("<click:[^>]+><color:[^>]+>\\[([^]]+)]")
+            val labels = buttonSurfaces.flatMap { surface ->
+                buttonLabel.findAll(surface).map { match -> match.groupValues[1] }.toList()
+            }
+
+            labels.size shouldBe 12
+            labels.all { label -> label.startsWith("▶ ") || label.startsWith("✖ ") } shouldBe true
+        }
     }
 
     test("compact localized summaries explain unfamiliar terms with hover text") {

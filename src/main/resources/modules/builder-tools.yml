@@ -214,7 +214,7 @@ locales:
       complete: |-
 
         <#8c8c8c>   Область <#d48763><x>×<y>×<z> <#8c8c8c>— <#e6fff3><volume> блоков
-        <#8c8c8c>   <click:run_command:'/builder copy'><#92bed8>[▶ Скопировать]</click> <#8c8c8c>   <click:run_command:'/builder clear'><#969696>[✘ Сбросить]</click>
+        <#8c8c8c>   <click:run_command:'/builder copy'><#92bed8>[▶ Скопировать]</click> <#8c8c8c>   <click:run_command:'/builder clear'><#969696>[✖ Сбросить]</click>
       cleared: |-
 
         <prefix><#969696>Выделение очищено; частицы скрыты.
@@ -305,7 +305,7 @@ locales:
 
         <prefix><#2bba43><hover:show_text:'Временная копия выделенных блоков с точкой привязки.'>Чертёж</hover> <#8c8c8c>— <#e6fff3><count> блоков
         <#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки не попали в чертёж.'>Пропущено безопасно</hover>: <#969696><skipped>
-        <#8c8c8c>   <click:run_command:'/builder paste'><#d48763>[Вставить здесь]</click> <#8c8c8c>— <click:suggest_command:'/builder book draft '><#e6fff3>[Создать книгу]</click>
+        <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Вставить здесь]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать книгу]</click>
       retained: "<#d48763>Чертёж сохранён <#8c8c8c>— <#e6fff3>можно вставить снова"
     book:
       draft-saving: "<prefix><#e6fff3>Сохраняем чертёж…"
@@ -338,7 +338,7 @@ locales:
         - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — подробные настройки."
         - "<#8c8c8c>      <#969696>Черновик — только предпросмотр; он не строит."
         - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — получить <hover:show_text:'Расчёт стоимости материалов и работы до списания денег.'>смету</hover> без оплаты."
-        - "<#8c8c8c>   6. <#e6fff3>Нажмите <#2bba43>[Подтвердить]<#e6fff3> в сообщении со сметой."
+        - "<#8c8c8c>   6. <#e6fff3>Нажмите <#92bed8>[▶ Подтвердить]<#e6fff3> в сообщении со сметой."
         - |-
           <#8c8c8c>   7. <#e6fff3>Автор может выпустить <hover:show_text:'Отдельный оплачиваемый экземпляр той же книги; каждую книгу можно использовать один раз.'>новую одноразовую копию</hover>.
           <#8c8c8c>      <#e6fff3>Используйте настройки или <click:run_command:'/builder book copy'><#d48763>/builder book copy</click>.
@@ -390,7 +390,7 @@ locales:
         quote: |-
 
           <prefix><#ff9f0f>Этап 6/7: смета готова — <#2bba43><price><#ff9f0f>.
-          <#8c8c8c>   <click:run_command:'/builder book confirm'><#2bba43>[Подтвердить]</click> <#8c8c8c>— <#e6fff3>осталось <#d48763><seconds> с<#e6fff3>.
+          <#8c8c8c>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Подтвердить]</click> <#8c8c8c>— <#e6fff3>осталось <#d48763><seconds> с<#e6fff3>.
         delivery: |-
 
           <prefix><#ff9f0f>Этап 7/7: реестр выпускает книгу.
@@ -476,7 +476,7 @@ locales:
         <#8c8c8c>   <hover:show_text:'Стоимость материалов, которые продаются в строительном админшопе.'>Из админшопа</hover>: <#e6fff3><materials>
         <#8c8c8c>   <hover:show_text:'Материалы, которых нет в админшопе; они не входят в денежную цену.'>Принести с собой</hover>: <#d48763><required>
         <#8c8c8c>   <hover:show_text:'Плата за строительство поверх стоимости материалов.'>Работа</hover>: <#e6fff3><labor> <#8c8c8c>— <hover:show_text:'Сумма материалов из админшопа и работы.'>Итого</hover>: <#2bba43><price>
-        <#8c8c8c>   <click:run_command:'/builder book confirm'><#2bba43>[Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[Отмена]</click>
+        <#8c8c8c>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[✖ Отмена]</click>
       preview-opened: |-
 
         <prefix><#d48763>«<name>» <#8c8c8c>— <state>
@@ -583,11 +583,11 @@ locales:
         <#8c8c8c>   <hover:show_text:'Предметы, которые операция заберёт для выполнения плана.'>Расход</hover>: <#d48763><cost>
         <#8c8c8c>   <hover:show_text:'Предметы, которые операция отдаст за снятые или заменённые блоки.'>Возврат</hover>: <#d48763><reward>
       actions:
-        ready: "<#8c8c8c>   <click:run_command:'/builder confirm'><#92bed8>[▶ Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[Отмена]</click>"
+        ready: "<#8c8c8c>   <click:run_command:'/builder confirm'><#92bed8>[▶ Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✖ Отмена]</click>"
       skipped: "<#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки план намеренно не меняет.'>Пропущено безопасно</hover>: <#969696><count>"
       market:
         - "<#8c8c8c>   <hover:show_text:'Полная цена всех расходуемых материалов по админшопу.'>Смета</hover> <#d48763><full_price> <#8c8c8c>— <hover:show_text:'Цена только тех материалов, которых сейчас не хватает в инвентаре.'>докупить</hover> <#e6fff3><missing_price>"
-        - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Купить и построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[Отмена]</click>"
+        - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Купить и построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✖ Отмена]</click>"
       market-item: "<#8c8c8c>     <#e6fff3><amount>× <material>"
       market-unavailable: "<prefix><#ff9f0f>В админшопе нет: <#d48763><material>"
       market-more: "<#8c8c8c>     <#969696>Ещё материалов: <count>"
@@ -630,7 +630,7 @@ locales:
 
         <prefix><#2bba43>Операция завершена: <#d48763><kind>
         <#8c8c8c>   <#e6fff3>Изменено блоков: <#2bba43><count>
-      paste-again: "<#8c8c8c>   <click:run_command:'/builder paste'><#d48763>[Вставить ещё раз]</click> <#8c8c8c>— <#e6fff3>открыть новое превью"
+      paste-again: "<#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Вставить ещё раз]</click> <#8c8c8c>— <#e6fff3>открыть новое превью"
       rolled-back: |-
 
         <prefix><#c42323>Операция отменена и полностью восстановлена.
@@ -820,7 +820,7 @@ locales:
 
         <dark_gray>   <gray>Area: <white><x>×<y>×<z></white> — <volume> blocks
         <dark_gray>   <gray>The outline stays visible.
-        <dark_gray>   <click:run_command:'/builder copy'><#92bed8>[▶ Copy]</click> <dark_gray>   <click:run_command:'/builder clear'><#969696>[✘ Reset]</click>
+        <dark_gray>   <click:run_command:'/builder copy'><#92bed8>[▶ Copy]</click> <dark_gray>   <click:run_command:'/builder clear'><#969696>[✖ Reset]</click>
       cleared: |-
 
         <prefix><gray>Selection cleared; particles hidden.
@@ -903,7 +903,7 @@ locales:
 
         <prefix><green><hover:show_text:'A temporary copy of selected blocks with an anchor point.'>Blueprint</hover> <dark_gray>— <white><count> blocks
         <dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks were excluded.'>Skipped safely</hover>: <gray><skipped>
-        <dark_gray>   <click:run_command:'/builder paste'><aqua>[Paste here]</aqua></click> <dark_gray>— <click:suggest_command:'/builder book draft '><white>[Create book]</white></click>
+        <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Paste here]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create book]</click>
       retained: "<aqua>Blueprint retained <dark_gray>— <white>you can paste it again"
     book:
       draft-saving: "<prefix><gray>Saving the blueprint…"
@@ -935,7 +935,7 @@ locales:
         - "<dark_gray>   4. <gray>Right-click a block to place or move <hover:show_text:'A player-only outline of the future build; the world is unchanged.'>preview</hover>."
         - "<dark_gray>      <gray>Sneak-click to open detailed settings."
         - "<dark_gray>   5. <gray>Right-click air for a <hover:show_text:'The material and labor price calculated before any charge.'>quote</hover> without charge."
-        - "<dark_gray>   6. <gray>Click <green>[Confirm]</green> in the quote."
+        - "<dark_gray>   6. <gray>Click <#92bed8>[▶ Confirm]<gray> in the quote."
         - |-
           <dark_gray>   7. <gray>The author can issue a <hover:show_text:'A separately paid instance of the same book; each physical book is single-use.'>new single-use copy</hover>.
           <dark_gray>      <gray>Use the settings or <aqua>/builder book copy</aqua>.
@@ -987,7 +987,7 @@ locales:
         quote: |-
 
           <prefix><yellow>Step 6/7: quote <green><price></green>.
-          <dark_gray>   <click:run_command:'/builder book confirm'><green>[Confirm]</click> <dark_gray>— <gray><seconds>s remaining.
+          <dark_gray>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Confirm]</click> <dark_gray>— <gray><seconds>s remaining.
         delivery: |-
 
           <prefix><yellow>Step 7/7: issuing the book.
@@ -1075,7 +1075,7 @@ locales:
         <dark_gray>   <hover:show_text:'Cost of materials sold by the building admin shop.'>From the shop</hover>: <white><materials>
         <dark_gray>   <hover:show_text:'Materials absent from the admin shop and therefore not included in the money price.'>Bring yourself</hover>: <aqua><required>
         <dark_gray>   <hover:show_text:'The construction fee added to material cost.'>Work</hover>: <white><labor> <dark_gray>— <hover:show_text:'Shop materials plus construction work.'>Total</hover>: <green><price>
-        <dark_gray>   <click:run_command:'/builder book confirm'><green>[Confirm]</click>  <click:run_command:'/builder book cancel'><gray>[Cancel]</click>
+        <dark_gray>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Confirm]</click>  <click:run_command:'/builder book cancel'><#969696>[✖ Cancel]</click>
       preview-opened: |-
 
         <prefix><aqua>“<name>” <dark_gray>— <state>
@@ -1171,11 +1171,11 @@ locales:
         <dark_gray>   <hover:show_text:'Items the operation will consume to execute this plan.'>Cost</hover>: <white><cost>
         <dark_gray>   <hover:show_text:'Items returned for blocks removed or replaced by the operation.'>Return</hover>: <white><reward>
       actions:
-        ready: "<dark_gray>   <click:run_command:'/builder confirm'><#92bed8>[▶ Build]</click>  <click:run_command:'/builder cancel'><gray>[Cancel]</click>"
+        ready: "<dark_gray>   <click:run_command:'/builder confirm'><#92bed8>[▶ Build]</click>  <click:run_command:'/builder cancel'><#969696>[✖ Cancel]</click>"
       skipped: "<dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks are deliberately left unchanged.'>Skipped safely</hover>: <gray><count>"
       market:
         - "<dark_gray>   <hover:show_text:'The full admin-shop price of all consumed materials.'>Estimate</hover> <white><full_price> <dark_gray>— <hover:show_text:'The price of only the materials currently missing from your inventory.'>missing</hover> <gray><missing_price>"
-        - "<dark_gray>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Buy and build]</click>  <click:run_command:'/builder cancel'><gray>[Cancel]</click>"
+        - "<dark_gray>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Buy and build]</click>  <click:run_command:'/builder cancel'><#969696>[✖ Cancel]</click>"
       market-item: "<dark_gray>     <gray>Need <white><amount>×<material></white>"
       market-unavailable: "<prefix><yellow>Shop: unavailable <white><material></white>."
       market-more: "<prefix><gray>More lines: <white><count></white>."
@@ -1212,7 +1212,7 @@ locales:
         <dark_gray>   <gray>Your inventory is briefly protected.
       progress: "<gray><kind>: <green><count><dark_gray>/<aqua><total>"
       completed: "<prefix><green><white><kind></white> completed: <white><count></white> blocks."
-      paste-again: "<dark_gray>   <click:run_command:'/builder paste'><aqua>[Paste again]</aqua></click> <dark_gray>— <gray>open a fresh preview"
+      paste-again: "<dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Paste again]</click> <dark_gray>— <gray>open a fresh preview"
       rolled-back: |-
 
         <prefix><red>The operation was rolled back and restored.
