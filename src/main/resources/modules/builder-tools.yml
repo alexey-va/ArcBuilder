@@ -162,10 +162,11 @@ locales:
 
         <prefix><#c42323>Строительство здесь запрещено.
         <#8c8c8c>   На чужой территории нужны права Lands.
-      material: |-
+      material: "<prefix><#c42323>Этот материал нельзя использовать."
+      crown-material: |-
 
-        <prefix><#c42323>Этот материал нельзя использовать.
-        <#8c8c8c>   <#e6fff3>Для кроны выберите обычную листву.
+        <prefix><#c42323>Этот материал нельзя использовать для кроны.
+        <#8c8c8c>   <#e6fff3>Выберите обычную листву.
       crown-setting: "<prefix><#c42323>Неверный параметр. <click:run_command:'/builder crown help'><#d48763>/builder crown help</click>"
       tool: |-
 
@@ -213,7 +214,7 @@ locales:
       complete: |-
 
         <#8c8c8c>   Область <#d48763><x>×<y>×<z> <#8c8c8c>— <#e6fff3><volume> блоков
-        <#8c8c8c>   <click:run_command:'/builder copy'><#d48763>[Скопировать]</click> <#8c8c8c>— <click:run_command:'/builder clear'><#969696>[Сбросить]</click>
+        <#8c8c8c>   <click:run_command:'/builder copy'><#92bed8>[▶ Скопировать]</click> <#8c8c8c>   <click:run_command:'/builder clear'><#969696>[✘ Сбросить]</click>
       cleared: |-
 
         <prefix><#969696>Выделение очищено; частицы скрыты.
@@ -774,10 +775,11 @@ locales:
 
         <prefix><red>You cannot build here.
         <dark_gray>   Build access is required inside another Land.
-      material: |-
+      material: "<prefix><red>That material is not supported."
+      crown-material: |-
 
-        <prefix><red>That material is not supported.
-        <dark_gray>   <gray>Crowns require ordinary leaves.
+        <prefix><red>That material is not supported for crowns.
+        <dark_gray>   <gray>Choose ordinary leaves.
       crown-setting: "<prefix><red>Invalid setting. See <aqua>/builder crown help</aqua>."
       tool: |-
 
@@ -818,7 +820,7 @@ locales:
 
         <dark_gray>   <gray>Area: <white><x>×<y>×<z></white> — <volume> blocks
         <dark_gray>   <gray>The outline stays visible.
-        <dark_gray>   <click:run_command:'/builder copy'><aqua>/builder copy</aqua></click> <gray>— save it.
+        <dark_gray>   <click:run_command:'/builder copy'><#92bed8>[▶ Copy]</click> <dark_gray>   <click:run_command:'/builder clear'><#969696>[✘ Reset]</click>
       cleared: |-
 
         <prefix><gray>Selection cleared; particles hidden.

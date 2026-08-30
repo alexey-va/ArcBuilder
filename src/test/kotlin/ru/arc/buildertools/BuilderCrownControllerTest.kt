@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -78,6 +79,19 @@ class BuilderCrownControllerTest : FunSpec({
                 controller.clearPlayer(player.uniqueId)
                 controller.settings(player.uniqueId) shouldBe BuilderCrownSettings()
                 controller.anchor(player.uniqueId) shouldBe null
+            }
+        }
+    }
+
+    test("crown rejects a non-leaf material through crown-specific guidance") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderCrownMaterialGuidanceTest")
+            val player = paper.addPlayer("CrownMaterialOwner")
+            val harness = CrownHarness(plugin)
+            harness.controller.use { controller ->
+                shouldThrow<CrownFailure> {
+                    controller.handle(player, listOf("ancient_debris"))
+                }.path shouldBe "errors.crown-material"
             }
         }
     }

@@ -183,6 +183,22 @@ class BuilderBookJourneyTest : FunSpec({
         }
     }
 
+    test("selection actions use distinct semantic button glyphs") {
+        val config = Config(Files.createTempDirectory("arc-builder-selection-actions-"), "modules/builder-tools.yml")
+
+        val russian = config.string("locales.ru.selection.complete")
+        russian shouldContain "<click:run_command:'/builder copy'>"
+        russian shouldContain "<click:run_command:'/builder clear'>"
+        russian shouldContain "<color:#92bed8>[▶ Скопировать]"
+        russian shouldContain "<color:#969696>[✘ Сбросить]"
+
+        val english = config.string("locales.en.selection.complete")
+        english shouldContain "<click:run_command:'/builder copy'>"
+        english shouldContain "<click:run_command:'/builder clear'>"
+        english shouldContain "<color:#92bed8>[▶ Copy]"
+        english shouldContain "<color:#969696>[✘ Reset]"
+    }
+
     test("compact localized summaries explain unfamiliar terms with hover text") {
         val config = Config(Files.createTempDirectory("arc-builder-hover-glossary-"), "modules/builder-tools.yml")
         val scalarMinimums = mapOf(

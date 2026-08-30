@@ -166,6 +166,7 @@ class BuilderToolsConfig(
                 "errors.inventory",
                 "errors.protection",
                 "errors.material",
+                "errors.crown-material",
                 "errors.crown-setting",
                 "errors.tool",
                 "errors.recovering",

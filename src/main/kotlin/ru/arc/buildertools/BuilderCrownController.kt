@@ -119,7 +119,7 @@ internal class BuilderCrownController(
             current
         } else {
             val material = materialArgument(player, args[0])
-            if (!safety.isLeaf(material)) failure("errors.material")
+            if (!safety.isLeaf(material)) failure("errors.crown-material")
             current.copy(
                 palette = listOf(BuilderCrownPaletteEntry(material.name.lowercase(Locale.ROOT), 1)),
                 radius = args.getOrNull(1)?.let(::radius) ?: current.radius,
@@ -200,8 +200,8 @@ internal class BuilderCrownController(
             failure("errors.crown-setting")
         }
         parsed.forEach { entry ->
-            val material = Material.matchMaterial(entry.materialName) ?: failure("errors.material")
-            if (!safety.isLeaf(material)) failure("errors.material")
+            val material = Material.matchMaterial(entry.materialName) ?: failure("errors.crown-material")
+            if (!safety.isLeaf(material)) failure("errors.crown-material")
         }
         storeSettings(player, settings(player).copy(palette = parsed))
         send(player, "crown.palette-updated", mapOf("count" to messages.literal(parsed.size)))
@@ -250,7 +250,7 @@ internal class BuilderCrownController(
                 mapOf(
                     "material" to host.materialLabel(
                         player,
-                        Material.matchMaterial(entry.materialName) ?: failure("errors.material"),
+                        Material.matchMaterial(entry.materialName) ?: failure("errors.crown-material"),
                     ),
                     "weight" to messages.literal(entry.weight),
                 ),
@@ -294,8 +294,8 @@ internal class BuilderCrownController(
     ): BuilderPlan {
         val world = Bukkit.getWorld(center.worldId) ?: failure("errors.world-not-allowed")
         val materialByName = settings.palette.associate { entry ->
-            val material = Material.matchMaterial(entry.materialName) ?: failure("errors.material")
-            if (!safety.isLeaf(material)) failure("errors.material")
+            val material = Material.matchMaterial(entry.materialName) ?: failure("errors.crown-material")
+            if (!safety.isLeaf(material)) failure("errors.crown-material")
             entry.materialName to material
         }
         val dataByMaterial = materialByName.values.associateWith(host::placementData)
@@ -318,11 +318,11 @@ internal class BuilderCrownController(
 
     private fun materialArgument(player: Player, raw: String?): Material {
         if (raw == null) {
-            return player.inventory.itemInMainHand.type.takeUnless(Material::isAir) ?: failure("errors.material")
+            return player.inventory.itemInMainHand.type.takeUnless(Material::isAir) ?: failure("errors.crown-material")
         }
         return Material.matchMaterial(raw)
             ?: Material.matchMaterial(raw.uppercase(Locale.ROOT))
-            ?: failure("errors.material")
+            ?: failure("errors.crown-material")
     }
 
     private fun send(player: Player, path: String, values: Map<String, Component> = emptyMap()) {

@@ -3,6 +3,8 @@ package ru.arc.buildertools
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeSameInstanceAs
 import io.mockk.every
 import io.mockk.mockk
@@ -14,6 +16,7 @@ import com.sk89q.worldedit.bukkit.BukkitAdapter
 import com.sk89q.worldedit.world.block.BaseBlock
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextDecoration
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
@@ -52,6 +55,7 @@ import ru.arc.paper.testing.loadPlugin
 import ru.arc.util.BlockUtils.rotateBlockData
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
 import java.time.Duration
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -120,14 +124,23 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
     test("fill rejects reward ore materials before creating a plan") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("OreFillBuilder", GameMode.CREATIVE)
+            player.setLocale(Locale.forLanguageTag("ru-RU"))
             val world = journey.world
             player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            while (player.nextComponentMessage() != null) {
+                // Isolate the command rejection from selection feedback.
+            }
 
             player.performCommand("builder fill ancient_debris") shouldBe true
 
+            val rejection = PlainTextComponentSerializer.plainText().serialize(
+                checkNotNull(player.nextComponentMessage()),
+            )
+            rejection shouldContain "Этот материал нельзя использовать."
+            rejection shouldNotContain "крон"
             journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
             world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
         }
@@ -720,7 +733,7 @@ private class ArcBuilderJourney private constructor(
     val renderer: RecordingBuilderDisplayRenderer,
     private val runtime: BuilderToolsRuntime,
 ) : AutoCloseable {
-    fun builder(name: String, mode: GameMode): Player = paper.addPlayer(name).also { player ->
+    fun builder(name: String, mode: GameMode) = paper.addPlayer(name).also { player ->
         player.gameMode = mode
         grantBuilderPermissions(player)
     }
