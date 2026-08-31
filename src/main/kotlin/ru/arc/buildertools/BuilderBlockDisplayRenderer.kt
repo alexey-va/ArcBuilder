@@ -74,6 +74,7 @@ internal object BuilderPreviewWindow {
 internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
     private val maxPlanDisplays: Int,
+    blockDisplayScale: Float,
     private val planDisplayRange: Double,
     private val guidancePeriodTicks: Long,
     private val messages: LocalizedMiniMessage,
@@ -95,13 +96,28 @@ internal class BuilderBlockDisplayRenderer(
         val glow: Color,
     )
 
-    private data class Scene(val worldId: UUID, val signature: Int, val entities: List<Entity>)
+    private data class DisplayKey(
+        val x: Double,
+        val y: Double,
+        val z: Double,
+        val blockState: String,
+        val scaleX: Float,
+        val scaleY: Float,
+        val scaleZ: Float,
+        val translateX: Float,
+        val translateY: Float,
+        val translateZ: Float,
+        val glowRgb: Int,
+    )
+
+    private data class Scene(val worldId: UUID, val entities: Map<DisplayKey, Entity>)
     private data class BookBlock(val location: Location, val blockData: BlockData)
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
     private val bookSites = mutableMapOf<UUID, ConstructionSite>()
     private val bookModels = mutableMapOf<UUID, BookModel>()
     private val bookBossBars = mutableMapOf<UUID, BossBar>()
+    private val blockTransform = BuilderDisplayGeometry.blockTransform(blockDisplayScale)
 
     init {
         require(maxPlanDisplays in 32..512)
@@ -155,13 +171,13 @@ internal class BuilderBlockDisplayRenderer(
                 val removal = after.material.isAir
                 add(
                     DisplaySpec(
-                        x = change.position.x + .04,
-                        y = change.position.y + .04,
-                        z = change.position.z + .04,
+                        x = change.position.x + blockTransform.offset.toDouble(),
+                        y = change.position.y + blockTransform.offset.toDouble(),
+                        z = change.position.z + blockTransform.offset.toDouble(),
                         blockData = if (removal) Material.RED_STAINED_GLASS.createBlockData() else after,
-                        scaleX = .92f,
-                        scaleY = .92f,
-                        scaleZ = .92f,
+                        scaleX = blockTransform.scale,
+                        scaleY = blockTransform.scale,
+                        scaleZ = blockTransform.scale,
                         glow = if (removal) Color.RED else Color.fromRGB(197, 116, 255),
                     ),
                 )
@@ -265,13 +281,13 @@ internal class BuilderBlockDisplayRenderer(
             visible.forEach { block ->
                 add(
                     DisplaySpec(
-                        block.location.blockX + .04,
-                        block.location.blockY + .04,
-                        block.location.blockZ + .04,
+                        block.location.blockX + blockTransform.offset.toDouble(),
+                        block.location.blockY + blockTransform.offset.toDouble(),
+                        block.location.blockZ + blockTransform.offset.toDouble(),
                         block.blockData,
-                        .92f,
-                        .92f,
-                        .92f,
+                        blockTransform.scale,
+                        blockTransform.scale,
+                        blockTransform.scale,
                         glow = Color.fromRGB(255, 177, 66),
                     ),
                 )
@@ -339,13 +355,22 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun replace(player: Player, layer: Layer, specs: List<DisplaySpec>) {
         val key = player.uniqueId to layer
-        val signature = specs.hashCode()
-        if (scenes[key]?.let { it.worldId == player.world.uid && it.signature == signature } == true) return
-        remove(player.uniqueId, layer)
-        if (specs.isEmpty() || !player.isOnline) return
+        val previous = scenes[key]?.takeIf { it.worldId == player.world.uid }
+        if (previous == null) remove(player.uniqueId, layer)
+        if (specs.isEmpty() || !player.isOnline) {
+            remove(player.uniqueId, layer)
+            return
+        }
+        val previousEntities = previous?.entities.orEmpty().filterValues(Entity::isValid)
+        val nextSpecs = specs.associateBy { it.key() }
+        val delta = BuilderDisplaySceneDiff.between(previousEntities.keys, nextSpecs.keys.toList())
+        if (delta.added.isEmpty() && delta.removed.isEmpty()) return
+        val nextEntities = LinkedHashMap<DisplayKey, Entity>(delta.retained.size + delta.added.size)
+        delta.retained.forEach { displayKey -> nextEntities[displayKey] = previousEntities.getValue(displayKey) }
         val spawned = mutableListOf<Entity>()
         try {
-            specs.forEach { spec ->
+            delta.added.forEach { displayKey ->
+                val spec = nextSpecs.getValue(displayKey)
                 val display = player.world.spawn(Location(player.world, spec.x, spec.y, spec.z), BlockDisplay::class.java) { entity ->
                     entity.block = spec.blockData
                     entity.setVisibleByDefault(false)
@@ -365,16 +390,32 @@ internal class BuilderBlockDisplayRenderer(
                 }
                 player.showEntity(plugin, display)
                 spawned += display
+                nextEntities[displayKey] = display
             }
-            scenes[key] = Scene(player.world.uid, signature, spawned)
+            delta.removed.forEach { displayKey -> previousEntities.getValue(displayKey).remove() }
+            scenes[key] = Scene(player.world.uid, nextEntities)
         } catch (failure: Throwable) {
             spawned.forEach(Entity::remove)
             throw failure
         }
     }
 
+    private fun DisplaySpec.key() = DisplayKey(
+        x = x,
+        y = y,
+        z = z,
+        blockState = blockData.asString,
+        scaleX = scaleX,
+        scaleY = scaleY,
+        scaleZ = scaleZ,
+        translateX = translateX,
+        translateY = translateY,
+        translateZ = translateZ,
+        glowRgb = glow.asRGB(),
+    )
+
     private fun remove(playerId: UUID, layer: Layer) {
-        scenes.remove(playerId to layer)?.entities?.forEach(Entity::remove)
+        scenes.remove(playerId to layer)?.entities?.values?.forEach(Entity::remove)
     }
 
     override fun clearPlayer(playerId: UUID) {
@@ -384,7 +425,7 @@ internal class BuilderBlockDisplayRenderer(
 
     override fun close() {
         bookBossBars.keys.toList().forEach(::closeBookGuidance)
-        scenes.values.flatMap(Scene::entities).forEach(Entity::remove)
+        scenes.values.flatMap { scene -> scene.entities.values }.forEach(Entity::remove)
         scenes.clear()
     }
 }

@@ -14,11 +14,28 @@ internal data class BuilderBookPlannedCell(
 
 /** Prevents one half of a bed, door, or other bisected block from entering a book plan alone. */
 internal object BuilderBookMultiBlockPolicy {
+    /** Keeps the item-owning half first and its companion immediately after it. */
+    fun primaryFirst(cells: List<BuilderBookPlannedCell>): List<BuilderBookPlannedCell> {
+        val indexed = cells.withIndex().associateBy { it.value.position }
+        return cells.withIndex()
+            .sortedWith(
+                compareBy<IndexedValue<BuilderBookPlannedCell>> { indexedCell ->
+                    val partner = companionPosition(indexedCell.value.position, indexedCell.value.after)
+                        ?.let(indexed::get)
+                        ?.takeIf { matchingPair(indexedCell.value.after, it.value.after) }
+                    minOf(indexedCell.index, partner?.index ?: indexedCell.index)
+                }.thenBy { indexedCell ->
+                    if (isPrimary(indexedCell.value.after)) 0 else 1
+                }.thenBy(IndexedValue<BuilderBookPlannedCell>::index),
+            )
+            .map(IndexedValue<BuilderBookPlannedCell>::value)
+    }
+
     fun rejectedPositions(cells: List<BuilderBookPlannedCell>): Set<BuilderBlockPos> {
         val byPosition = cells.associateBy(BuilderBookPlannedCell::position)
         return buildSet {
             cells.forEach { cell ->
-                val partnerPosition = partnerPosition(cell.position, cell.after) ?: return@forEach
+                val partnerPosition = companionPosition(cell.position, cell.after) ?: return@forEach
                 val partner = byPosition[partnerPosition]
                 if (
                     partner == null ||
@@ -33,7 +50,7 @@ internal object BuilderBookMultiBlockPolicy {
         }
     }
 
-    private fun partnerPosition(position: BuilderBlockPos, data: BlockData): BuilderBlockPos? = when (data) {
+    fun companionPosition(position: BuilderBlockPos, data: BlockData): BuilderBlockPos? = when (data) {
         is Bed -> {
             val direction = if (data.part == Bed.Part.FOOT) data.facing else data.facing.oppositeFace
             position.offset(direction)
@@ -46,11 +63,17 @@ internal object BuilderBookMultiBlockPolicy {
         else -> null
     }
 
-    private fun matchingPair(first: BlockData, second: BlockData): Boolean = when {
+    fun matchingPair(first: BlockData, second: BlockData): Boolean = when {
         first is Bed && second is Bed ->
             first.material == second.material && first.part != second.part && first.facing == second.facing
         first is Bisected && second is Bisected && isVerticalPair(first) && isVerticalPair(second) ->
             first.material == second.material && first.half != second.half
+        else -> false
+    }
+
+    fun isPrimary(data: BlockData): Boolean = when (data) {
+        is Bed -> data.part == Bed.Part.FOOT
+        is Bisected -> isVerticalPair(data) && data.half == Bisected.Half.BOTTOM
         else -> false
     }
 

@@ -129,6 +129,7 @@ class BuilderToolsDomainTest : FunSpec({
             setLong("runtime.player-recovery-retry-period-ticks", 80L)
             setInt("runtime.progress-every-batches", 3)
             setDouble("preview.plan-display-range", 48.0)
+            setDouble("preview.block-display-scale", 1.0)
             setInt("preview.max-plan-displays", 320)
             setLong("preview.guidance-period-ticks", 15L)
             setInt("preview.plan-title.fade-in-ticks", 2)
@@ -156,6 +157,7 @@ class BuilderToolsDomainTest : FunSpec({
         configured.playerRecoveryRetryPeriodTicks shouldBe 80L
         configured.progressEveryBatches shouldBe 3
         configured.previewPlanDisplayRange shouldBe 48.0
+        configured.previewBlockDisplayScale shouldBe 1.0f
         configured.previewMaxPlanDisplays shouldBe 320
         configured.previewGuidancePeriodTicks shouldBe 15L
         configured.previewPlanTitleFadeInTicks shouldBe 2
@@ -171,6 +173,9 @@ class BuilderToolsDomainTest : FunSpec({
         configured.bookAuctionRecoveryRetry shouldBe java.time.Duration.ofSeconds(45)
         configured.bookPlayerMaterialsSummaryLimit shouldBe 6
         configured.requireLands shouldBe true
+
+        base.setDouble("preview.block-display-scale", 1.01)
+        shouldThrow<IllegalArgumentException> { BuilderToolsConfig(base, override).validated() }
     }
 
     test("bundled policy supports survival and creative without opening spectator modes") {

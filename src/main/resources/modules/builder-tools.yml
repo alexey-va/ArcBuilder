@@ -60,6 +60,8 @@ preview:
   max-selection-particles: 512
   # Small plans show every non-air block; large plans show this many blocks nearest to the moving player.
   max-plan-displays: 512
+  # 1.0 renders every preview block at the exact size of a real Minecraft block.
+  block-display-scale: 1.0
   plan-display-range: 64
   guidance-period-ticks: 20
   plan-title:

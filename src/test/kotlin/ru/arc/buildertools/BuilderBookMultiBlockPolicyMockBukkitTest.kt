@@ -56,12 +56,12 @@ class BuilderBookMultiBlockPolicyMockBukkitTest : FunSpec({
                 part = Bed.Part.HEAD
             }
 
-            BuilderBookMultiBlockPolicy.rejectedPositions(
-                listOf(
-                    BuilderBookPlannedCell(footPosition, foot, change(footPosition, foot)),
-                    BuilderBookPlannedCell(headPosition, head, change(headPosition, head)),
-                ),
-            ) shouldBe emptySet()
+            val footCell = BuilderBookPlannedCell(footPosition, foot, change(footPosition, foot))
+            val headCell = BuilderBookPlannedCell(headPosition, head, change(headPosition, head))
+
+            BuilderBookMultiBlockPolicy.rejectedPositions(listOf(footCell, headCell)) shouldBe emptySet()
+            BuilderBookMultiBlockPolicy.primaryFirst(listOf(headCell, footCell)).map { it.position } shouldBe
+                listOf(footPosition, headPosition)
         }
     }
 
@@ -82,6 +82,20 @@ class BuilderBookMultiBlockPolicyMockBukkitTest : FunSpec({
                     BuilderBookPlannedCell(topPosition, top, change(topPosition, top)),
                 ),
             ).shouldContainExactlyInAnyOrder(bottomPosition, topPosition)
+        }
+    }
+
+    test("door construction order keeps the item-owning bottom beside its top") {
+        MockBukkitTestRuntime.open().use {
+            val bottomPosition = BuilderBlockPos(worldId, 4, 70, 4)
+            val topPosition = bottomPosition.copy(y = 71)
+            val bottom = (Material.OAK_DOOR.createBlockData() as Door).apply { half = Bisected.Half.BOTTOM }
+            val top = (Material.OAK_DOOR.createBlockData() as Door).apply { half = Bisected.Half.TOP }
+            val bottomCell = BuilderBookPlannedCell(bottomPosition, bottom, change(bottomPosition, bottom))
+            val topCell = BuilderBookPlannedCell(topPosition, top, change(topPosition, top))
+
+            BuilderBookMultiBlockPolicy.primaryFirst(listOf(topCell, bottomCell)).map { it.position } shouldBe
+                listOf(bottomPosition, topPosition)
         }
     }
 

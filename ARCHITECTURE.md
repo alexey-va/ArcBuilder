@@ -195,9 +195,13 @@ The book subsystem is larger and should be entered through
 
 Confirmed build books do not use the ordinary all-at-once mutation path.
 `BuilderConstructionProject.kt` owns a durable, restart-safe project that
-advances one exact block at a time. Only the physical book is consumed at
-startup. Each step obtains its own material later, applies its prevalidated
-change, and stores any replaced block before advancing the durable cursor.
+advances one exact step at a time. A validated door, bed, or other true
+two-block pair is ordered by its item-owning primary half and both halves are
+written in the same server tick after both positions pass the live safety
+check; the durable companion step then reconciles the already-applied block.
+Only the physical book is consumed at startup. Each step obtains its own
+material later, applies its prevalidated change, and stores any replaced block
+before advancing the durable cursor.
 Missing material or output space is a waiting state, not a failed build.
 Ambiguous block, permission, persistence, or output-delivery state fails closed
 into `RECOVERY_REQUIRED`.
@@ -395,7 +399,7 @@ python3 ../arc-core/scripts/verify_consumer_architecture.py .
 
 Do not run `integrationTest`, Testcontainers, Docker, or the transitive
 integration gate locally. The production artifact is
-`build/libs/ArcBuilder-1.0.2.jar`.
+`build/libs/ArcBuilder-1.0.3.jar`.
 
 ## Adding another selection operation
 

@@ -43,6 +43,8 @@ import org.bukkit.loot.LootTable
 import org.opentest4j.TestAbortedException
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.BuildBookCodec
+import ru.arc.autobuild.BuildBookData
+import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.Building
 import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.PlayerBuildBookStore
@@ -224,6 +226,69 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                     change.position shouldBe BuilderBlockPos(target.world.uid, target.x, target.y, target.z)
                     change.beforeBlockData shouldBe "minecraft:andesite"
                     change.afterBlockData shouldBe "minecraft:air"
+                }
+            }
+        } finally {
+            unmockkStatic(BukkitAdapter::class)
+        }
+    }
+
+    test("system book places both door halves in the same construction tick") {
+        val definition = SystemBuildBookDefinition(
+            buildingId = "atomic-door-test.schem",
+            title = "Atomic door test",
+            schematicSha256 = "e".repeat(64),
+            playerEnabled = true,
+            materialsIncluded = true,
+        )
+        val bottomBlock = mockk<BaseBlock>()
+        val topBlock = mockk<BaseBlock>()
+        mockkStatic(BukkitAdapter::class)
+        try {
+            strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
+                val bottom = Material.OAK_DOOR.createBlockData() as Door
+                bottom.half = Bisected.Half.BOTTOM
+                val top = bottom.clone() as Door
+                top.half = Bisected.Half.TOP
+                every { BukkitAdapter.adapt(bottomBlock) } returns bottom
+                every { BukkitAdapter.adapt(topBlock) } returns top
+                val building = mockk<Building>()
+                every { building.fileName } returns definition.buildingId
+                every { building.volume } returns 2L
+                every { building.getCorner1(any()) } returns BlockVector3.ZERO
+                every { building.getCorner2(any()) } returns BlockVector3.at(0, 1, 0)
+                every { building.getBlock(any(), any()) } answers {
+                    if (firstArg<BlockVector3>().y() == 0) bottomBlock else topBlock
+                }
+                BuildingManager.addBuilding(building)
+
+                val player = journey.builder("DoorBookBuilder", GameMode.SURVIVAL)
+                player.teleport(player.location.apply { yaw = -180f })
+                player.inventory.setItemInMainHand(
+                    BuildBookItems.create(BuildBookData(definition.buildingId, definition.buildingId)),
+                )
+                val anchor = journey.world.getBlockAt(5, 64, 5)
+                journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, anchor)
+                val site = checkNotNull(BuildingManager.pending(player.uniqueId))
+                val bottomTarget = site.worldLocation(BlockVector3.ZERO).block
+                val topTarget = site.worldLocation(BlockVector3.at(0, 1, 0)).block
+                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
+                val pendingPlan = journey.renderer.plans[player.uniqueId] ?: error(
+                    generateSequence(player::nextComponentMessage)
+                        .joinToString(" | ") { PlainTextComponentSerializer.plainText().serialize(it) },
+                )
+                pendingPlan.changes.size shouldBe 2
+                player.performCommand("builder confirm") shouldBe true
+                journey.await("first atomic door mutation") {
+                    bottomTarget.type == Material.OAK_DOOR || topTarget.type == Material.OAK_DOOR
+                }
+
+                bottomTarget.type shouldBe Material.OAK_DOOR
+                topTarget.type shouldBe Material.OAK_DOOR
+                (bottomTarget.blockData as Door).half shouldBe Bisected.Half.BOTTOM
+                (topTarget.blockData as Door).half shouldBe Bisected.Half.TOP
+                journey.awaitSettled(player) {
+                    bottomTarget.type == Material.OAK_DOOR && topTarget.type == Material.OAK_DOOR
                 }
             }
         } finally {

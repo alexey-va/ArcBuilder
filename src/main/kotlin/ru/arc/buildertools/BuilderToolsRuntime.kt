@@ -10,6 +10,7 @@ import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.World
 import org.bukkit.block.Block
+import org.bukkit.block.data.BlockData
 import org.bukkit.block.data.type.Leaves
 import org.bukkit.loot.LootTable
 import org.bukkit.command.Command
@@ -74,6 +75,14 @@ internal data class BuilderBookPlannedProject(
     val project: BuilderConstructionProjectRecord,
 )
 
+private data class BuilderConstructionWorldMutation(
+    val step: BuilderConstructionStep,
+    val target: Block,
+    val before: BlockData,
+    val after: BlockData,
+    val required: Boolean,
+)
+
 internal class BuilderToolsRuntime(
     private val plugin: JavaPlugin,
     private val config: BuilderToolsConfig,
@@ -81,6 +90,7 @@ internal class BuilderToolsRuntime(
     private val displayRenderer: BuilderDisplayRenderer = BuilderBlockDisplayRenderer(
         plugin,
         config.previewMaxPlanDisplays,
+        config.previewBlockDisplayScale,
         config.previewPlanDisplayRange,
         config.previewGuidancePeriodTicks,
         config.messages(),
@@ -367,34 +377,80 @@ internal class BuilderToolsRuntime(
             mutation: BuilderResourceMutation,
         ): BuilderResourceMutationResult = constructionResources.rollback(project, mutation)
 
+        private fun atomicSteps(
+            project: BuilderConstructionProjectRecord,
+            step: BuilderConstructionStep,
+        ): List<BuilderConstructionStep> {
+            val after = Bukkit.createBlockData(step.change.afterBlockData)
+            if (!BuilderBookMultiBlockPolicy.isPrimary(after)) return listOf(step)
+            val companionPosition = BuilderBookMultiBlockPolicy.companionPosition(step.change.position, after)
+                ?: return listOf(step)
+            val companion = project.steps.singleOrNull { it.change.position == companionPosition }
+                ?: return listOf(step)
+            val companionAfter = Bukkit.createBlockData(companion.change.afterBlockData)
+            return if (
+                companion.requiredMaterial == null &&
+                BuilderBookMultiBlockPolicy.matchingPair(after, companionAfter)
+            ) {
+                listOf(step, companion)
+            } else {
+                listOf(step)
+            }
+        }
+
         override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) {
-            val change = step.change
-            val world = Bukkit.getWorld(change.position.worldId)
-                ?: throw IllegalStateException("Builder construction world is unavailable")
-            if (!world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
-                throw BuilderConstructionTemporarilyUnavailableException()
-            }
-            val target = block(world, change.position)
-            check(target.blockData.asString == change.beforeBlockData) {
-                "Builder construction block changed before apply"
-            }
-            val before = Bukkit.createBlockData(change.beforeBlockData)
-            val after = Bukkit.createBlockData(change.afterBlockData)
-            target.setBlockData(after, false)
-            step.lootTableKey?.let { lootTableKey ->
-                try {
-                    lootTableAccess.apply(target, requiredLootTable(lootTableKey))
-                } catch (failure: Throwable) {
-                    target.setBlockData(before, false)
-                    throw failure
+            val mutations = atomicSteps(project, step).map { atomicStep ->
+                val change = atomicStep.change
+                val world = Bukkit.getWorld(change.position.worldId)
+                    ?: throw IllegalStateException("Builder construction world is unavailable")
+                if (!world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
+                    throw BuilderConstructionTemporarilyUnavailableException()
                 }
+                val target = block(world, change.position)
+                val before = Bukkit.createBlockData(change.beforeBlockData)
+                val after = Bukkit.createBlockData(change.afterBlockData)
+                val current = target.blockData.asString
+                check(current == change.beforeBlockData || current == change.afterBlockData) {
+                    "Builder construction block changed before atomic apply"
+                }
+                val required = current == change.beforeBlockData
+                if (required) {
+                    check(canModify(project, atomicStep)) {
+                        "Builder construction atomic companion cannot be modified"
+                    }
+                }
+                BuilderConstructionWorldMutation(atomicStep, target, before, after, required)
             }
-            coreProtect?.logChange(project.playerName, target.location, before, after)
+
+            val changed = mutableListOf<BuilderConstructionWorldMutation>()
+            try {
+                mutations.filter(BuilderConstructionWorldMutation::required).forEach { mutation ->
+                    mutation.target.setBlockData(mutation.after, false)
+                    changed += mutation
+                }
+                mutations.forEach { mutation ->
+                    mutation.step.lootTableKey?.let { lootTableKey ->
+                        lootTableAccess.apply(mutation.target, requiredLootTable(lootTableKey))
+                    }
+                }
+            } catch (failure: Throwable) {
+                changed.asReversed().forEach { mutation ->
+                    runCatching { mutation.target.setBlockData(mutation.before, false) }
+                        .exceptionOrNull()
+                        ?.let(failure::addSuppressed)
+                }
+                throw failure
+            }
+
+            changed.forEach { mutation ->
+                coreProtect?.logChange(project.playerName, mutation.target.location, mutation.before, mutation.after)
+            }
+            val current = mutations.first()
             BuilderConstructionFeedback.play(
-                world,
-                target.location,
-                before,
-                after,
+                current.target.world,
+                current.target.location,
+                current.before,
+                current.after,
                 project.cursor,
                 constructionFeedbackSettings,
             )
@@ -917,7 +973,10 @@ internal class BuilderToolsRuntime(
             cell.placement == BuilderBookPlacementResult.SkippedUnsafe ||
                 cell.position in rejectedMultiBlocks && cell.placement is BuilderBookPlacementResult.Change
         }
-        val placements = cells.asSequence().filterNot { it.position in rejectedMultiBlocks }.mapNotNull { cell ->
+        val orderedCells = BuilderBookMultiBlockPolicy.primaryFirst(
+            cells.filterNot { it.position in rejectedMultiBlocks },
+        )
+        val placements = orderedCells.asSequence().mapNotNull { cell ->
             val placement = cell.placement as? BuilderBookPlacementResult.Change ?: return@mapNotNull null
             BuilderBookPlannedChange(
                 change = placement.block,

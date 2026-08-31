@@ -106,6 +106,7 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         val merged = Config(root, "modules/builder-tools.yml")
         merged.integer("runtime.progress-every-batches") shouldBe 10
         merged.integer("preview.max-plan-displays") shouldBe 512
+        merged.double("preview.block-display-scale") shouldBe 1.0
         merged.integer("construction.effects.interval-blocks") shouldBe 4
         merged.string("operator-owned-note") shouldBe "keep-me"
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe false

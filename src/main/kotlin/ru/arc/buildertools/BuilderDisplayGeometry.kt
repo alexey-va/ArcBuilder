@@ -9,9 +9,40 @@ internal data class BuilderDisplayEdge(
     val scaleZ: Float,
 )
 
+internal data class BuilderDisplayBlockTransform(
+    val offset: Float,
+    val scale: Float,
+)
+
+internal data class BuilderDisplaySceneDelta<T>(
+    val retained: Set<T>,
+    val added: List<T>,
+    val removed: Set<T>,
+)
+
+internal object BuilderDisplaySceneDiff {
+    fun <T> between(previous: Set<T>, next: List<T>): BuilderDisplaySceneDelta<T> {
+        val distinctNext = next.distinct()
+        val nextSet = distinctNext.toSet()
+        return BuilderDisplaySceneDelta(
+            retained = previous.intersect(nextSet),
+            added = distinctNext.filterNot(previous::contains),
+            removed = previous - nextSet,
+        )
+    }
+}
+
 /** Exact twelve-edge cuboid used by every selection and preview layer. */
 internal object BuilderDisplayGeometry {
     private const val THICKNESS = .035f
+
+    fun blockTransform(scale: Float): BuilderDisplayBlockTransform {
+        require(scale.isFinite() && scale in .5f..1f)
+        return BuilderDisplayBlockTransform(
+            offset = (1f - scale) / 2f,
+            scale = scale,
+        )
+    }
 
     fun bounds(positions: List<BuilderBlockPos>): List<BuilderDisplayEdge> {
         if (positions.isEmpty()) return emptyList()
