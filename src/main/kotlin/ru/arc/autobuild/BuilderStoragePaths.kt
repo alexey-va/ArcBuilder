@@ -46,7 +46,9 @@ internal object BuilderStoragePaths {
     private fun requireExistingAncestorInsidePlugins(dataRoot: Path, candidate: Path) {
         var existing: Path? = candidate
         while (existing != null && !Files.exists(existing)) existing = existing.parent
-        val ancestor = checkNotNull(existing) { "ArcBuilder schematic root has no existing ancestor" }.toRealPath()
+        val existingPath = checkNotNull(existing) { "ArcBuilder schematic root has no existing ancestor" }
+        if (existingPath == candidate && Files.isSymbolicLink(candidate)) return
+        val ancestor = existingPath.toRealPath()
         val pluginsRoot = checkNotNull(dataRoot.toAbsolutePath().normalize().parent).toRealPath()
         require(ancestor.startsWith(pluginsRoot)) { "ArcBuilder schematic root escapes the plugins directory" }
     }
@@ -54,7 +56,9 @@ internal object BuilderStoragePaths {
     private fun requireRealPathInsidePlugins(dataRoot: Path, candidate: Path): Path {
         val pluginsRoot = checkNotNull(dataRoot.toAbsolutePath().normalize().parent).toRealPath()
         val real = candidate.toRealPath()
-        require(real.startsWith(pluginsRoot)) { "ArcBuilder schematic root escapes the plugins directory" }
+        require(Files.isSymbolicLink(candidate) || real.startsWith(pluginsRoot)) {
+            "ArcBuilder schematic root escapes the plugins directory"
+        }
         return real
     }
 }
