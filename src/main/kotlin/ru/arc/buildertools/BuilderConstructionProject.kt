@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.UUID
 
+private val BUILDER_LOOT_TABLE_KEY = Regex("[a-z0-9_.-]+:[a-z0-9_./-]+")
+
 internal enum class BuilderConstructionProjectState(val terminal: Boolean) {
     PREPARED(false),
     ACTIVE(false),
@@ -24,11 +26,20 @@ internal data class BuilderConstructionStep(
     val change: BuilderBlockChange,
     val requiredMaterial: BuilderItemAmount?,
     val output: BuilderItemAmount?,
+    val lootTableKey: String? = null,
 ) {
     fun validated(): BuilderConstructionStep = apply {
         change.validated()
         requiredMaterial?.validated()
         output?.validated()
+        lootTableKey?.let { key ->
+            require(key.length <= 256 && key.matches(BUILDER_LOOT_TABLE_KEY)) {
+                "Builder construction loot-table key is invalid"
+            }
+            require(change.afterBlockData == "minecraft:chest" || change.afterBlockData.startsWith("minecraft:chest[")) {
+                "Builder construction loot table requires a chest step"
+            }
+        }
     }
 }
 
@@ -438,7 +449,11 @@ internal class BuilderConstructionProjectUnknownOutcomeException(
 internal interface BuilderConstructionProjectPort {
     fun currentBlockData(position: BuilderBlockPos): String
 
-    fun canModify(playerId: UUID, change: BuilderBlockChange): Boolean
+    /** Includes durable block-entity metadata when a step owns any. */
+    fun isStepApplied(step: BuilderConstructionStep): Boolean =
+        currentBlockData(step.change.position) == step.change.afterBlockData
+
+    fun canModify(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Boolean
 
     fun prepareInput(
         playerId: UUID,
@@ -462,7 +477,7 @@ internal interface BuilderConstructionProjectPort {
         mutation: BuilderResourceMutation,
     ): BuilderResourceMutationResult
 
-    fun apply(project: BuilderConstructionProjectRecord, change: BuilderBlockChange)
+    fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep)
 }
 
 internal class BuilderConstructionTemporarilyUnavailableException : RuntimeException()
@@ -651,14 +666,19 @@ internal object BuilderConstructionProjectController {
                 true -> Unit
             }
         } else {
-            when (worldMatchesAfter(step, port)) {
+            when (worldBlockDataMatchesAfter(step, port)) {
                 null -> return null
                 false -> return record.recoveryRequired(nowMillis)
+                true -> Unit
+            }
+            when (worldMatchesAfter(step, port)) {
+                null -> return null
+                false -> if (step.lootTableKey == null) return record.recoveryRequired(nowMillis)
                 true -> return appliedStep(record, step, nowMillis)
             }
         }
         try {
-            port.apply(record, step.change)
+            port.apply(record, step)
         } catch (_: Throwable) {
             return when (worldMatchesAfter(step, port)) {
                 true -> appliedStep(record, step, nowMillis)
@@ -715,6 +735,17 @@ internal object BuilderConstructionProjectController {
         step: BuilderConstructionStep,
         port: BuilderConstructionProjectPort,
     ): Boolean? = try {
+        port.isStepApplied(step)
+    } catch (_: BuilderConstructionTemporarilyUnavailableException) {
+        null
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun worldBlockDataMatchesAfter(
+        step: BuilderConstructionStep,
+        port: BuilderConstructionProjectPort,
+    ): Boolean? = try {
         port.currentBlockData(step.change.position) == step.change.afterBlockData
     } catch (_: BuilderConstructionTemporarilyUnavailableException) {
         null
@@ -727,7 +758,7 @@ internal object BuilderConstructionProjectController {
         step: BuilderConstructionStep,
         port: BuilderConstructionProjectPort,
     ): Boolean? = try {
-        port.canModify(record.playerId, step.change)
+        port.canModify(record, step)
     } catch (_: BuilderConstructionTemporarilyUnavailableException) {
         null
     } catch (_: Throwable) {

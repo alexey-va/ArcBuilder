@@ -8,6 +8,7 @@ internal data class BuilderBookPlannedChange(
     val change: BuilderBlockChange,
     val placementItem: ItemStack?,
     val refund: ItemStack?,
+    val lootTableKey: String? = null,
 )
 
 internal data class BuilderBookConstructionDefinition(
@@ -62,6 +63,7 @@ internal object BuilderBookConstructionCosts {
                 change = placement.change,
                 requiredMaterial = inputItem?.let { BuilderItemCodec.aggregate(listOf(it)).single() },
                 output = placement.refund?.let { BuilderItemCodec.aggregate(listOf(it)).single() },
+                lootTableKey = placement.lootTableKey,
             ).validated()
         }
         return BuilderBookConstructionDefinition(

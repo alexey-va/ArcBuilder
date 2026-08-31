@@ -180,6 +180,7 @@ class BuilderBookJourneyTest : FunSpec({
             val waitingMaterials = config.string("locales.$locale.construction.waiting-materials")
             waitingMaterials shouldContain "<count>/<total>"
             waitingMaterials shouldContain if (locale == "ru") "блоков" else "blocks"
+            waitingMaterials.lowercase() shouldContain if (locale == "ru") "инвентарь" else "inventory"
         }
     }
 

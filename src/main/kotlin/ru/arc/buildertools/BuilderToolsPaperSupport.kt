@@ -375,11 +375,11 @@ internal class BuilderBlockSafety(
 
     fun isSafePlacement(data: BlockData): Boolean =
         isSafeMaterial(data.material) &&
-            data.asString.startsWith("minecraft:") &&
-            (data !is Waterlogged || !data.isWaterlogged) &&
-            (data !is Lightable || !data.isLit) &&
-            (data !is Powerable || !data.isPowered) &&
-            (data !is Bed || !data.isOccupied)
+            isSafeState(data)
+
+    /** Opt-in exception for reviewed system books; player-authored containers remain rejected. */
+    fun isSafeSystemLootContainer(data: BlockData): Boolean =
+        data.material == Material.CHEST && isSafeState(data)
 
     fun isSafeMaterial(material: Material): Boolean {
         if (!material.isBlock || material.isAir || BuilderPlacementCost.constructionItem(material) == null) return false
@@ -391,6 +391,13 @@ internal class BuilderBlockSafety(
     }
 
     fun isLeaf(material: Material): Boolean = material.name.endsWith("_LEAVES") && isSafeMaterial(material)
+
+    private fun isSafeState(data: BlockData): Boolean =
+        data.asString.startsWith("minecraft:") &&
+            (data !is Waterlogged || !data.isWaterlogged) &&
+            (data !is Lightable || !data.isLit) &&
+            (data !is Powerable || !data.isPowered) &&
+            (data !is Bed || !data.isOccupied)
 
     private fun isCustom(block: Block): Boolean {
         if (CustomBlockData.hasCustomBlockData(block, plugin)) return true

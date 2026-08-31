@@ -49,6 +49,14 @@ class BuilderToolsConfig(
             "construction.max-resolved-containers-per-call",
             DEFAULT_CONSTRUCTION_MAX_RESOLVED_CONTAINERS_PER_CALL,
         )
+    val constructionEffectsEnabled: Boolean get() = config.bool("construction.effects.enabled", true)
+    val constructionEffectIntervalBlocks: Int get() = config.integer("construction.effects.interval-blocks", 4)
+    val constructionSoundsEnabled: Boolean get() = config.bool("construction.effects.sounds.enabled", true)
+    val constructionSoundVolume: Float get() = config.double("construction.effects.sounds.volume", 0.55).toFloat()
+    val constructionSoundPitch: Float get() = config.double("construction.effects.sounds.pitch", 1.0).toFloat()
+    val constructionParticlesEnabled: Boolean get() = config.bool("construction.effects.particles.enabled", true)
+    val constructionParticleCount: Int get() = config.integer("construction.effects.particles.count", 3)
+    val constructionParticleSpread: Double get() = config.double("construction.effects.particles.spread", 0.2)
     val healthRefreshPeriodTicks: Long get() = config.long("runtime.health-refresh-period-ticks", 20L)
     val playerRecoveryRetryPeriodTicks: Long get() = config.long("runtime.player-recovery-retry-period-ticks", 100L)
     val progressEveryBatches: Int get() = config.integer("runtime.progress-every-batches", 10)
@@ -56,7 +64,7 @@ class BuilderToolsConfig(
     val previewRadius: Double get() = config.double("preview.radius", 32.0)
     val previewSpacing: Double get() = config.double("preview.outline-spacing", 0.75)
     val previewMaxSelectionParticles: Int get() = config.integer("preview.max-selection-particles", 512)
-    val previewMaxPlanParticles: Int get() = config.integer("preview.max-plan-particles", 180)
+    val previewMaxPlanDisplays: Int get() = config.integer("preview.max-plan-displays", 512)
     val previewPlanDisplayRange: Double get() = config.double("preview.plan-display-range", 64.0)
     val previewGuidancePeriodTicks: Long get() = config.long("preview.guidance-period-ticks", 20L)
     val previewPlanTitleFadeInTicks: Int get() = config.integer("preview.plan-title.fade-in-ticks", 5)
@@ -138,6 +146,21 @@ class BuilderToolsConfig(
         require(constructionMaxResolvedContainersPerCall <= constructionMaxCachedContainersPerProject) {
             "Builder construction container resolution budget cannot exceed its cache limit"
         }
+        require(constructionEffectIntervalBlocks in 1..128) {
+            "Builder construction effect interval is invalid"
+        }
+        require(constructionSoundVolume.isFinite() && constructionSoundVolume in 0.0f..2.0f) {
+            "Builder construction sound volume is invalid"
+        }
+        require(constructionSoundPitch.isFinite() && constructionSoundPitch in 0.5f..2.0f) {
+            "Builder construction sound pitch is invalid"
+        }
+        require(constructionParticleCount in 0..16) {
+            "Builder construction particle count is invalid"
+        }
+        require(constructionParticleSpread.isFinite() && constructionParticleSpread in 0.0..1.0) {
+            "Builder construction particle spread is invalid"
+        }
         require(healthRefreshPeriodTicks in 10L..1_200L) { "Builder-tools health refresh period is invalid" }
         require(playerRecoveryRetryPeriodTicks in 20L..1_200L) { "Builder-tools recovery retry period is invalid" }
         require(progressEveryBatches in 1..100) { "Builder-tools progress cadence is invalid" }
@@ -145,7 +168,7 @@ class BuilderToolsConfig(
         require(previewRadius.isFinite() && previewRadius in 8.0..64.0) { "Builder-tools preview radius is invalid" }
         require(previewSpacing.isFinite() && previewSpacing in 0.25..2.0) { "Builder-tools preview spacing is invalid" }
         require(previewMaxSelectionParticles in 48..1_024) { "Builder-tools selection preview limit is invalid" }
-        require(previewMaxPlanParticles in 32..512) { "Builder-tools plan preview limit is invalid" }
+        require(previewMaxPlanDisplays in 32..512) { "Builder-tools plan preview limit is invalid" }
         require(previewPlanDisplayRange.isFinite() && previewPlanDisplayRange in 8.0..128.0) {
             "Builder-tools plan display range is invalid"
         }

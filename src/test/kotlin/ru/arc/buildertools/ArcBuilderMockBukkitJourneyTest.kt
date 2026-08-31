@@ -21,6 +21,7 @@ import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.Bisected
@@ -38,6 +39,7 @@ import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
+import org.bukkit.loot.LootTable
 import org.opentest4j.TestAbortedException
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.BuildBookCodec
@@ -80,7 +82,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         verify(exactly = 1) { secondClone.rotate(StructureRotation.CLOCKWISE_90) }
     }
 
-    test("build-book plan replaces safe ground, carves source air and skips containers and reward ores") {
+    test("build-book plan replaces terrain and fluids, carves andesite, and gates system loot chests") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("BookGroundBuilder", GameMode.SURVIVAL)
             val world = journey.world
@@ -88,6 +90,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(6, 64, 6).type = Material.DIRT
             world.getBlockAt(7, 64, 6).type = Material.DIRT
             world.getBlockAt(8, 64, 6).type = Material.CHEST
+            world.getBlockAt(10, 64, 6).type = Material.WATER
+            world.getBlockAt(11, 64, 6).type = Material.LAVA
+            world.getBlockAt(12, 64, 6).type = Material.ANDESITE
 
             val replacement = journey.planBuildBookBlock(
                 player,
@@ -109,6 +114,32 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 world.getBlockAt(9, 64, 6),
                 Material.ANCIENT_DEBRIS.createBlockData(),
             )
+            val water = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(10, 64, 6),
+                Material.STONE.createBlockData(),
+            ) as BuilderBookPlacementResult.Change
+            val lava = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(11, 64, 6),
+                Material.AIR.createBlockData(),
+            ) as BuilderBookPlacementResult.Change
+            val andesite = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(12, 64, 6),
+                Material.AIR.createBlockData(),
+            ) as BuilderBookPlacementResult.Change
+            val ordinaryChest = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(13, 64, 6),
+                Material.CHEST.createBlockData(),
+            )
+            val reviewedSystemChest = journey.planBuildBookBlock(
+                player,
+                world.getBlockAt(13, 64, 6),
+                Material.CHEST.createBlockData(),
+                allowSystemLootContainer = true,
+            )
 
             replacement.block.beforeBlockData to replacement.block.afterBlockData shouldBe
                 ("minecraft:dirt" to "minecraft:stone")
@@ -118,6 +149,15 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             carving.refund?.type shouldBe Material.DIRT
             container shouldBe BuilderBookPlacementResult.SkippedUnsafe
             ore shouldBe BuilderBookPlacementResult.SkippedUnsafe
+            water.block.beforeBlockData shouldBe "minecraft:water[level=0]"
+            water.refund shouldBe null
+            lava.block.afterBlockData shouldBe "minecraft:air"
+            lava.refund shouldBe null
+            andesite.block.beforeBlockData to andesite.block.afterBlockData shouldBe
+                ("minecraft:andesite" to "minecraft:air")
+            andesite.refund?.type shouldBe Material.ANDESITE
+            ordinaryChest shouldBe BuilderBookPlacementResult.SkippedUnsafe
+            (reviewedSystemChest as BuilderBookPlacementResult.Change).block.afterBlockData shouldContain "minecraft:chest"
         }
     }
 
@@ -143,6 +183,117 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             rejection shouldNotContain "крон"
             journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
             world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
+        }
+    }
+
+    test("system book journey keeps schematic air and removes obstructing andesite") {
+        val definition = SystemBuildBookDefinition(
+            buildingId = "carve-test.schem",
+            title = "Carve test",
+            schematicSha256 = "c".repeat(64),
+            playerEnabled = true,
+            materialsIncluded = true,
+        )
+        val schematicAir = mockk<BaseBlock>()
+        mockkStatic(BukkitAdapter::class)
+        try {
+            strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
+                every { BukkitAdapter.adapt(schematicAir) } returns Bukkit.createBlockData(Material.AIR)
+                val building = mockk<Building>()
+                every { building.fileName } returns definition.buildingId
+                every { building.volume } returns 1L
+                every { building.getCorner1(any()) } returns BlockVector3.ZERO
+                every { building.getCorner2(any()) } returns BlockVector3.ZERO
+                every { building.getBlock(any(), any()) } returns schematicAir
+                BuildingManager.addBuilding(building)
+
+                val player = journey.builder("AndesiteCarver", GameMode.CREATIVE)
+                player.teleport(player.location.apply { yaw = -180f })
+                val book = ru.arc.autobuild.BuildBookItems.create(
+                    ru.arc.autobuild.BuildBookData(definition.buildingId, definition.buildingId),
+                )
+                player.inventory.setItemInMainHand(book)
+                val anchor = journey.world.getBlockAt(5, 64, 5).also { it.type = Material.DIRT }
+                journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, anchor)
+                val site = checkNotNull(BuildingManager.pending(player.uniqueId))
+                val target = site.worldLocation(BlockVector3.ZERO).block.also { it.type = Material.ANDESITE }
+
+                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
+
+                checkNotNull(journey.renderer.plans[player.uniqueId]).changes.single().let { change ->
+                    change.position shouldBe BuilderBlockPos(target.world.uid, target.x, target.y, target.z)
+                    change.beforeBlockData shouldBe "minecraft:andesite"
+                    change.afterBlockData shouldBe "minecraft:air"
+                }
+            }
+        } finally {
+            unmockkStatic(BukkitAdapter::class)
+        }
+    }
+
+    test("reviewed system book places a chest with the configured vanilla loot table") {
+        val definition = SystemBuildBookDefinition(
+            buildingId = "loot-chest-test.schem",
+            title = "Loot chest test",
+            schematicSha256 = "d".repeat(64),
+            playerEnabled = true,
+            materialsIncluded = true,
+            containerLootTableKey = "minecraft:chests/spawn_bonus_chest",
+        )
+        val schematicChest = mockk<BaseBlock>()
+        val lootTable = mockk<LootTable>()
+        every { lootTable.key } returns NamespacedKey.minecraft("chests/spawn_bonus_chest")
+        var appliedLootKey: NamespacedKey? = null
+        val lootTableAccess = object : BuilderLootTableAccess {
+            override fun matches(block: org.bukkit.block.Block, table: LootTable): Boolean = appliedLootKey == table.key
+
+            override fun apply(block: org.bukkit.block.Block, table: LootTable) {
+                appliedLootKey = table.key
+            }
+        }
+        mockkStatic(BukkitAdapter::class)
+        try {
+            strictMockBukkit(
+                open = {
+                    ArcBuilderJourney.open(
+                        systemResolver = { definition },
+                        lootTableResolver = { lootTable },
+                        lootTableAccess = lootTableAccess,
+                    )
+                },
+            ) { journey ->
+                every { BukkitAdapter.adapt(schematicChest) } returns Bukkit.createBlockData(Material.CHEST)
+                val building = mockk<Building>()
+                every { building.fileName } returns definition.buildingId
+                every { building.volume } returns 1L
+                every { building.getCorner1(any()) } returns BlockVector3.ZERO
+                every { building.getCorner2(any()) } returns BlockVector3.ZERO
+                every { building.getBlock(any(), any()) } returns schematicChest
+                BuildingManager.addBuilding(building)
+
+                val player = journey.builder("StarterLootChest", GameMode.CREATIVE)
+                player.teleport(player.location.apply { yaw = -180f })
+                player.inventory.setItemInMainHand(
+                    ru.arc.autobuild.BuildBookItems.create(
+                        ru.arc.autobuild.BuildBookData(definition.buildingId, definition.buildingId),
+                    ),
+                )
+                val anchor = journey.world.getBlockAt(7, 64, 7).also { it.type = Material.DIRT }
+                journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, anchor)
+                val target = checkNotNull(BuildingManager.pending(player.uniqueId))
+                    .worldLocation(BlockVector3.ZERO)
+                    .block
+                    .also { it.type = Material.AIR }
+                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
+
+                player.performCommand("builder confirm") shouldBe true
+                journey.await("loot-table assignment") { appliedLootKey != null }
+                journey.awaitSettled(player) { target.type == Material.CHEST }
+
+                appliedLootKey shouldBe NamespacedKey.minecraft("chests/spawn_bonus_chest")
+            }
+        } finally {
+            unmockkStatic(BukkitAdapter::class)
         }
     }
 
@@ -804,8 +955,12 @@ private class ArcBuilderJourney private constructor(
 
     fun activeLeases(): Int = runtime.runtimeHealthContribution().activeLeases
 
-    fun planBuildBookBlock(player: Player, block: org.bukkit.block.Block, after: BlockData): BuilderBookPlacementResult =
-        runtime.planBuildBookBlock(player, block, after)
+    fun planBuildBookBlock(
+        player: Player,
+        block: org.bukkit.block.Block,
+        after: BlockData,
+        allowSystemLootContainer: Boolean = false,
+    ): BuilderBookPlacementResult = runtime.planBuildBookBlock(player, block, after, allowSystemLootContainer)
 
     fun rightClickBook(player: Player, action: Action, block: org.bukkit.block.Block?) {
         paper.callEvent(
@@ -841,6 +996,8 @@ private class ArcBuilderJourney private constructor(
         fun open(
             blocksPerTick: Int = 2,
             systemResolver: (ru.arc.autobuild.BuildBookData) -> SystemBuildBookDefinition? = { null },
+            lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
+            lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
         ): ArcBuilderJourney {
             ConfigManager.clear()
             val paper = MockBukkitTestRuntime.open()
@@ -865,6 +1022,8 @@ private class ArcBuilderJourney private constructor(
                     bookSchematicVerifier = BuilderBookSchematicVerifier { true },
                     bookReplacementRefund = { block -> ItemStack(block.type) },
                     systemBuildBookResolver = systemResolver,
+                    lootTableResolver = lootTableResolver,
+                    lootTableAccess = lootTableAccess,
                 )
                 checkNotNull(plugin.getCommand("builder")).apply {
                     setExecutor(runtime)

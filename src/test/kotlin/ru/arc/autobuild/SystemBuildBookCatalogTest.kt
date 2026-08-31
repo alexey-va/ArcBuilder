@@ -28,6 +28,7 @@ class SystemBuildBookCatalogTest : FunSpec({
                     sha256: ${sha256(bytes)}
                     player-enabled: true
                     materials-included: true
+                    container-loot-table: minecraft:chests/spawn_bonus_chest
                 """,
             ),
             root,
@@ -37,6 +38,7 @@ class SystemBuildBookCatalogTest : FunSpec({
         val definition = checkNotNull(catalog.resolve(data))
         definition.title shouldBe "Стартовый дом"
         definition.materialsIncluded shouldBe true
+        definition.containerLootTableKey shouldBe "minecraft:chests/spawn_bonus_chest"
         definition.title.contains(".schem") shouldBe false
         catalog.resolve(BuildBookData(buildingId = "unknown.schem", title = "unknown")) shouldBe null
 
@@ -60,6 +62,38 @@ class SystemBuildBookCatalogTest : FunSpec({
                         title: Viking
                         sha256: ${"0".repeat(64)}
                         player-enabled: true
+                    """,
+                ),
+                root,
+            )
+        }
+        shouldThrow<IllegalArgumentException> {
+            SystemBuildBookCatalog.load(
+                config(
+                    root,
+                    """
+                    books:
+                      - building-id: viking.schem
+                        title: Viking
+                        sha256: $digest
+                        player-enabled: true
+                        container-loot-table: true
+                    """,
+                ),
+                root,
+            )
+        }
+        shouldThrow<IllegalArgumentException> {
+            SystemBuildBookCatalog.load(
+                config(
+                    root,
+                    """
+                    books:
+                      - building-id: viking.schem
+                        title: Viking
+                        sha256: $digest
+                        player-enabled: true
+                        container-loot-table: Invalid Loot Table
                     """,
                 ),
                 root,

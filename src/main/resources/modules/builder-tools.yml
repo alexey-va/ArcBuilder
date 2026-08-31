@@ -33,6 +33,18 @@ construction:
   # Per-project cache and per-call resolution caps keep dense storage areas bounded.
   max-cached-containers-per-project: 256
   max-resolved-containers-per-call: 32
+  effects:
+    # Cosmetic feedback is sampled by completed block number, so large builds stay quiet enough.
+    enabled: true
+    interval-blocks: 4
+    sounds:
+      enabled: true
+      volume: 0.55
+      pitch: 1.0
+    particles:
+      enabled: true
+      count: 3
+      spread: 0.2
 
 runtime:
   # Refreshes the in-memory builder contribution; lifecycle health logging remains platform-owned.
@@ -46,7 +58,8 @@ preview:
   radius: 32
   outline-spacing: 0.75
   max-selection-particles: 512
-  max-plan-particles: 180
+  # Small plans show every non-air block; large plans show this many blocks nearest to the moving player.
+  max-plan-displays: 512
   plan-display-range: 64
   guidance-period-ticks: 20
   plan-title:
@@ -103,6 +116,14 @@ safety:
     - VINE
     - GLOW_LICHEN
     - SNOW
+    # Build books may replace a water volume just like they replace air on land.
+    - WATER
+    - LAVA
+    - BUBBLE_COLUMN
+    - SEAGRASS
+    - TALL_SEAGRASS
+    - KELP
+    - KELP_PLANT
 
 locales:
   ru:
@@ -676,7 +697,7 @@ locales:
       waiting-materials: |-
 
         <prefix><#ff9f0f>Стройке не хватает: <#d48763><material>
-        <#8c8c8c>   <#e6fff3>Положите их в <hover:show_text:'Сундук или бочку, которую владелец проекта имеет право открыть.'>доступный сундук</hover> рядом.
+        <#8c8c8c>   <#e6fff3>Положите их в инвентарь или <hover:show_text:'Сундук или бочку, которую владелец проекта имеет право открыть.'>доступный сундук</hover> рядом.
         <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total> <#e6fff3>блоков.
       waiting-output: |-
 
@@ -1269,7 +1290,7 @@ locales:
       waiting-materials: |-
 
         <prefix><yellow>Construction needs: <white><material></white>.
-        <dark_gray>   <gray>Put them in an <hover:show_text:'A chest or barrel the project owner is allowed to open.'>accessible nearby container</hover>.
+        <dark_gray>   <gray>Put them in your inventory or an <hover:show_text:'A chest or barrel the project owner is allowed to open.'>accessible nearby container</hover>.
         <dark_gray>   <gray>Progress: <white><count>/<total></white> blocks.
       waiting-output: |-
 

@@ -6,9 +6,9 @@ import java.util.UUID
  * Main-thread owner of the player and container leases used while a durable construction
  * project crosses a value-mutation commit boundary.
  *
- * A construction project is long-lived, but its player lock must exist only
- * around one synchronous construction action. The exact project identity keeps
- * a stale completion from unlocking a newer lease for the same player.
+ * Player inventory remains interactive: a changed snapshot naturally pauses
+ * the project at WAITING_MATERIALS. Only exact external container sources are
+ * isolated from concurrent players and automation.
  */
 internal class BuilderConstructionPlayerLeases(
     private val operationLocks: BuilderOperationLocks,
@@ -36,10 +36,8 @@ internal class BuilderConstructionPlayerLeases(
         val requested = Lease(playerId, containerBlocks)
         val existing = leaseByProject[projectId]
         if (existing != null) return existing == requested
-        if (playerId in projectByPlayer) return false
-        if (!operationLocks.tryBookLock(playerId)) return false
+        if (playerId in projectByPlayer || operationLocks.isPlayerLocked(playerId)) return false
         if (containerBlocks.isNotEmpty() && !operationLocks.tryResourceLock(projectId, containerBlocks)) {
-            operationLocks.unlockBook(playerId)
             return false
         }
 
@@ -55,7 +53,6 @@ internal class BuilderConstructionPlayerLeases(
             "Builder construction player lease indexes diverged for $projectId"
         }
         operationLocks.unlockResources(projectId)
-        operationLocks.unlockBook(lease.playerId)
     }
 
     /** Releases every currently held construction lease. Safe to repeat. */

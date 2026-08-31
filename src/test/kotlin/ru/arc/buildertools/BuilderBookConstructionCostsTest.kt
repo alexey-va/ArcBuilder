@@ -77,10 +77,11 @@ class BuilderBookConstructionCostsTest : FunSpec({
                     BuilderBlockChange(
                         BuilderBlockPos(worldId, 0, 64, 0),
                         "minecraft:air",
-                        "minecraft:pale_oak_planks",
+                        "minecraft:chest[facing=north,type=single,waterlogged=false]",
                     ),
-                    placementItem = ItemStack(Material.PALE_OAK_PLANKS),
+                    placementItem = ItemStack(Material.CHEST),
                     refund = null,
+                    lootTableKey = "minecraft:chests/spawn_bonus_chest",
                 ),
             )
 
@@ -101,6 +102,7 @@ class BuilderBookConstructionCostsTest : FunSpec({
 
             survival.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:book" to 1)
             survival.steps.single().requiredMaterial shouldBe null
+            survival.steps.single().lootTableKey shouldBe "minecraft:chests/spawn_bonus_chest"
             creative.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:book" to 1)
             creative.steps.single().requiredMaterial shouldBe null
         }

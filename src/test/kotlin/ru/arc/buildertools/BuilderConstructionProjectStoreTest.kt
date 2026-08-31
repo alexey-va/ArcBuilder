@@ -100,4 +100,33 @@ class BuilderConstructionProjectStoreTest : FunSpec({
         reloaded?.pendingResourceMutation?.sources?.single()?.before shouldBe receipt.sources.single().before
         reloaded?.pendingResourceMutation?.sources?.single()?.after shouldBe receipt.sources.single().after
     }
+
+    test("store restart preserves a reviewed chest loot-table step") {
+        val root = Files.createTempDirectory("arc-builder-construction-project-loot-")
+        val chestChange = BuilderBlockChange(
+            BuilderBlockPos(worldId, 12, 64, 12),
+            "minecraft:air",
+            "minecraft:chest[facing=north,type=single,waterlogged=false]",
+        )
+        val chestStep = BuilderConstructionStep(
+            change = chestChange,
+            requiredMaterial = null,
+            output = null,
+            lootTableKey = "minecraft:chests/spawn_bonus_chest",
+        )
+        val chestPlan = plan.copy(changes = listOf(chestChange), costs = listOf(book))
+        val project = prepared().copy(
+            projectId = chestPlan.id,
+            plan = chestPlan,
+            steps = listOf(chestStep),
+        ).validated()
+
+        BuilderConstructionProjectStore(root, maxChanges = 10_000).commit(project)
+
+        BuilderConstructionProjectStore(root, maxChanges = 10_000)
+            .loadOrNull(projectId)
+            ?.steps
+            ?.single()
+            ?.lootTableKey shouldBe "minecraft:chests/spawn_bonus_chest"
+    }
 })

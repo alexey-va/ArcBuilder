@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import com.sk89q.worldedit.bukkit.BukkitAdapter
 import org.bukkit.Bukkit
 import org.bukkit.Color
 import org.bukkit.Location
@@ -39,6 +40,36 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
     fun clearPlayer(playerId: UUID)
 }
 
+/** Keeps every small preview and turns large previews into a deterministic player-centred window. */
+internal object BuilderPreviewWindow {
+    private data class Candidate<T>(val index: Int, val value: T, val distanceSquared: Double)
+
+    fun <T> nearest(
+        values: List<T>,
+        limit: Int,
+        viewerX: Double,
+        viewerY: Double,
+        viewerZ: Double,
+        center: (T) -> Triple<Double, Double, Double>,
+    ): List<T> {
+        require(limit > 0)
+        if (values.size <= limit) return values
+        return values.mapIndexed { index, value ->
+            val (x, y, z) = center(value)
+            val dx = x - viewerX
+            val dy = y - viewerY
+            val dz = z - viewerZ
+            Candidate(index, value, dx * dx + dy * dy + dz * dz)
+        }
+            .sortedWith(
+                compareBy<Candidate<T>>(Candidate<T>::distanceSquared).thenBy(Candidate<T>::index),
+            )
+            .take(limit)
+            .sortedBy(Candidate<T>::index)
+            .map(Candidate<T>::value)
+    }
+}
+
 /** Player-only native BlockDisplay scenes; no packets, fake blocks, or particles. */
 internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
@@ -65,8 +96,11 @@ internal class BuilderBlockDisplayRenderer(
     )
 
     private data class Scene(val worldId: UUID, val signature: Int, val entities: List<Entity>)
+    private data class BookBlock(val location: Location, val blockData: BlockData)
+    private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
     private val bookSites = mutableMapOf<UUID, ConstructionSite>()
+    private val bookModels = mutableMapOf<UUID, BookModel>()
     private val bookBossBars = mutableMapOf<UUID, BossBar>()
 
     init {
@@ -76,7 +110,10 @@ internal class BuilderBlockDisplayRenderer(
         checkNotNull(
             taskScope.runTimer(0L, guidancePeriodTicks) {
                 bookSites.values.toList().forEach { site ->
-                    if (site.player.isOnline) showBookActionBar(site)
+                    if (site.player.isOnline) {
+                        renderBook(site)
+                        showBookActionBar(site)
+                    }
                 }
             },
         ) { "Builder preview guidance task scope is inactive" }
@@ -103,16 +140,17 @@ internal class BuilderBlockDisplayRenderer(
             return
         }
         val eye = player.eyeLocation
-        val visible = plan.changes.asSequence().filter { change ->
-            val dx = change.position.x + .5 - eye.x
-            val dy = change.position.y + .5 - eye.y
-            val dz = change.position.z + .5 - eye.z
-            dx * dx + dy * dy + dz * dz <= planDisplayRange * planDisplayRange
-        }.toList()
-        val step = kotlin.math.ceil(visible.size / maxPlanDisplays.toDouble()).toInt().coerceAtLeast(1)
-        val sampled = visible.asSequence().filterIndexed { index, _ -> index % step == 0 }.take(maxPlanDisplays).toList()
+        val visible = BuilderPreviewWindow.nearest(
+            values = plan.changes,
+            limit = maxPlanDisplays,
+            viewerX = eye.x,
+            viewerY = eye.y,
+            viewerZ = eye.z,
+        ) { change ->
+            Triple(change.position.x + .5, change.position.y + .5, change.position.z + .5)
+        }
         val specs = buildList {
-            sampled.forEach { change ->
+            visible.forEach { change ->
                 val after = Bukkit.createBlockData(change.afterBlockData)
                 val removal = after.material.isAir
                 add(
@@ -138,11 +176,13 @@ internal class BuilderBlockDisplayRenderer(
     override fun clearPlan(playerId: UUID) = remove(playerId, Layer.PLAN)
 
     override fun open(site: ConstructionSite) {
+        bookModels[site.player.uniqueId] = bookModel(site)
         renderBook(site)
         showBookGuidance(site, showTitle = true)
     }
 
     override fun refresh(site: ConstructionSite) {
+        bookModels[site.player.uniqueId] = bookModel(site)
         renderBook(site)
         showBookGuidance(site, showTitle = false)
     }
@@ -198,6 +238,7 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun closeBookGuidance(playerId: UUID) {
         val player = bookSites.remove(playerId)?.player ?: Bukkit.getPlayer(playerId)
+        bookModels.remove(playerId)
         bookBossBars.remove(playerId)?.let { bar -> player?.hideBossBar(bar) }
         player?.sendActionBar(Component.empty())
     }
@@ -207,26 +248,27 @@ internal class BuilderBlockDisplayRenderer(
             remove(site.player.uniqueId, Layer.BOOK)
             return
         }
+        val model = bookModels[site.player.uniqueId] ?: bookModel(site).also {
+            bookModels[site.player.uniqueId] = it
+        }
+        val eye = site.player.eyeLocation
+        val visible = BuilderPreviewWindow.nearest(
+            values = model.blocks,
+            limit = maxPlanDisplays,
+            viewerX = eye.x,
+            viewerY = eye.y,
+            viewerZ = eye.z,
+        ) { block ->
+            Triple(block.location.blockX + .5, block.location.blockY + .5, block.location.blockZ + .5)
+        }
         val specs = buildList {
-            val positions = site.relativePositionsBottomUp().mapNotNull { relative ->
-                val data = runCatching {
-                    rotateBlockData(
-                        org.bukkit.Bukkit.createBlockData(
-                            com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)).asString,
-                        ),
-                        site.fullRotation,
-                    )
-                }.getOrNull()?.takeUnless { it.material.isAir } ?: return@mapNotNull null
-                Triple(site.worldLocation(relative), relative, data)
-            }.toList()
-            val step = kotlin.math.ceil(positions.size / maxPlanDisplays.toDouble()).toInt().coerceAtLeast(1)
-            positions.asSequence().filterIndexed { index, _ -> index % step == 0 }.take(maxPlanDisplays).forEach { (location, _, data) ->
+            visible.forEach { block ->
                 add(
                     DisplaySpec(
-                        location.blockX + .04,
-                        location.blockY + .04,
-                        location.blockZ + .04,
-                        data,
+                        block.location.blockX + .04,
+                        block.location.blockY + .04,
+                        block.location.blockZ + .04,
+                        block.blockData,
                         .92f,
                         .92f,
                         .92f,
@@ -234,13 +276,34 @@ internal class BuilderBlockDisplayRenderer(
                     ),
                 )
             }
-            positions.map { (location, _, _) ->
-                BuilderBlockPos(site.world.uid, location.blockX, location.blockY, location.blockZ)
-            }.takeIf(List<*>::isNotEmpty)?.let {
+            model.bounds.takeIf(List<*>::isNotEmpty)?.let {
                 addAll(bounds(it, Material.ORANGE_STAINED_GLASS, Color.fromRGB(255, 177, 66)))
             }
         }
         replace(site.player, Layer.BOOK, specs)
+    }
+
+    private fun bookModel(site: ConstructionSite): BookModel {
+        val blocks = site.relativePositionsBottomUp().mapNotNull { relative ->
+            val data = runCatching {
+                rotateBlockData(
+                    Bukkit.createBlockData(BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)).asString),
+                    site.fullRotation,
+                )
+            }.getOrNull()?.takeUnless { it.material.isAir } ?: return@mapNotNull null
+            BookBlock(site.worldLocation(relative), data)
+        }.toList()
+        return BookModel(
+            blocks = blocks,
+            bounds = blocks.map { block ->
+                BuilderBlockPos(
+                    site.world.uid,
+                    block.location.blockX,
+                    block.location.blockY,
+                    block.location.blockZ,
+                )
+            },
+        )
     }
 
     private fun bounds(selection: BuilderSelection, material: Material, glow: Color): List<DisplaySpec> = bounds(
@@ -292,7 +355,7 @@ internal class BuilderBlockDisplayRenderer(
                     entity.isGlowing = true
                     entity.glowColorOverride = spec.glow
                     entity.brightness = Display.Brightness(15, 15)
-                    entity.viewRange = 1.0f
+                    entity.viewRange = (planDisplayRange / 64.0).toFloat()
                     entity.transformation = Transformation(
                         Vector3f(spec.translateX, spec.translateY, spec.translateZ),
                         Quaternionf(),

@@ -11,6 +11,7 @@ internal data class SystemBuildBookDefinition(
     val schematicSha256: String,
     val playerEnabled: Boolean,
     val materialsIncluded: Boolean,
+    val containerLootTableKey: String? = null,
 ) {
     fun validated(): SystemBuildBookDefinition = apply {
         require(BUILDING_ID.matches(buildingId) && '/' !in buildingId && '\\' !in buildingId && ".." !in buildingId) {
@@ -20,11 +21,17 @@ internal data class SystemBuildBookDefinition(
             "System build-book title is invalid"
         }
         require(SHA256.matches(schematicSha256)) { "System build-book schematic digest is invalid" }
+        containerLootTableKey?.let { key ->
+            require(key.length <= 256 && LOOT_TABLE_KEY.matches(key)) {
+                "System build-book container loot-table key is invalid"
+            }
+        }
     }
 
     private companion object {
         val BUILDING_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}\\.(?:schem|schematic)")
         val SHA256 = Regex("[a-f0-9]{64}")
+        val LOOT_TABLE_KEY = Regex("[a-z0-9_.-]+:[a-z0-9_./-]+")
     }
 }
 
@@ -71,7 +78,14 @@ internal class SystemBuildBookCatalog private constructor(
                         ?: throw IllegalArgumentException("System build-book digest is missing"),
                     playerEnabled = raw["player-enabled"] as? Boolean
                         ?: throw IllegalArgumentException("System build-book player-enabled flag is missing"),
-                    materialsIncluded = raw["materials-included"] as? Boolean ?: false,
+                    materialsIncluded = raw["materials-included"]?.let { value ->
+                        value as? Boolean
+                            ?: throw IllegalArgumentException("System build-book materials-included flag is invalid")
+                    } ?: false,
+                    containerLootTableKey = raw["container-loot-table"]?.let { value ->
+                        value as? String
+                            ?: throw IllegalArgumentException("System build-book container loot-table key is invalid")
+                    },
                 ).validated()
             }
             val catalog = SystemBuildBookCatalog(root, definitions)

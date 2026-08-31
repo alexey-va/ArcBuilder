@@ -67,6 +67,8 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         var outputSpace: Boolean = true,
         var outputFailure: Boolean = false,
         var applyFailureAfterMutation: Boolean = false,
+        var inputReconcileResult: BuilderResourceMutationResult = BuilderResourceMutationResult.APPLIED,
+        var lootApplied: Boolean = true,
     ) : BuilderConstructionProjectPort {
         var removed = 0
         var returned = 0
@@ -77,7 +79,13 @@ class BuilderConstructionProjectControllerTest : FunSpec({
 
         override fun currentBlockData(position: BuilderBlockPos): String = blockData
 
-        override fun canModify(playerId: UUID, change: BuilderBlockChange): Boolean = mutable
+        override fun isStepApplied(step: BuilderConstructionStep): Boolean =
+            blockData == step.change.afterBlockData && (step.lootTableKey == null || lootApplied)
+
+        override fun canModify(
+            project: BuilderConstructionProjectRecord,
+            step: BuilderConstructionStep,
+        ): Boolean = mutable
 
         override fun prepareInput(
             playerId: UUID,
@@ -101,6 +109,8 @@ class BuilderConstructionProjectControllerTest : FunSpec({
                     stored += mutation.amount.amount
                     outputApplied = true
                 }
+            } else if (inputReconcileResult != BuilderResourceMutationResult.APPLIED) {
+                return inputReconcileResult
             } else if (!inputApplied) {
                 removed += mutation.amount.amount
                 inputApplied = true
@@ -119,9 +129,10 @@ class BuilderConstructionProjectControllerTest : FunSpec({
             return BuilderResourceMutationResult.APPLIED
         }
 
-        override fun apply(project: BuilderConstructionProjectRecord, change: BuilderBlockChange) {
+        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) {
             applied += 1
-            blockData = change.afterBlockData
+            blockData = step.change.afterBlockData
+            if (step.lootTableKey != null) lootApplied = true
             if (applyFailureAfterMutation) error("CoreProtect failed after the block changed")
         }
     }
@@ -156,6 +167,20 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         port.inputAvailable = true
         BuilderConstructionProjectController.tick(result, createdAt + 4, port)?.state shouldBe
             BuilderConstructionProjectState.INPUT_PREPARED
+    }
+
+    test("inventory movement after planning pauses for a fresh material snapshot") {
+        val port = FakePort()
+        val inputPrepared = checkNotNull(BuilderConstructionProjectController.tick(active(), createdAt + 2, port))
+        inputPrepared.state shouldBe BuilderConstructionProjectState.INPUT_PREPARED
+        port.inputReconcileResult = BuilderResourceMutationResult.STALE
+
+        val paused = checkNotNull(BuilderConstructionProjectController.tick(inputPrepared, createdAt + 3, port))
+
+        paused.state shouldBe BuilderConstructionProjectState.WAITING_MATERIALS
+        paused.cursor shouldBe 0
+        port.removed shouldBe 0
+        port.applied shouldBe 0
     }
 
     test("successful step durably marks delivery before storing replacement and completing") {
@@ -235,6 +260,34 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         port.removed shouldBe 1
         port.applied shouldBe 0
         port.returned shouldBe 0
+    }
+
+    test("world-prepared replay completes a chest whose loot table was not durably applied") {
+        val chestChange = BuilderBlockChange(
+            change.position,
+            "minecraft:air",
+            "minecraft:chest[facing=north,type=single,waterlogged=false]",
+        )
+        val chestStep = BuilderConstructionStep(
+            change = chestChange,
+            requiredMaterial = null,
+            output = null,
+            lootTableKey = "minecraft:chests/spawn_bonus_chest",
+        )
+        val worldPrepared = active().copy(
+            plan = plan.copy(changes = listOf(chestChange), costs = listOf(book), rewards = emptyList()),
+            steps = listOf(chestStep),
+            state = BuilderConstructionProjectState.WORLD_PREPARED,
+            pendingResourceMutation = null,
+        ).validated()
+        val port = FakePort(blockData = chestChange.afterBlockData, lootApplied = false)
+
+        val result = BuilderConstructionProjectController.tick(worldPrepared, createdAt + 4, port)
+
+        result?.state shouldBe BuilderConstructionProjectState.COMPLETED
+        result?.cursor shouldBe 1
+        port.applied shouldBe 1
+        port.lootApplied shouldBe true
     }
 
     test("post-mutation logging failure never refunds input when the world proves the change landed") {

@@ -7,9 +7,11 @@ import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.block.data.type.Leaves
+import org.bukkit.loot.LootTable
 import org.bukkit.command.Command
 import org.bukkit.command.CommandExecutor
 import org.bukkit.command.CommandSender
@@ -78,7 +80,7 @@ internal class BuilderToolsRuntime(
     private val taskScope: LifecycleTaskScope = LifecycleTaskScope(),
     private val displayRenderer: BuilderDisplayRenderer = BuilderBlockDisplayRenderer(
         plugin,
-        config.previewMaxPlanParticles,
+        config.previewMaxPlanDisplays,
         config.previewPlanDisplayRange,
         config.previewGuidancePeriodTicks,
         config.messages(),
@@ -90,6 +92,8 @@ internal class BuilderToolsRuntime(
     private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
     private val systemBuildBookResolver: (BuildBookData) -> SystemBuildBookDefinition? =
         loadSystemBuildBookResolver(plugin, config),
+    private val lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
+    private val lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
     private val sendPlayerMessage: (Player, Component) -> Unit = { player, message -> player.sendMessage(message) },
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val messages: LocalizedMiniMessage = config.messages()
@@ -287,6 +291,16 @@ internal class BuilderToolsRuntime(
         maxCachedContainersPerProject = config.constructionMaxCachedContainersPerProject,
         maxResolvedContainersPerCall = config.constructionMaxResolvedContainersPerCall,
     )
+    private val constructionFeedbackSettings = BuilderConstructionFeedbackSettings(
+        enabled = config.constructionEffectsEnabled,
+        intervalBlocks = config.constructionEffectIntervalBlocks,
+        soundsEnabled = config.constructionSoundsEnabled,
+        soundVolume = config.constructionSoundVolume,
+        soundPitch = config.constructionSoundPitch,
+        particlesEnabled = config.constructionParticlesEnabled,
+        particleCount = config.constructionParticleCount,
+        particleSpread = config.constructionParticleSpread,
+    )
     private val constructionPort = object : BuilderConstructionProjectPort {
         override fun currentBlockData(position: BuilderBlockPos): String {
             val world = Bukkit.getWorld(position.worldId)
@@ -297,7 +311,19 @@ internal class BuilderToolsRuntime(
             return block(world, position).blockData.asString
         }
 
-        override fun canModify(playerId: UUID, change: BuilderBlockChange): Boolean {
+        override fun isStepApplied(step: BuilderConstructionStep): Boolean {
+            if (currentBlockData(step.change.position) != step.change.afterBlockData) return false
+            val rawKey = step.lootTableKey ?: return true
+            val world = Bukkit.getWorld(step.change.position.worldId) ?: return false
+            return lootTableAccess.matches(block(world, step.change.position), requiredLootTable(rawKey))
+        }
+
+        override fun canModify(
+            project: BuilderConstructionProjectRecord,
+            step: BuilderConstructionStep,
+        ): Boolean {
+            val playerId = project.playerId
+            val change = step.change
             val world = Bukkit.getWorld(change.position.worldId) ?: return false
             if (!config.allowsWorld(world.name) || !world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
                 throw BuilderConstructionTemporarilyUnavailableException()
@@ -305,7 +331,8 @@ internal class BuilderToolsRuntime(
             val target = block(world, change.position)
             if (!world.worldBorder.isInside(target.location)) return false
             val after = Bukkit.createBlockData(change.afterBlockData)
-            if (!after.material.isAir && !safety.isSafePlacement(after)) return false
+            val safeSystemContainer = step.lootTableKey != null && safety.isSafeSystemLootContainer(after)
+            if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer) return false
             val replaceable = safety.isReplaceable(target)
             if (!replaceable && !safety.isSafeExisting(target)) return false
             return HookRegistry.landsHook?.canModify(
@@ -337,7 +364,8 @@ internal class BuilderToolsRuntime(
             mutation: BuilderResourceMutation,
         ): BuilderResourceMutationResult = constructionResources.rollback(project, mutation)
 
-        override fun apply(project: BuilderConstructionProjectRecord, change: BuilderBlockChange) {
+        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) {
+            val change = step.change
             val world = Bukkit.getWorld(change.position.worldId)
                 ?: throw IllegalStateException("Builder construction world is unavailable")
             if (!world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
@@ -350,7 +378,23 @@ internal class BuilderToolsRuntime(
             val before = Bukkit.createBlockData(change.beforeBlockData)
             val after = Bukkit.createBlockData(change.afterBlockData)
             target.setBlockData(after, false)
+            step.lootTableKey?.let { lootTableKey ->
+                try {
+                    lootTableAccess.apply(target, requiredLootTable(lootTableKey))
+                } catch (failure: Throwable) {
+                    target.setBlockData(before, false)
+                    throw failure
+                }
+            }
             coreProtect?.logChange(project.playerName, target.location, before, after)
+            BuilderConstructionFeedback.play(
+                world,
+                target.location,
+                before,
+                after,
+                project.cursor,
+                constructionFeedbackSettings,
+            )
         }
     }
     private var recovering = true
@@ -847,26 +891,37 @@ internal class BuilderToolsRuntime(
         if (!BuildBookCodec.matches(book, data)) throw BuilderUserFailure("book.missing")
         if (site.building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
 
-        var skippedUnsafe = 0
-        val placements = site.relativePositionsBottomUp().mapNotNull { relative ->
+        val lootTableKey = systemDefinition?.containerLootTableKey?.also { requiredLootTable(it) }
+        val cells = site.relativePositionsBottomUp().map { relative ->
             val after = rotateBlockData(
                 BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)),
                 site.fullRotation,
             )
-            when (val placement = planBuildBookBlock(player, site.worldLocation(relative).block, after)) {
-                BuilderBookPlacementResult.Unchanged -> null
-                BuilderBookPlacementResult.SkippedUnsafe -> {
-                    skippedUnsafe += 1
-                    null
-                }
-                is BuilderBookPlacementResult.Change -> {
-                    BuilderBookPlannedChange(
-                        change = placement.block,
-                        placementItem = placement.placementItem,
-                        refund = placement.refund,
-                    )
-                }
-            }
+            val target = site.worldLocation(relative).block
+            BuilderBookPlannedCell(
+                position = BuilderBlockPos(target.world.uid, target.x, target.y, target.z),
+                after = after,
+                placement = planBuildBookBlock(
+                    player,
+                    target,
+                    after,
+                    allowSystemLootContainer = lootTableKey != null,
+                ),
+            )
+        }.toList()
+        val rejectedMultiBlocks = BuilderBookMultiBlockPolicy.rejectedPositions(cells)
+        val skippedUnsafe = cells.count { cell ->
+            cell.placement == BuilderBookPlacementResult.SkippedUnsafe ||
+                cell.position in rejectedMultiBlocks && cell.placement is BuilderBookPlacementResult.Change
+        }
+        val placements = cells.asSequence().filterNot { it.position in rejectedMultiBlocks }.mapNotNull { cell ->
+            val placement = cell.placement as? BuilderBookPlacementResult.Change ?: return@mapNotNull null
+            BuilderBookPlannedChange(
+                change = placement.block,
+                placementItem = placement.placementItem,
+                refund = placement.refund,
+                lootTableKey = lootTableKey.takeIf { safety.isSafeSystemLootContainer(cell.after) },
+            )
         }.take(config.maxChanges + 1).toList()
         requireChanges(placements.map(BuilderBookPlannedChange::change))
         val construction = BuilderBookConstructionCosts.calculate(
@@ -910,8 +965,10 @@ internal class BuilderToolsRuntime(
         player: Player,
         block: Block,
         after: org.bukkit.block.data.BlockData,
+        allowSystemLootContainer: Boolean = false,
     ): BuilderBookPlacementResult {
-        if (!after.material.isAir && !safety.isSafePlacement(after)) {
+        val safeSystemContainer = allowSystemLootContainer && safety.isSafeSystemLootContainer(after)
+        if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer) {
             return BuilderBookPlacementResult.SkippedUnsafe
         }
         if (block.blockData.asString == after.asString) return BuilderBookPlacementResult.Unchanged
@@ -1135,8 +1192,15 @@ internal class BuilderToolsRuntime(
             discardPendingPlan(player.uniqueId)
             throw BuilderUserFailure("errors.game-mode-changed")
         }
-        revalidatePlan(player, plan)
         val construction = plannedConstructionProjects[plan.id]
+        revalidatePlan(
+            player,
+            plan,
+            construction?.steps.orEmpty()
+                .asSequence()
+                .filter { it.lootTableKey != null }
+                .mapTo(mutableSetOf()) { it.change.position },
+        )
         if (buyMissing && construction != null) throw BuilderUserFailure("errors.shop-not-supported")
         if (buyMissing) {
             when (val result = shop.procure(player, plan)) {
@@ -1763,7 +1827,11 @@ internal class BuilderToolsRuntime(
 
     private fun finishOperation(operation: BuilderActiveOperation) = operationLocks.finish(operation)
 
-    private fun revalidatePlan(player: Player, plan: BuilderPlan) {
+    private fun revalidatePlan(
+        player: Player,
+        plan: BuilderPlan,
+        systemLootContainerPositions: Set<BuilderBlockPos> = emptySet(),
+    ) {
         plan.validated(config.maxChanges)
         plan.changes.forEach { change ->
             val block = block(requireWorld(change.position.worldId), change.position)
@@ -1773,7 +1841,9 @@ internal class BuilderToolsRuntime(
             if (!block.type.isAir && !safety.isSafeExisting(block) && !safety.isReplaceable(block)) {
                 throw BuilderUserFailure("errors.expired")
             }
-            if (!safety.isSafePlacement(after) && after.material !in safety.replaceable) {
+            val safeSystemContainer =
+                change.position in systemLootContainerPositions && safety.isSafeSystemLootContainer(after)
+            if (!safety.isSafePlacement(after) && !safeSystemContainer && after.material !in safety.replaceable) {
                 throw BuilderUserFailure("errors.plan-failed")
             }
         }
@@ -1905,6 +1975,15 @@ internal class BuilderToolsRuntime(
     }
 
     private fun block(world: World, position: BuilderBlockPos): Block = world.getBlockAt(position.x, position.y, position.z)
+
+    private fun requiredLootTable(rawKey: String): org.bukkit.loot.LootTable {
+        val key = checkNotNull(NamespacedKey.fromString(rawKey)) {
+            "Builder construction loot-table key is invalid"
+        }
+        return checkNotNull(lootTableResolver(key)) {
+            "Builder construction loot table is unavailable: $rawKey"
+        }
+    }
 
     private fun requireWorld(id: UUID): World = Bukkit.getWorld(id) ?: throw BuilderUserFailure("errors.world-not-allowed")
 

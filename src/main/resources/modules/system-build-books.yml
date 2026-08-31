@@ -41,6 +41,7 @@ books:
     sha256: ae1184f810e3d8979a58a2d332aeb2906c947b68fac1e6a9c7938dcd46e841fa
     player-enabled: true
     materials-included: true
+    container-loot-table: minecraft:chests/spawn_bonus_chest
   - building-id: viking2.schem
     title: Большой дом викинга
     sha256: 9237fe9b7849f0da03b4bc7fdb3c27327f0c60b23e04fac69e3ec0cde94a3848

@@ -218,6 +218,9 @@ System catalogue entries may opt into `materials-included`. Those books consume
 only their physical book and create steps without material requirements. The
 starter `viking.schem` book uses this policy. Its Sponge `Offset Y` is zero so a
 ground anchor places the house on, rather than below, the clicked surface.
+The same reviewed entry may opt ordinary chest steps into one namespaced
+vanilla `container-loot-table`; durable replay verifies both block data and the
+assigned table before advancing. Player-authored containers remain unsafe.
 See `BUILD_BOOKS.md` for the maintenance command, live shared-root contract,
 CMI kit boundary, and rollout checklist.
 
@@ -244,9 +247,9 @@ operator-tunable groups are:
 | --- | --- |
 | `enabled`, `allowed-worlds`, `storage` | Gate the module, select worlds, and select the schematic root. `enabled`/worlds/root may be overlaid by `builder-tools-runtime.yml`. |
 | `limits`, `timers` | Change caps, range, plan/clipboard/undo lifetimes, and journal retention. |
-| `construction` | Container search radius, online-inventory range, tick period, probe budget, bounded per-project container cache, and per-call resolution budget. |
+| `construction` | Container search radius, online-inventory range, tick period, probe budget, bounded per-project container cache, per-call resolution budget, and sampled sound/particle feedback. |
 | `runtime` | In-memory health refresh period, player-recovery retry period, and progress cadence. Lifecycle health-log cadence remains platform-owned. |
-| `preview` | Preview cadence/radius/particle budgets, plan display range, guidance cadence, and plan-title timings. |
+| `preview` | Preview cadence/radius, selection particle budget, nearest-block display budget, plan display range, guidance/recentering cadence, and plan-title timings. |
 | `shop` | Read-only quote and auto-buy gates/limits. |
 | `book-contracts` | Contract enablement/pricing, auction recovery retry, player-material summary limit, and MySQL settings. Contract enablement/pricing/SQL may be overlaid by the runtime file. |
 | `safety` | Lands/CoreProtect requirements and the replaceable-material allowlist. |
@@ -369,7 +372,7 @@ python3 ../arc-core/scripts/verify_consumer_architecture.py .
 
 Do not run `integrationTest`, Testcontainers, Docker, or the transitive
 integration gate locally. The production artifact is
-`build/libs/ArcBuilder-1.0.1.jar`.
+`build/libs/ArcBuilder-1.0.2.jar`.
 
 ## Adding another selection operation
 

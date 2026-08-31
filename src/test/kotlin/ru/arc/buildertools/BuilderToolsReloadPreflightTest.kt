@@ -70,6 +70,19 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         failure.message.orEmpty() shouldContain "limits.blocks-per-tick"
     }
 
+    test("reload preflight strictly validates cosmetic effect settings") {
+        val root = configRoot()
+        val path = root.resolve("modules/builder-tools.yml")
+        Files.writeString(
+            path,
+            Files.readString(path).replace("volume: 0.55", "volume: loud"),
+        )
+
+        val failure = shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+
+        failure.message.orEmpty() shouldContain "construction.effects.sounds.volume"
+    }
+
     test("invalid boolean and partial duration syntax are rejected strictly") {
         val root = configRoot()
         val path = root.resolve("modules/builder-tools.yml")
@@ -92,6 +105,8 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe true
         val merged = Config(root, "modules/builder-tools.yml")
         merged.integer("runtime.progress-every-batches") shouldBe 10
+        merged.integer("preview.max-plan-displays") shouldBe 512
+        merged.integer("construction.effects.interval-blocks") shouldBe 4
         merged.string("operator-owned-note") shouldBe "keep-me"
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe false
     }

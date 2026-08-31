@@ -102,6 +102,36 @@ class BuilderOperationLocksPlatformEventTest : FunSpec({
         }
     }
 
+    test("construction receipt lease leaves player inventory and hotbar interactive") {
+        MockBukkitTestRuntime.open().use { paper ->
+            strictPlatformScenario {
+                val fixture = LockEventFixture.create(paper, "BuilderConstructionHotbar")
+                fixture.locks.use { locks ->
+                    BuilderConstructionPlayerLeases(locks).use { leases ->
+                        val projectId = UUID.randomUUID()
+                        leases.acquire(projectId, fixture.owner.uniqueId) shouldBe true
+
+                        paper.callEvent(PlayerItemHeldEvent(fixture.owner, 0, 1)).isCancelled shouldBe false
+
+                        val view = checkNotNull(fixture.owner.openInventory(Bukkit.createInventory(null, 9)))
+                        paper.callEvent(
+                            InventoryClickEvent(
+                                view,
+                                InventoryType.SlotType.CONTAINER,
+                                0,
+                                ClickType.LEFT,
+                                InventoryAction.PICKUP_ALL,
+                            ),
+                        ).isCancelled shouldBe false
+
+                        leases.release(projectId)
+                        paper.callEvent(PlayerItemHeldEvent(fixture.owner, 1, 2)).isCancelled shouldBe false
+                    }
+                }
+            }
+        }
+    }
+
     test("locked blocks cancel break and place while unrelated blocks remain mutable") {
         MockBukkitTestRuntime.open().use { paper ->
             strictPlatformScenario {

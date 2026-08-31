@@ -47,6 +47,17 @@ System entries may set `materials-included: true`. Such a book consumes only
 itself and requires no building materials. This is intentionally enabled for
 the `kitstart` starter house.
 
+A reviewed system entry may also set `container-loot-table` to a vanilla
+namespaced loot table. Only ordinary chest steps carrying that exact catalogue
+setting bypass the general container-placement ban; player-authored and other
+system-book containers remain skipped. The starter house uses
+`minecraft:chests/spawn_bonus_chest`.
+
+The player's inventory and hotbar remain interactive while a persistent
+project builds. If an item captured for the next durable debit is moved or is
+no longer available, that step returns to `WAITING_MATERIALS` and tells the
+player to supply it in their inventory or a permitted nearby container.
+
 ## Schematic storage and origin fixes
 
 The live canonical files are under the shared Minecraft root
