@@ -68,6 +68,7 @@ internal object BuilderToolsRuntimeHealth {
             activeLeases = leases,
             schemas = buildMap {
                 put("builder_drafts", BuilderDraftRecord.CURRENT_SCHEMA_VERSION)
+                put("builder_construction", BuilderConstructionProjectRecord.CURRENT_SCHEMA_VERSION)
                 if (input.bookContractsEnabled) put("book_registry", BuilderBookSqlRegistry.CURRENT_SCHEMA_VERSION)
             },
             dependencies = linkedMapOf(

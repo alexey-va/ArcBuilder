@@ -107,6 +107,56 @@ class BuilderToolsDomainTest : FunSpec({
         BuilderToolsConfig(base, override).validated().maxClipboardBlocks shouldBe 10
     }
 
+    test("construction container scan budget is configurable inside a hard safety ceiling") {
+        val temporaryDirectory = Files.createTempDirectory("arc-builder-construction-scan-config-")
+        val base = Config(temporaryDirectory, "modules/builder-tools.yml")
+        val override = Config(temporaryDirectory, "modules/builder-tools-runtime.yml").apply {
+            setBoolean("enabled", true)
+            setStringList("allowed-worlds", listOf("*"))
+        }
+
+        base.setInt("construction.max-container-probes-per-tick", 1)
+        BuilderToolsConfig(base, override).validated().constructionMaxContainerProbesPerTick shouldBe 1
+
+        base.setInt("construction.max-container-probes-per-tick", 4_097)
+        shouldThrow<IllegalArgumentException> { BuilderToolsConfig(base, override).validated() }
+    }
+
+    test("runtime cadence and preview presentation controls reload from configuration") {
+        val temporaryDirectory = Files.createTempDirectory("arc-builder-runtime-tunables-")
+        val base = Config(temporaryDirectory, "modules/builder-tools.yml").apply {
+            setLong("runtime.health-refresh-period-ticks", 40L)
+            setLong("runtime.player-recovery-retry-period-ticks", 80L)
+            setInt("runtime.progress-every-batches", 3)
+            setDouble("preview.plan-display-range", 48.0)
+            setLong("preview.guidance-period-ticks", 15L)
+            setInt("preview.plan-title.fade-in-ticks", 2)
+            setInt("preview.plan-title.stay-ticks", 60)
+            setInt("preview.plan-title.fade-out-ticks", 4)
+            setString("book-contracts.auction-recovery-retry", "45s")
+            setInt("book-contracts.player-materials-summary-limit", 6)
+            setBoolean("safety.require-lands", true)
+        }
+        val override = Config(temporaryDirectory, "modules/builder-tools-runtime.yml").apply {
+            setBoolean("enabled", true)
+            setStringList("allowed-worlds", listOf("*"))
+        }
+
+        val configured = BuilderToolsConfig(base, override).validated()
+
+        configured.healthRefreshPeriodTicks shouldBe 40L
+        configured.playerRecoveryRetryPeriodTicks shouldBe 80L
+        configured.progressEveryBatches shouldBe 3
+        configured.previewPlanDisplayRange shouldBe 48.0
+        configured.previewGuidancePeriodTicks shouldBe 15L
+        configured.previewPlanTitleFadeInTicks shouldBe 2
+        configured.previewPlanTitleStayTicks shouldBe 60
+        configured.previewPlanTitleFadeOutTicks shouldBe 4
+        configured.bookAuctionRecoveryRetry shouldBe java.time.Duration.ofSeconds(45)
+        configured.bookPlayerMaterialsSummaryLimit shouldBe 6
+        configured.requireLands shouldBe true
+    }
+
     test("bundled policy supports survival and creative without opening spectator modes") {
         BuilderGameModePolicy.allows(GameMode.SURVIVAL) shouldBe true
         BuilderGameModePolicy.allows(GameMode.CREATIVE) shouldBe true

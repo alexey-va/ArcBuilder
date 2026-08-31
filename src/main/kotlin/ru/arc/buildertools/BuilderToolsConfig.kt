@@ -12,6 +12,7 @@ import ru.arc.sql.SqlSslMode
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Duration
+import java.nio.file.Path
 import java.util.Locale
 
 class BuilderToolsConfig(
@@ -23,6 +24,9 @@ class BuilderToolsConfig(
         get() = (runtimeOverride?.stringListOrNull("allowed-worlds") ?: config.stringList("allowed-worlds"))
             .map { it.lowercase(Locale.ROOT) }
             .toSet()
+    val schematicsRoot: String
+        get() = runtimeOverride?.stringOrNull("storage.schematics-root")
+            ?: config.string("storage.schematics-root", "schematics")
     val maxChanges: Int get() = config.integer("limits.max-changes", 4_096)
     val maxClipboardBlocks: Int get() = config.integer("limits.max-clipboard-blocks", 4_096)
     val maxScanVolume: Long get() = config.long("limits.max-scan-volume", 8_192L)
@@ -33,11 +37,31 @@ class BuilderToolsConfig(
     val constructionContainerRadius: Int get() = config.integer("construction.container-radius", 4)
     val constructionOnlineInventoryRange: Double get() = config.double("construction.online-inventory-range", 48.0)
     val constructionTickPeriod: Long get() = config.long("construction.tick-period-ticks", 1L)
+    val constructionMaxContainerProbesPerTick: Int
+        get() = config.integer("construction.max-container-probes-per-tick", 512)
+    val constructionMaxCachedContainersPerProject: Int
+        get() = config.integer(
+            "construction.max-cached-containers-per-project",
+            DEFAULT_CONSTRUCTION_MAX_CACHED_CONTAINERS_PER_PROJECT,
+        )
+    val constructionMaxResolvedContainersPerCall: Int
+        get() = config.integer(
+            "construction.max-resolved-containers-per-call",
+            DEFAULT_CONSTRUCTION_MAX_RESOLVED_CONTAINERS_PER_CALL,
+        )
+    val healthRefreshPeriodTicks: Long get() = config.long("runtime.health-refresh-period-ticks", 20L)
+    val playerRecoveryRetryPeriodTicks: Long get() = config.long("runtime.player-recovery-retry-period-ticks", 100L)
+    val progressEveryBatches: Int get() = config.integer("runtime.progress-every-batches", 10)
     val previewPeriodTicks: Long get() = config.long("preview.period-ticks", 10L)
     val previewRadius: Double get() = config.double("preview.radius", 32.0)
     val previewSpacing: Double get() = config.double("preview.outline-spacing", 0.75)
     val previewMaxSelectionParticles: Int get() = config.integer("preview.max-selection-particles", 512)
     val previewMaxPlanParticles: Int get() = config.integer("preview.max-plan-particles", 180)
+    val previewPlanDisplayRange: Double get() = config.double("preview.plan-display-range", 64.0)
+    val previewGuidancePeriodTicks: Long get() = config.long("preview.guidance-period-ticks", 20L)
+    val previewPlanTitleFadeInTicks: Int get() = config.integer("preview.plan-title.fade-in-ticks", 5)
+    val previewPlanTitleStayTicks: Int get() = config.integer("preview.plan-title.stay-ticks", 45)
+    val previewPlanTitleFadeOutTicks: Int get() = config.integer("preview.plan-title.fade-out-ticks", 10)
     val shopEnabled: Boolean get() = config.bool("shop.enabled", true)
     val shopMaxQuotedMaterials: Int get() = config.integer("shop.max-quoted-materials", 64)
     val shopMaxAutoBuyItems: Int get() = config.integer("shop.max-auto-buy-items", 4_096)
@@ -59,11 +83,15 @@ class BuilderToolsConfig(
             runtimeOverride?.stringOrNull("book-contracts.max-issue-price")
                 ?: config.string("book-contracts.max-issue-price", "50000000.00"),
         )
+    val bookAuctionRecoveryRetry: Duration
+        get() = config.duration("book-contracts.auction-recovery-retry", Duration.ofSeconds(30))
+    val bookPlayerMaterialsSummaryLimit: Int
+        get() = config.integer("book-contracts.player-materials-summary-limit", 4)
     val planTtl: Duration get() = config.duration("timers.plan-ttl", Duration.ofSeconds(30))
     val clipboardTtl: Duration get() = config.duration("timers.clipboard-ttl", Duration.ofMinutes(15))
     val undoTtl: Duration get() = config.duration("timers.undo-ttl", Duration.ofMinutes(30))
     val journalRetention: Duration get() = config.duration("timers.journal-retention", Duration.ofHours(2))
-    val requireLands: Boolean get() = false
+    val requireLands: Boolean get() = config.bool("safety.require-lands", false)
     val requireCoreProtect: Boolean get() = config.bool("safety.require-coreprotect", true)
     val replaceableMaterials: Set<String>
         get() = config.stringList("safety.replaceable-materials").map { it.uppercase(Locale.ROOT) }.toSet()
@@ -72,12 +100,16 @@ class BuilderToolsConfig(
         "*" in allowedWorlds || worldName.lowercase(Locale.ROOT) in allowedWorlds
 
     fun validated(): BuilderToolsConfig = apply {
-        if (!enabled) return@apply
-        require(allowedWorlds.isNotEmpty() && allowedWorlds.all { it == "*" || WORLD_NAME.matches(it) }) {
-            "Builder-tools allowed-worlds must contain safe world names or a wildcard"
+        if (enabled) {
+            require(allowedWorlds.isNotEmpty() && allowedWorlds.all { it == "*" || WORLD_NAME.matches(it) }) {
+                "Builder-tools allowed-worlds must contain safe world names or a wildcard"
+            }
+            require("*" !in allowedWorlds || allowedWorlds.size == 1) {
+                "Builder-tools world wildcard must be the only allowed-worlds entry"
+            }
         }
-        require("*" !in allowedWorlds || allowedWorlds.size == 1) {
-            "Builder-tools world wildcard must be the only allowed-worlds entry"
+        require(schematicsRoot.isNotBlank() && schematicsRoot.length <= 512 && schematicsRoot.none(Char::isISOControl)) {
+            "Builder-tools schematic root is invalid"
         }
         require(maxChanges in 1..BuilderPlan.ABSOLUTE_MAX_CHANGES) { "Builder-tools max-changes is invalid" }
         require(maxClipboardBlocks in 1..BuilderPlan.ABSOLUTE_MAX_CHANGES) { "Builder-tools clipboard limit is invalid" }
@@ -94,11 +126,33 @@ class BuilderToolsConfig(
             "Builder construction online inventory range is invalid"
         }
         require(constructionTickPeriod in 1L..100L) { "Builder construction tick period is invalid" }
+        require(constructionMaxContainerProbesPerTick in 1..4_096) {
+            "Builder construction container probe budget is invalid"
+        }
+        require(constructionMaxCachedContainersPerProject in 16..1_024) {
+            "Builder construction container cache limit is invalid"
+        }
+        require(constructionMaxResolvedContainersPerCall in 1..128) {
+            "Builder construction container resolution budget is invalid"
+        }
+        require(constructionMaxResolvedContainersPerCall <= constructionMaxCachedContainersPerProject) {
+            "Builder construction container resolution budget cannot exceed its cache limit"
+        }
+        require(healthRefreshPeriodTicks in 10L..1_200L) { "Builder-tools health refresh period is invalid" }
+        require(playerRecoveryRetryPeriodTicks in 20L..1_200L) { "Builder-tools recovery retry period is invalid" }
+        require(progressEveryBatches in 1..100) { "Builder-tools progress cadence is invalid" }
         require(previewPeriodTicks in 5L..40L) { "Builder-tools preview period is invalid" }
         require(previewRadius.isFinite() && previewRadius in 8.0..64.0) { "Builder-tools preview radius is invalid" }
         require(previewSpacing.isFinite() && previewSpacing in 0.25..2.0) { "Builder-tools preview spacing is invalid" }
         require(previewMaxSelectionParticles in 48..1_024) { "Builder-tools selection preview limit is invalid" }
         require(previewMaxPlanParticles in 32..512) { "Builder-tools plan preview limit is invalid" }
+        require(previewPlanDisplayRange.isFinite() && previewPlanDisplayRange in 8.0..128.0) {
+            "Builder-tools plan display range is invalid"
+        }
+        require(previewGuidancePeriodTicks in 5L..100L) { "Builder-tools preview guidance period is invalid" }
+        require(previewPlanTitleFadeInTicks in 0..100) { "Builder-tools plan title fade-in is invalid" }
+        require(previewPlanTitleStayTicks in 1..400) { "Builder-tools plan title stay is invalid" }
+        require(previewPlanTitleFadeOutTicks in 0..100) { "Builder-tools plan title fade-out is invalid" }
         require(shopMaxAutoBuyItems in 1..BuilderPlan.ABSOLUTE_MAX_ITEMS.toInt()) {
             "Builder-tools shop item limit is invalid"
         }
@@ -106,7 +160,7 @@ class BuilderToolsConfig(
         require(shopMaxAutoBuyPriceMinor in 100L..100_000_000_000L) {
             "Builder-tools shop price limit is invalid"
         }
-        if (bookContractsEnabled) {
+        if (enabled && bookContractsEnabled) {
             require(shopEnabled) { "Builder-book contracts require admin-shop pricing" }
             require(bookConstructionMarkupBasisPoints in 0..10_000) {
                 "Builder-book construction markup must be between 0 and 100 percent"
@@ -116,6 +170,12 @@ class BuilderToolsConfig(
             }
             require(bookSqlConfig().enabled) { "Builder-book contracts require MySQL" }
             bookSqlConfig().connection()
+        }
+        require(bookAuctionRecoveryRetry in Duration.ofSeconds(5)..Duration.ofMinutes(10)) {
+            "Builder-book auction recovery retry is invalid"
+        }
+        require(bookPlayerMaterialsSummaryLimit in 1..16) {
+            "Builder-book player-material summary limit is invalid"
         }
         require(planTtl in Duration.ofSeconds(10)..Duration.ofMinutes(2)) { "Builder-tools plan TTL is invalid" }
         require(clipboardTtl in Duration.ofMinutes(1)..Duration.ofHours(2)) { "Builder-tools clipboard TTL is invalid" }
@@ -179,6 +239,9 @@ class BuilderToolsConfig(
                 "errors.shop-estimate-changed",
                 "errors.shop-purchase-failed",
                 "errors.shop-purchase-ambiguous",
+                "reload.success",
+                "reload.busy",
+                "reload.failed",
                 "selection.first",
                 "selection.second",
                 "selection.complete",
@@ -342,6 +405,9 @@ class BuilderToolsConfig(
 
         fun load(): BuilderToolsConfig {
             val dataRoot = ARC.instance.dataPath
+            val base = ConfigManager.ofModule(dataRoot, "builder-tools.yml").also {
+                it.mergeMissingFromBundled(ConfigManager.bundledModuleResource("builder-tools.yml"))
+            }
             val overridePath = ConfigManager.moduleYamlPath(dataRoot, "builder-tools-runtime.yml")
             val override = if (java.nio.file.Files.isRegularFile(overridePath)) {
                 ConfigManager.ofModule(dataRoot, "builder-tools-runtime.yml")
@@ -349,9 +415,24 @@ class BuilderToolsConfig(
                 null
             }
             return BuilderToolsConfig(
-                config = ConfigManager.ofModule(dataRoot, "builder-tools.yml"),
+                config = base,
                 runtimeOverride = override,
             )
+        }
+
+        internal fun mergeBundledDefaults(dataRoot: Path): Boolean =
+            Config(dataRoot, ConfigManager.moduleYamlRelative(dataRoot, "builder-tools.yml"))
+                .mergeMissingFromBundled(ConfigManager.bundledModuleResource("builder-tools.yml"))
+
+        internal fun loadFresh(dataRoot: Path): BuilderToolsConfig {
+            val base = Config(dataRoot, ConfigManager.moduleYamlRelative(dataRoot, "builder-tools.yml"))
+            val overridePath = ConfigManager.moduleYamlPath(dataRoot, "builder-tools-runtime.yml")
+            val override = if (java.nio.file.Files.isRegularFile(overridePath)) {
+                Config(dataRoot, ConfigManager.moduleYamlRelative(dataRoot, "builder-tools-runtime.yml"))
+            } else {
+                null
+            }
+            return BuilderToolsConfig(base, override)
         }
     }
 }

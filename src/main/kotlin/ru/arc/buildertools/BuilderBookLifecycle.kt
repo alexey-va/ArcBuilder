@@ -187,6 +187,7 @@ internal class BuilderBookLifecycle(
             },
             lock = operationLocks::tryBookLock,
             unlock = operationLocks::unlockBook,
+            recoveryRetryMillis = config.bookAuctionRecoveryRetry.toMillis(),
         )
     }
     private val pendingMints = mutableMapOf<UUID, PendingMint>()
@@ -1309,7 +1310,7 @@ internal class BuilderBookLifecycle(
         requirements: List<ru.arc.autobuild.BuildBookMaterialRequirement>,
     ): Component {
         if (requirements.isEmpty()) return messages.render("book.player-materials.included", locale(player))
-        val visible = requirements.take(4)
+        val visible = requirements.take(config.bookPlayerMaterialsSummaryLimit)
         val summary = visible.map { requirement ->
             messages.literal("${requirement.amount}× ").append(
                 BuilderMaterialPresentation.label(player, requirement.material),

@@ -5,6 +5,7 @@ import net.kyori.adventure.text.Component
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.inventory.ItemStack
+import org.bukkit.inventory.meta.ItemMeta
 import org.bukkit.persistence.PersistentDataType
 import ru.arc.ARC
 import ru.arc.buildertools.BuilderCurrencyPresentation
@@ -213,8 +214,20 @@ object BuildBookSettings {
     fun customModelData(data: BuildBookData): Int =
         if (data.draft) draftCustomModelData else activeCustomModelData
 
-    fun validate() {
-        config.mergeMissingFromBundled(ConfigManager.bundledModuleResource(CONFIG_FILE))
+    fun validate() = validate(config, mergeForward = true)
+
+    internal fun mergeBundledDefaults(dataRoot: java.nio.file.Path): Boolean =
+        Config(dataRoot, ConfigManager.moduleYamlRelative(dataRoot, CONFIG_FILE))
+            .mergeMissingFromBundled(ConfigManager.bundledModuleResource(CONFIG_FILE))
+
+    internal fun validate(source: Config, mergeForward: Boolean) {
+        if (mergeForward) source.mergeMissingFromBundled(ConfigManager.bundledModuleResource(CONFIG_FILE))
+        val maxOffset = source.integer("build-book.player-copy.max-offset", 16)
+        val maxBooksPerPlayer = source.integer("build-book.player-copy.max-per-player", 24)
+        val customModelData = source.integer("build-book.player-copy.custom-model-data", 0)
+        val draftCustomModelData = source.integer("build-book.player-copy.draft-custom-model-data", customModelData)
+        val activeCustomModelData = source.integer("build-book.player-copy.active-custom-model-data", customModelData)
+        val defaultTitle = source.string("build-book.player-copy.default-name", "Моя постройка")
         require(maxOffset in 0..64) { "Build-book max-offset must be between 0 and 64" }
         require(maxBooksPerPlayer in 1..100) { "Build-book max-per-player must be between 1 and 100" }
         require(customModelData >= 0) { "Build-book custom-model-data cannot be negative" }
@@ -223,9 +236,11 @@ object BuildBookSettings {
         require(defaultTitle.isNotBlank() && defaultTitle.length <= 48 && defaultTitle.none(Char::isISOControl)) {
             "Build-book default name is invalid"
         }
-        tooltipStyle
-        REQUIRED_SCALARS.forEach { path -> require(config.stringOrNull(path) != null) { "Missing build-book text '$path'" } }
-        REQUIRED_LISTS.forEach { path -> require(config.stringListOrNull(path)?.isNotEmpty() == true) { "Missing build-book lore '$path'" } }
+        checkNotNull(NamespacedKey.fromString(source.string("build-book.tooltip-style", "lzblocks:tooltip/rare"))) {
+            "Build-book tooltip style is invalid"
+        }
+        REQUIRED_SCALARS.forEach { path -> require(source.stringOrNull(path) != null) { "Missing build-book text '$path'" } }
+        REQUIRED_LISTS.forEach { path -> require(source.stringListOrNull(path)?.isNotEmpty() == true) { "Missing build-book lore '$path'" } }
     }
 
     private val REQUIRED_SCALARS = setOf(
@@ -436,51 +451,58 @@ object BuildBookItems {
 
     fun refreshAppearance(item: ItemStack, data: BuildBookData, modelId: Int = BuildBookSettings.customModelData(data)) {
         val config = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
-        item.editMeta { meta ->
-            strip(
-                config.component("build-book.display-name", "<#d48763><bold><name>") {
-                    tag("name", Component.text(compactTitle(data.title)))
-                },
-            )?.let(meta::displayName)
-            val commonLore = config.componentList("build-book.lore") {
-                    tag("name", Component.text(data.title))
-                    tag("rotation", Component.text(data.transform.rotation))
-                    tag("offset_x", Component.text(data.transform.offsetX))
-                    tag("offset_y", Component.text(data.transform.offsetY))
-                    tag("offset_z", Component.text(data.transform.offsetZ))
-                    tag("blocks", Component.text((data.blockCount ?: "?").toString()))
-                    tag("creator", Component.text(data.creatorName ?: "RusCrafting"))
-                    tag(
-                        "state",
-                        config.component(
-                            when {
-                                data.deliveryPending -> "build-book.states.delivery-pending"
-                                data.registered -> "build-book.states.active"
-                                data.draft -> "build-book.states.draft"
-                                else -> "build-book.states.system"
-                            },
-                            "<#e6fff3>Готова",
-                        ),
+        item.editMeta { meta -> applyAppearance(meta, data, modelId, config) }
+    }
+
+    internal fun applyAppearance(
+        meta: ItemMeta,
+        data: BuildBookData,
+        modelId: Int = BuildBookSettings.customModelData(data),
+        config: Config = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml"),
+    ) {
+        strip(
+            config.component("build-book.display-name", "<#d48763><bold><name>") {
+                tag("name", Component.text(compactTitle(data.title)))
+            },
+        )?.let(meta::displayName)
+        val commonLore = config.componentList("build-book.lore") {
+            tag("name", Component.text(data.title))
+            tag("rotation", Component.text(data.transform.rotation))
+            tag("offset_x", Component.text(data.transform.offsetX))
+            tag("offset_y", Component.text(data.transform.offsetY))
+            tag("offset_z", Component.text(data.transform.offsetZ))
+            tag("blocks", Component.text((data.blockCount ?: "?").toString()))
+            tag("creator", Component.text(data.creatorName ?: "RusCrafting"))
+            tag(
+                "state",
+                config.component(
+                    when {
+                        data.deliveryPending -> "build-book.states.delivery-pending"
+                        data.registered -> "build-book.states.active"
+                        data.draft -> "build-book.states.draft"
+                        else -> "build-book.states.system"
+                    },
+                    "<#e6fff3>Готова",
+                ),
+            )
+            tag(
+                "price",
+                data.issuePriceMinor?.let { priceMinor ->
+                    BuilderCurrencyPresentation.amountWithCoin(
+                        Component.text(BuilderMoney.decimal(priceMinor).toPlainString()),
                     )
-                    tag(
-                        "price",
-                        data.issuePriceMinor?.let { priceMinor ->
-                            BuilderCurrencyPresentation.amountWithCoin(
-                                Component.text(BuilderMoney.decimal(priceMinor).toPlainString()),
-                            )
-                        } ?: config.component(
-                            if (data.draft) "build-book.price.draft" else "build-book.price.system",
-                            "<#969696>Недоступно",
-                        ),
-                    )
-                    tag("instance", Component.text(data.instanceId?.toString()?.take(8) ?: "после активации"))
-                }.mapNotNull(::strip)
-            val footer = config.componentList("build-book.footer").mapNotNull(::strip)
-            meta.lore(commonLore + playerMaterialLore(config, data) + footer)
-            @Suppress("DEPRECATION")
-            meta.setCustomModelData(modelId.takeIf { it > 0 })
-            meta.tooltipStyle = BuildBookSettings.tooltipStyle
-        }
+                } ?: config.component(
+                    if (data.draft) "build-book.price.draft" else "build-book.price.system",
+                    "<#969696>Недоступно",
+                ),
+            )
+            tag("instance", Component.text(data.instanceId?.toString()?.take(8) ?: "после активации"))
+        }.mapNotNull(::strip)
+        val footer = config.componentList("build-book.footer").mapNotNull(::strip)
+        meta.lore(commonLore + playerMaterialLore(config, data) + footer)
+        @Suppress("DEPRECATION")
+        meta.setCustomModelData(modelId.takeIf { it > 0 })
+        meta.tooltipStyle = BuildBookSettings.tooltipStyle
     }
 
     private fun playerMaterialLore(config: Config, data: BuildBookData): List<Component> {

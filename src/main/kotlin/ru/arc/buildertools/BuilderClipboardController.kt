@@ -193,6 +193,14 @@ internal class BuilderClipboardController(
 
     internal fun hasState(playerId: UUID): Boolean = playerId in clipboards
 
+    val pendingCount: Int
+        get() {
+            val now = nowMillis()
+            clipboards.entries.removeIf { (_, clipboard) -> clipboard.expiresAtMillis <= now }
+            rotationAdjustments.keys.retainAll(clipboards.keys)
+            return clipboards.size
+        }
+
     override fun close() {
         if (closed) return
         closed = true

@@ -62,6 +62,23 @@ internal object BuilderItemCodec {
         return item
     }
 
+    fun encodeStack(item: ItemStack): String {
+        require(!item.type.isAir && item.amount > 0) { "Cannot encode an empty builder-tools item stack" }
+        return Base64.getEncoder().encodeToString(native.encodeItem(item.clone()))
+    }
+
+    fun decodeStack(base64: String): ItemStack {
+        val bytes = try {
+            Base64.getDecoder().decode(base64)
+        } catch (failure: IllegalArgumentException) {
+            throw IllegalArgumentException("Builder-tools item stack payload is not Base64", failure)
+        }
+        require(bytes.size in 1..1_000_000) { "Builder-tools item stack payload is outside its decoded size bound" }
+        return native.decodeItem(bytes).also { item ->
+            require(!item.type.isAir && item.amount > 0) { "Builder-tools item stack payload is invalid" }
+        }
+    }
+
     fun aggregate(items: Iterable<ItemStack>): List<BuilderItemAmount> {
         val aggregates = mutableListOf<Pair<ItemStack, Int>>()
         items.filterNot { it.type.isAir || it.amount <= 0 }.forEach { input ->

@@ -77,6 +77,7 @@ placeholders:
   progress: '67'
   purchased: '48'
   radius: '6'
+  reason: 'limits.blocks-per-tick: значение должно быть от 1 до 256'
   required: '32× дубовых досок, 16× стекла'
   reward: '12 глубинного сланца'
   rotation: '90'
@@ -156,7 +157,7 @@ surfaces:
         - autobuild:build-book.footer
       placeholders:
         state: Бесплатный черновик
-        price: после проверки
+        price: после расчёта
     - id: active-build-book
       material: BOOK
       itemsadder: arc:builder_book_active

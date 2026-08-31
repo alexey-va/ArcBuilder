@@ -30,6 +30,9 @@ internal object BuilderPermissionPolicy {
             BuilderFeature.entries.any { feature -> canUse(feature, hasPermission) } ||
             bookEntryPermissions.any(hasPermission)
 
+    fun canUseBook(hasPermission: (String) -> Boolean): Boolean =
+        hasPermission(umbrellaPermission) || bookEntryPermissions.any(hasPermission)
+
     fun canUse(feature: BuilderFeature, hasPermission: (String) -> Boolean): Boolean =
         hasPermission(umbrellaPermission) || hasPermission(feature.canonicalPermission)
 

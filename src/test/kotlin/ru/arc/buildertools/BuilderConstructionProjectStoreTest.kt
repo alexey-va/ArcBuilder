@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import java.nio.file.Files
+import java.util.Base64
 import java.util.UUID
 
 class BuilderConstructionProjectStoreTest : FunSpec({
@@ -43,6 +44,20 @@ class BuilderConstructionProjectStoreTest : FunSpec({
         updatedAtMillis = createdAt,
     ).validated()
 
+    fun bookDebitReceipt() = BuilderResourceMutation(
+        amount = book,
+        insert = false,
+        sources = listOf(
+            BuilderResourceInventoryMutation(
+                kind = BuilderResourceSourceKind.PLAYER,
+                playerId = playerId,
+                requireNearProject = false,
+                before = listOf(Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3))),
+                after = listOf(null),
+            ),
+        ),
+    ).validated(playerId)
+
     test("store durably resumes a waiting project after restart") {
         val root = Files.createTempDirectory("arc-builder-construction-project-")
         val first = BuilderConstructionProjectStore(root, maxChanges = 10_000)
@@ -69,5 +84,20 @@ class BuilderConstructionProjectStoreTest : FunSpec({
         shouldThrow<IllegalArgumentException> {
             store.commit(prepared)
         }
+    }
+
+    test("store restart preserves the complete pending resource receipt") {
+        val root = Files.createTempDirectory("arc-builder-construction-project-receipt-")
+        val store = BuilderConstructionProjectStore(root, maxChanges = 10_000)
+        val receipt = bookDebitReceipt()
+        val prepared = prepared().activationPrepared(receipt)
+
+        val committed = store.commit(prepared)
+        val reloaded = BuilderConstructionProjectStore(root, maxChanges = 10_000).loadOrNull(projectId)
+
+        reloaded shouldBe committed
+        reloaded?.pendingResourceMutation shouldBe receipt
+        reloaded?.pendingResourceMutation?.sources?.single()?.before shouldBe receipt.sources.single().before
+        reloaded?.pendingResourceMutation?.sources?.single()?.after shouldBe receipt.sources.single().after
     }
 })

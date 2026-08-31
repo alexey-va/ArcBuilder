@@ -57,7 +57,13 @@ object BuildingManager {
         return removed
     }
 
+    internal fun clearPreviews() {
+        previews.keys.toList().forEach(::closePreview)
+    }
+
     internal fun pending(playerId: UUID): ConstructionSite? = previews[playerId]
+
+    internal val pendingCount: Int get() = previews.size
 
     @JvmStatic fun rotationFromYaw(yaw: Float): Int {
         val adjusted = (((yaw + 180f) % 360f) + 360f) % 360f

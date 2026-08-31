@@ -11,6 +11,8 @@ internal enum class BuilderConstructionProjectState(val terminal: Boolean) {
     PREPARED(false),
     ACTIVE(false),
     WAITING_MATERIALS(false),
+    INPUT_PREPARED(false),
+    WORLD_PREPARED(false),
     WAITING_OUTPUT_SPACE(false),
     DELIVERING_OUTPUT(false),
     RECOVERY_REQUIRED(false),
@@ -41,6 +43,7 @@ internal data class BuilderConstructionProjectRecord(
     val state: BuilderConstructionProjectState,
     val cursor: Int,
     val pendingOutput: BuilderItemAmount? = null,
+    val pendingResourceMutation: BuilderResourceMutation? = null,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
     val completedAtMillis: Long? = null,
@@ -91,23 +94,72 @@ internal data class BuilderConstructionProjectRecord(
             "Builder construction project pending output does not match its state"
         }
         pendingOutput?.validated()
+        pendingResourceMutation?.validated(playerId)?.sources
+            ?.flatMap(BuilderResourceInventoryMutation::containerBlocks)
+            ?.forEach { position ->
+                require(position.worldId == steps.first().change.position.worldId) {
+                    "Builder construction resource receipt crosses the project world"
+                }
+            }
         when (state) {
-            BuilderConstructionProjectState.PREPARED -> require(cursor == 0) {
-                "A prepared builder construction project must start at its first step"
+            BuilderConstructionProjectState.PREPARED -> {
+                require(cursor == 0) { "A prepared builder construction project must start at its first step" }
+                pendingResourceMutation?.let { mutation ->
+                    require(!mutation.insert && mutation.amount == bookCost) {
+                        "A prepared builder construction project must debit its exact book"
+                    }
+                    require(
+                        mutation.sources.size == 1 &&
+                            mutation.sources.single().kind == BuilderResourceSourceKind.PLAYER &&
+                            !mutation.sources.single().requireNearProject,
+                    ) { "A prepared builder construction project requires one unrestricted player receipt" }
+                }
+            }
+            BuilderConstructionProjectState.INPUT_PREPARED -> {
+                pendingResourceMutation?.let { mutation ->
+                    require(!mutation.insert && mutation.amount == steps[cursor].requiredMaterial) {
+                        "Builder construction input receipt does not match its step"
+                    }
+                }
+            }
+            BuilderConstructionProjectState.WORLD_PREPARED -> {
+                val input = steps[cursor].requiredMaterial
+                val mutation = pendingResourceMutation
+                if (mutation != null) {
+                    require(input != null && !mutation.insert && mutation.amount == input) {
+                        "Builder construction world-prepared receipt does not match its step"
+                    }
+                }
+            }
+            BuilderConstructionProjectState.DELIVERING_OUTPUT -> {
+                pendingResourceMutation?.let { mutation ->
+                    require(mutation.insert && mutation.amount == pendingOutput) {
+                        "Builder construction output receipt does not match its step"
+                    }
+                }
             }
             BuilderConstructionProjectState.COMPLETED -> require(cursor == steps.size) {
                 "A completed builder construction project must finish every step"
             }
-            else -> require(cursor < steps.size) {
-                "A non-completed builder construction project cannot be past its final step"
+            else -> {
+                require(cursor < steps.size) { "A non-completed builder construction project cannot be past its final step" }
+                if (state != BuilderConstructionProjectState.RECOVERY_REQUIRED) {
+                    require(pendingResourceMutation == null) {
+                        "Builder construction project retained an unexpected resource receipt"
+                    }
+                }
             }
         }
     }
+
+    fun activationPrepared(mutation: BuilderResourceMutation): BuilderConstructionProjectRecord =
+        copy(pendingResourceMutation = mutation.validated(playerId)).validated()
 
     fun activated(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
         copy(
             state = BuilderConstructionProjectState.ACTIVE,
             pendingOutput = null,
+            pendingResourceMutation = null,
             updatedAtMillis = nowMillis,
         ),
     )
@@ -115,6 +167,24 @@ internal data class BuilderConstructionProjectRecord(
     fun waitingForMaterials(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
         copy(
             state = BuilderConstructionProjectState.WAITING_MATERIALS,
+            pendingOutput = null,
+            pendingResourceMutation = null,
+            updatedAtMillis = nowMillis,
+        ),
+    )
+
+    fun inputPrepared(mutation: BuilderResourceMutation, nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+        copy(
+            state = BuilderConstructionProjectState.INPUT_PREPARED,
+            pendingOutput = null,
+            pendingResourceMutation = mutation.validated(playerId),
+            updatedAtMillis = nowMillis,
+        ),
+    )
+
+    fun worldPrepared(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+        copy(
+            state = BuilderConstructionProjectState.WORLD_PREPARED,
             pendingOutput = null,
             updatedAtMillis = nowMillis,
         ),
@@ -124,13 +194,15 @@ internal data class BuilderConstructionProjectRecord(
         copy(
             state = BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
             pendingOutput = output.validated(),
+            pendingResourceMutation = null,
             updatedAtMillis = nowMillis,
         ),
     )
 
-    fun deliveringOutput(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+    fun deliveringOutput(mutation: BuilderResourceMutation, nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
         copy(
             state = BuilderConstructionProjectState.DELIVERING_OUTPUT,
+            pendingResourceMutation = mutation.validated(playerId),
             updatedAtMillis = nowMillis,
         ),
     )
@@ -151,6 +223,7 @@ internal data class BuilderConstructionProjectRecord(
         copy(
             state = BuilderConstructionProjectState.CANCELLED,
             pendingOutput = null,
+            pendingResourceMutation = null,
             updatedAtMillis = nowMillis,
             completedAtMillis = nowMillis,
         ),
@@ -168,6 +241,7 @@ internal data class BuilderConstructionProjectRecord(
                 },
                 cursor = nextCursor,
                 pendingOutput = null,
+                pendingResourceMutation = null,
                 updatedAtMillis = nowMillis,
                 completedAtMillis = nowMillis.takeIf { completed },
             ),
@@ -215,13 +289,28 @@ internal object BuilderConstructionProjectTransitionRules {
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.ACTIVE ->
-                after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
+                after.state == BuilderConstructionProjectState.INPUT_PREPARED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.WORLD_PREPARED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
                     after.state == BuilderConstructionProjectState.WAITING_MATERIALS && sameCursor ||
                     after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.WAITING_MATERIALS ->
+                after.state == BuilderConstructionProjectState.INPUT_PREPARED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.WORLD_PREPARED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
+                    after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
+                    after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
+                    after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
+            BuilderConstructionProjectState.INPUT_PREPARED ->
+                after.state == BuilderConstructionProjectState.WORLD_PREPARED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.WAITING_MATERIALS && sameCursor ||
+                    after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
+            BuilderConstructionProjectState.WORLD_PREPARED ->
                 after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
                     after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
@@ -285,7 +374,20 @@ internal class BuilderConstructionProjectStore(
         require(journal.loadOrNull(checked.projectId.toString()) == null) {
             "Builder construction project already exists"
         }
-        return journal.commit(checked.projectId.toString(), checked)
+        return try {
+            journal.commit(checked.projectId.toString(), checked)
+        } catch (commitFailure: Throwable) {
+            val afterFailure = try {
+                journal.loadOrNull(checked.projectId.toString())
+            } catch (readFailure: Throwable) {
+                throw BuilderConstructionProjectUnknownOutcomeException(commitFailure, readFailure)
+            }
+            when (afterFailure) {
+                checked -> checked
+                null -> throw BuilderConstructionProjectTransitionRejectedException(commitFailure)
+                else -> throw BuilderConstructionProjectUnknownOutcomeException(commitFailure)
+            }
+        }
     }
 
     @Synchronized
@@ -338,28 +440,71 @@ internal interface BuilderConstructionProjectPort {
 
     fun canModify(playerId: UUID, change: BuilderBlockChange): Boolean
 
-    fun removeInput(
+    fun prepareInput(
         playerId: UUID,
         project: BuilderConstructionProjectRecord,
         input: BuilderItemAmount,
-    ): Boolean
+    ): BuilderResourceMutation?
 
-    fun returnInput(
-        playerId: UUID,
-        project: BuilderConstructionProjectRecord,
-        input: BuilderItemAmount,
-    ): Boolean
-
-    fun storeOutput(
+    fun prepareOutput(
         playerId: UUID,
         project: BuilderConstructionProjectRecord,
         output: BuilderItemAmount,
-    ): Boolean
+    ): BuilderResourceMutation?
+
+    fun reconcileResource(
+        project: BuilderConstructionProjectRecord,
+        mutation: BuilderResourceMutation,
+    ): BuilderResourceMutationResult
+
+    fun rollbackResource(
+        project: BuilderConstructionProjectRecord,
+        mutation: BuilderResourceMutation,
+    ): BuilderResourceMutationResult
 
     fun apply(project: BuilderConstructionProjectRecord, change: BuilderBlockChange)
 }
 
 internal class BuilderConstructionTemporarilyUnavailableException : RuntimeException()
+
+internal object BuilderConstructionRecoveryPolicy {
+    fun normalizeLoaded(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+    ): BuilderConstructionProjectRecord = when {
+        record.state == BuilderConstructionProjectState.PREPARED && record.pendingResourceMutation == null ->
+            record.recoveryRequired(nowMillis)
+        record.state == BuilderConstructionProjectState.INPUT_PREPARED && record.pendingResourceMutation == null ->
+            record.recoveryRequired(nowMillis)
+        record.state == BuilderConstructionProjectState.WORLD_PREPARED &&
+            record.steps[record.cursor].requiredMaterial != null && record.pendingResourceMutation == null ->
+            record.recoveryRequired(nowMillis)
+        record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT && record.pendingResourceMutation == null ->
+            record.recoveryRequired(nowMillis)
+        else -> record
+    }
+}
+
+internal object BuilderConstructionTransitionFailurePolicy {
+    /** A confirmed write rejection must never cause an already-run value mutation to be retried. */
+    fun requiresRecovery(
+        expected: BuilderConstructionProjectRecord,
+        target: BuilderConstructionProjectRecord,
+    ): Boolean = when (expected.state) {
+        BuilderConstructionProjectState.PREPARED ->
+            target.state == BuilderConstructionProjectState.ACTIVE
+        BuilderConstructionProjectState.INPUT_PREPARED ->
+            target.state == BuilderConstructionProjectState.WORLD_PREPARED
+        BuilderConstructionProjectState.WORLD_PREPARED ->
+            target.state == BuilderConstructionProjectState.ACTIVE ||
+                target.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
+                target.state == BuilderConstructionProjectState.COMPLETED
+        BuilderConstructionProjectState.DELIVERING_OUTPUT ->
+            target.state == BuilderConstructionProjectState.ACTIVE ||
+                target.state == BuilderConstructionProjectState.COMPLETED
+        else -> false
+    }
+}
 
 internal object BuilderConstructionProjectController {
     /**
@@ -373,15 +518,31 @@ internal object BuilderConstructionProjectController {
     ): BuilderConstructionProjectRecord? {
         val current = record.validated()
         return when (current.state) {
-            BuilderConstructionProjectState.PREPARED,
             BuilderConstructionProjectState.RECOVERY_REQUIRED,
             BuilderConstructionProjectState.COMPLETED,
             BuilderConstructionProjectState.CANCELLED,
             -> null
-            BuilderConstructionProjectState.WAITING_MATERIALS -> processStep(current, nowMillis, port)
-            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE -> current.deliveringOutput(nowMillis)
+            BuilderConstructionProjectState.PREPARED -> activate(current, nowMillis, port)
+            BuilderConstructionProjectState.WAITING_MATERIALS -> prepareStep(current, nowMillis, port)
+            BuilderConstructionProjectState.INPUT_PREPARED -> debitInput(current, nowMillis, port)
+            BuilderConstructionProjectState.WORLD_PREPARED -> applyWorld(current, nowMillis, port)
+            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE -> prepareOutput(current, nowMillis, port)
             BuilderConstructionProjectState.DELIVERING_OUTPUT -> deliverOutput(current, nowMillis, port)
-            BuilderConstructionProjectState.ACTIVE -> processStep(current, nowMillis, port)
+            BuilderConstructionProjectState.ACTIVE -> prepareStep(current, nowMillis, port)
+        }
+    }
+
+    private fun activate(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+    ): BuilderConstructionProjectRecord? {
+        val mutation = record.pendingResourceMutation ?: return record.recoveryRequired(nowMillis)
+        return when (reconcileResource(record, mutation, port)) {
+            BuilderResourceMutationResult.APPLIED -> record.activated(nowMillis)
+            BuilderResourceMutationResult.RETRY -> null
+            BuilderResourceMutationResult.STALE -> record.cancelled(nowMillis)
+            BuilderResourceMutationResult.CONFLICT -> record.recoveryRequired(nowMillis)
         }
     }
 
@@ -396,19 +557,30 @@ internal object BuilderConstructionProjectController {
             false -> return record.recoveryRequired(nowMillis)
             true -> Unit
         }
-        val output = checkNotNull(record.pendingOutput)
-        return try {
-            if (port.storeOutput(record.playerId, record, output)) {
-                record.outputDelivered(nowMillis)
-            } else {
-                record.waitingForOutput(output, nowMillis)
-            }
-        } catch (_: Throwable) {
-            record.recoveryRequired(nowMillis)
+        val mutation = record.pendingResourceMutation ?: return record.recoveryRequired(nowMillis)
+        return when (reconcileResource(record, mutation, port)) {
+            BuilderResourceMutationResult.APPLIED -> record.outputDelivered(nowMillis)
+            BuilderResourceMutationResult.RETRY -> null
+            BuilderResourceMutationResult.STALE -> record.waitingForOutput(checkNotNull(record.pendingOutput), nowMillis)
+            BuilderResourceMutationResult.CONFLICT -> record.recoveryRequired(nowMillis)
         }
     }
 
-    private fun processStep(
+    private fun prepareOutput(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+    ): BuilderConstructionProjectRecord? {
+        val output = checkNotNull(record.pendingOutput)
+        val mutation = try {
+            port.prepareOutput(record.playerId, record, output)
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+        return record.deliveringOutput(mutation, nowMillis)
+    }
+
+    private fun prepareStep(
         record: BuilderConstructionProjectRecord,
         nowMillis: Long,
         port: BuilderConstructionProjectPort,
@@ -425,28 +597,107 @@ internal object BuilderConstructionProjectController {
             true -> Unit
         }
         val input = step.requiredMaterial
-        if (input != null) {
-            val removed = try {
-                port.removeInput(record.playerId, record, input)
-            } catch (_: Throwable) {
-                false
+        if (input == null) return record.worldPrepared(nowMillis)
+        val mutation = try {
+            port.prepareInput(record.playerId, record, input)
+        } catch (_: Throwable) {
+            null
+        }
+        if (mutation != null) return record.inputPrepared(mutation, nowMillis)
+        return if (record.state == BuilderConstructionProjectState.WAITING_MATERIALS) {
+            null
+        } else {
+            record.waitingForMaterials(nowMillis)
+        }
+    }
+
+    private fun debitInput(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+    ): BuilderConstructionProjectRecord? {
+        val step = record.steps[record.cursor]
+        when (worldMatchesBefore(step, port)) {
+            null -> return null
+            false -> return record.recoveryRequired(nowMillis)
+            true -> Unit
+        }
+        when (canModify(record, step, port)) {
+            null -> return null
+            false -> return record.recoveryRequired(nowMillis)
+            true -> Unit
+        }
+        val mutation = record.pendingResourceMutation ?: return record.recoveryRequired(nowMillis)
+        return when (reconcileResource(record, mutation, port)) {
+            BuilderResourceMutationResult.APPLIED -> record.worldPrepared(nowMillis)
+            BuilderResourceMutationResult.RETRY -> null
+            BuilderResourceMutationResult.STALE -> record.waitingForMaterials(nowMillis)
+            BuilderResourceMutationResult.CONFLICT -> record.recoveryRequired(nowMillis)
+        }
+    }
+
+    private fun applyWorld(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+    ): BuilderConstructionProjectRecord? {
+        val step = record.steps[record.cursor]
+        val before = worldMatchesBefore(step, port)
+        if (before == null) return null
+        if (before) {
+            when (canModify(record, step, port)) {
+                null -> return null
+                false -> return compensateOrRecover(record, step, nowMillis, port)
+                true -> Unit
             }
-            if (!removed) {
-                return if (record.state == BuilderConstructionProjectState.WAITING_MATERIALS) {
-                    null
-                } else {
-                    record.waitingForMaterials(nowMillis)
-                }
+        } else {
+            when (worldMatchesAfter(step, port)) {
+                null -> return null
+                false -> return record.recoveryRequired(nowMillis)
+                true -> return appliedStep(record, step, nowMillis)
             }
         }
         try {
             port.apply(record, step.change)
         } catch (_: Throwable) {
-            input?.let { runCatching { port.returnInput(record.playerId, record, it) } }
-            return record.recoveryRequired(nowMillis)
+            return when (worldMatchesAfter(step, port)) {
+                true -> appliedStep(record, step, nowMillis)
+                false -> compensateOrRecover(record, step, nowMillis, port)
+                null -> record.recoveryRequired(nowMillis)
+            }
         }
+        return appliedStep(record, step, nowMillis)
+    }
+
+    private fun appliedStep(
+        record: BuilderConstructionProjectRecord,
+        step: BuilderConstructionStep,
+        nowMillis: Long,
+    ): BuilderConstructionProjectRecord {
         val output = step.output ?: return record.advanced(nowMillis)
         return record.waitingForOutput(output, nowMillis)
+    }
+
+    private fun compensateOrRecover(
+        record: BuilderConstructionProjectRecord,
+        step: BuilderConstructionStep,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+    ): BuilderConstructionProjectRecord {
+        record.pendingResourceMutation?.let { mutation ->
+            runCatching { port.rollbackResource(record, mutation) }
+        }
+        return record.recoveryRequired(nowMillis)
+    }
+
+    private fun reconcileResource(
+        record: BuilderConstructionProjectRecord,
+        mutation: BuilderResourceMutation,
+        port: BuilderConstructionProjectPort,
+    ): BuilderResourceMutationResult = try {
+        port.reconcileResource(record, mutation)
+    } catch (_: Throwable) {
+        BuilderResourceMutationResult.CONFLICT
     }
 
     private fun worldMatchesBefore(
@@ -457,7 +708,7 @@ internal object BuilderConstructionProjectController {
     } catch (_: BuilderConstructionTemporarilyUnavailableException) {
         null
     } catch (_: Throwable) {
-        false
+        null
     }
 
     private fun worldMatchesAfter(
@@ -468,7 +719,7 @@ internal object BuilderConstructionProjectController {
     } catch (_: BuilderConstructionTemporarilyUnavailableException) {
         null
     } catch (_: Throwable) {
-        false
+        null
     }
 
     private fun canModify(

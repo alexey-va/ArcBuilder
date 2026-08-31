@@ -59,6 +59,20 @@ class BuilderConstructionProjectDomainTest : FunSpec({
         updatedAtMillis = createdAt,
     ).validated()
 
+    fun mutation(amount: BuilderItemAmount, insert: Boolean) = BuilderResourceMutation(
+        amount = amount,
+        insert = insert,
+        sources = listOf(
+            BuilderResourceInventoryMutation(
+                kind = BuilderResourceSourceKind.PLAYER,
+                playerId = playerId,
+                requireNearProject = true,
+                before = listOf(if (insert) null else "AAAA"),
+                after = listOf(if (insert) "DDDD" else null),
+            ),
+        ),
+    ).validated(playerId)
+
     test("project advances one durable step at a time and completes on the final step") {
         val active = prepared().activated(createdAt + 1)
         val afterFirst = active.advanced(createdAt + 2)
@@ -77,7 +91,7 @@ class BuilderConstructionProjectDomainTest : FunSpec({
         val active = prepared().activated(createdAt + 1)
         val waitingMaterial = active.waitingForMaterials(createdAt + 2)
         val waitingOutput = active.waitingForOutput(refund, createdAt + 4)
-        val delivering = waitingOutput.deliveringOutput(createdAt + 5)
+        val delivering = waitingOutput.deliveringOutput(mutation(refund, insert = true), createdAt + 5)
         val delivered = delivering.outputDelivered(createdAt + 6)
 
         waitingMaterial.cursor shouldBe 0

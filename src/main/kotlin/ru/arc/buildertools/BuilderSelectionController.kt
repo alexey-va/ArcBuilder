@@ -28,6 +28,8 @@ internal class BuilderSelectionController(
 
     private val drafts = mutableMapOf<UUID, Draft>()
 
+    val pendingCount: Int get() = drafts.size
+
     init {
         require(previewRadius > 0.0 && previewRadius.isFinite()) { "Selection preview radius must be positive" }
         require(previewSpacing > 0.0 && previewSpacing.isFinite()) { "Selection preview spacing must be positive" }

@@ -118,10 +118,10 @@ class BuildBookTest : TestBase() {
         val plainText = PlainTextComponentSerializer.plainText()
         val draftLore = draftItem.itemMeta.lore().orEmpty().map(plainText::serialize)
         val registeredLore = registeredItem.itemMeta.lore().orEmpty().map(plainText::serialize)
-        assertTrue(draftLore.any { it.contains("Цена новой копии: после проверки") })
+        assertTrue(draftLore.any { it.contains("Цена новой копии: после расчёта") })
         assertTrue(registeredLore.any { it.contains("Цена новой копии: 123.45 💰") })
-        assertTrue(registeredLore.any { it.contains("При строительстве монеты не списываются") })
-        assertTrue(registeredLore.any { it.contains("Принести с собой") })
+        assertTrue(registeredLore.any { it.contains("При строительстве: монеты не списываются") })
+        assertTrue(registeredLore.any { it.contains("Принести для строительства") })
         assertTrue(registeredLore.any { it.contains("32×") })
         assertTrue(registeredLore.any { it.contains("64×") })
         val coinGlyphs = registeredItem.itemMeta.lore().orEmpty()
@@ -129,7 +129,11 @@ class BuildBookTest : TestBase() {
             .filter { component -> component.content() == "💰" }
         assertEquals(1, coinGlyphs.size)
         assertTrue(coinGlyphs.all { component -> component.color() == NamedTextColor.WHITE })
-        assertEquals(NamespacedKey.fromString("lzblocks:tooltip/rare"), registeredItem.itemMeta.tooltipStyle)
+        // MockBukkit 4.116.3 omits tooltipStyle when its ItemMeta copy constructor runs after editMeta.
+        // Exercise the same production decorator directly so the assertion remains strict and is not skipped.
+        val appearanceMeta = ItemStack(Material.BOOK).itemMeta
+        BuildBookItems.applyAppearance(appearanceMeta, registered)
+        assertEquals(NamespacedKey.fromString("lzblocks:tooltip/rare"), appearanceMeta.tooltipStyle)
     }
 
     @Test

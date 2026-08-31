@@ -52,6 +52,11 @@ The existing schematic library remains at `plugins/ARC/schematics/` through the
 configured `../ARC/schematics` path. ARC must not contain Builder classes,
 commands, listeners, permissions, or module configs after migration.
 
+For the complete operator key inventory and the safe `/builder reload` runbook
+(runtime overlays, transactional preflight, active-state drain, enabled/disabled
+transitions, and fail-closed rollback), see
+[Operator configuration and reload](ARCHITECTURE.md#operator-configuration-and-reload).
+
 ## Build
 
 ```bash

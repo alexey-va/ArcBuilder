@@ -50,6 +50,8 @@ class BuilderToolsExperienceTest : FunSpec({
         BuilderProgressCadence.shouldRender(9, completed = false) shouldBe false
         BuilderProgressCadence.shouldRender(10, completed = false) shouldBe true
         BuilderProgressCadence.shouldRender(11, completed = true) shouldBe true
+        BuilderProgressCadence.shouldRender(3, completed = false, everyBatches = 3) shouldBe true
+        BuilderProgressCadence.shouldRender(4, completed = false, everyBatches = 3) shouldBe false
     }
 
     test("operation progress rejects impossible batch numbers") {

@@ -28,6 +28,17 @@ construction:
   # An online owner's inventory participates only while they remain near the site.
   online-inventory-range: 48
   tick-period-ticks: 1
+  # Hard cap for container coordinates inspected by one project tick.
+  max-container-probes-per-tick: 512
+  # Per-project cache and per-call resolution caps keep dense storage areas bounded.
+  max-cached-containers-per-project: 256
+  max-resolved-containers-per-call: 32
+
+runtime:
+  # Refreshes the in-memory builder contribution; lifecycle health logging remains platform-owned.
+  health-refresh-period-ticks: 20
+  player-recovery-retry-period-ticks: 100
+  progress-every-batches: 10
 
 preview:
   # Refresh twice per second, matching the persistent feel of the old Denizen outline.
@@ -36,6 +47,12 @@ preview:
   outline-spacing: 0.75
   max-selection-particles: 512
   max-plan-particles: 180
+  plan-display-range: 64
+  guidance-period-ticks: 20
+  plan-title:
+    fade-in-ticks: 5
+    stay-ticks: 45
+    fade-out-ticks: 10
 
 # Read-only estimates and explicit procurement through EconomyShopGUI Premium.
 # A normal /builder confirm never spends money.
@@ -51,6 +68,8 @@ book-contracts:
   enabled: false
   construction-markup-percent: '15.00'
   max-issue-price: '50000000.00'
+  auction-recovery-retry: 30s
+  player-materials-summary-limit: 4
   mysql:
     enabled: false
     host: 127.0.0.1
@@ -69,6 +88,7 @@ book-contracts:
       max-lifetime-ms: 1700000
 
 safety:
+  require-lands: false
   require-coreprotect: true
   # Fill replaces only this expendable set; paste may also replace ordinary safe blocks.
   replaceable-materials:
@@ -202,6 +222,16 @@ locales:
         <prefix><#c42323>Админшоп не подтвердил покупку.
         <#8c8c8c>   <#e6fff3>Материал: <#d48763><material>
         <#8c8c8c>   <#969696>Мир не изменён; выданные предметы уже у вас.
+    reload:
+      success: "<prefix><#2bba43>Конфигурация ArcBuilder применена без перезапуска."
+      busy: |-
+
+        <prefix><#ff9f0f>Сейчас конфигурацию применить нельзя.
+        <#8c8c8c>   <#e6fff3>Дождитесь завершения операции и повторите команду.
+      failed: |-
+
+        <prefix><#c42323>Конфигурация не применена.
+        <#8c8c8c>   <#969696><reason>
     selection:
       first: |-
 
@@ -664,6 +694,8 @@ locales:
         prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
         active: "<hover:show_text:'Стройка обрабатывает блоки по одному.'>строится</hover>"
         waiting_materials: "<hover:show_text:'Следующий блок ждёт нужный ресурс в инвентаре или доступном сундуке.'>ждёт материалы</hover>"
+        input_prepared: "<hover:show_text:'Шаг записан до безопасного списания материала.'>подтверждает материал</hover>"
+        world_prepared: "<hover:show_text:'Списание подтверждено; блок применяется идемпотентно.'>применяет блок</hover>"
         waiting_output_space: "<hover:show_text:'Некуда положить предмет, полученный со снятого блока.'>ждёт свободное место</hover>"
         delivering_output: "<hover:show_text:'Предмет со снятого блока сохраняется в доступный сундук или инвентарь.'>складывает блоки</hover>"
         recovery_required: "<hover:show_text:'Мир или права изменились; продолжение требует проверки администратора.'>нужна проверка</hover>"
@@ -805,6 +837,16 @@ locales:
         <prefix><red>The shop did not confirm the purchase.
         <dark_gray>   <gray>Material: <white><material>
         <dark_gray>   <gray>Nothing changed; delivered items remain yours.
+    reload:
+      success: "<prefix><green>ArcBuilder configuration applied without a restart."
+      busy: |-
+
+        <prefix><yellow>The configuration cannot be applied right now.
+        <dark_gray>   <gray>Wait for the active operation to finish and try again.
+      failed: |-
+
+        <prefix><red>The configuration was not applied.
+        <dark_gray>   <gray><reason>
     selection:
       first: |-
 
@@ -1245,6 +1287,8 @@ locales:
         prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"
         active: "<hover:show_text:'The project is processing one block at a time.'>building</hover>"
         waiting_materials: "<hover:show_text:'The next block needs a resource from inventory or an accessible container.'>waiting for materials</hover>"
+        input_prepared: "<hover:show_text:'The step is durable before its material is debited.'>confirming material</hover>"
+        world_prepared: "<hover:show_text:'The debit is confirmed and the block is applied idempotently.'>applying block</hover>"
         waiting_output_space: "<hover:show_text:'There is no room for an item recovered from a removed block.'>waiting for space</hover>"
         delivering_output: "<hover:show_text:'An item from a removed block is being stored safely.'>storing recovered blocks</hover>"
         recovery_required: "<hover:show_text:'The world or permissions changed; an administrator must review the project.'>needs review</hover>"

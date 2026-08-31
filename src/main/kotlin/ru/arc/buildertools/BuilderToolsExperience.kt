@@ -68,11 +68,10 @@ internal object BuilderItemPresentation {
 
 /** Keeps action-bar progress useful without sending a component every tick. */
 internal object BuilderProgressCadence {
-    private const val UPDATE_EVERY_BATCHES = 10
-
-    fun shouldRender(batchNumber: Int, completed: Boolean): Boolean {
+    fun shouldRender(batchNumber: Int, completed: Boolean, everyBatches: Int = 10): Boolean {
         require(batchNumber >= 1) { "Builder progress batch number must be positive" }
-        return batchNumber == 1 || completed || batchNumber % UPDATE_EVERY_BATCHES == 0
+        require(everyBatches in 1..100) { "Builder progress cadence must be between 1 and 100 batches" }
+        return batchNumber == 1 || completed || batchNumber % everyBatches == 0
     }
 }
 

@@ -13,6 +13,7 @@ class BuilderToolsRuntimeHealthTest : FunSpec({
         contribution.activeLeases shouldBe 0
         contribution.schemas shouldBe mapOf(
             "builder_drafts" to BuilderDraftRecord.CURRENT_SCHEMA_VERSION,
+            "builder_construction" to BuilderConstructionProjectRecord.CURRENT_SCHEMA_VERSION,
             "book_registry" to BuilderBookSqlRegistry.CURRENT_SCHEMA_VERSION,
         )
         contribution.dependencies shouldBe mapOf(

@@ -179,6 +179,12 @@ Missing material or output space is a waiting state, not a failed build.
 Ambiguous block, permission, persistence, or output-delivery state fails closed
 into `RECOVERY_REQUIRED`.
 
+Every book debit, step debit, and recovered-block delivery uses a durable
+write-ahead receipt containing the exact source identity plus before/after
+inventory slots. Replaying a receipt recognizes an already-applied effect,
+finishes a provably partial effect, or refuses drift; it never blindly repeats
+an item mutation after a crash or rejected journal write.
+
 `BuilderConstructionResources.kt` is the sole material boundary for these
 projects. It searches the online owner's nearby inventory plus vanilla chests,
 trapped chests, and barrels in the configured shell outside the construction
@@ -229,6 +235,115 @@ belongs in both `locales.ru` and `locales.en` in `builder-tools.yml`.
 Update it when a new key is not already covered by the existing chat or
 fragment globs.
 
+### Operator configuration and reload
+
+The bundled `modules/builder-tools.yml` is the policy source of truth. Its
+operator-tunable groups are:
+
+| Group | Keys and effect |
+| --- | --- |
+| `enabled`, `allowed-worlds`, `storage` | Gate the module, select worlds, and select the schematic root. `enabled`/worlds/root may be overlaid by `builder-tools-runtime.yml`. |
+| `limits`, `timers` | Change caps, range, plan/clipboard/undo lifetimes, and journal retention. |
+| `construction` | Container search radius, online-inventory range, tick period, probe budget, bounded per-project container cache, and per-call resolution budget. |
+| `runtime` | In-memory health refresh period, player-recovery retry period, and progress cadence. Lifecycle health-log cadence remains platform-owned. |
+| `preview` | Preview cadence/radius/particle budgets, plan display range, guidance cadence, and plan-title timings. |
+| `shop` | Read-only quote and auto-buy gates/limits. |
+| `book-contracts` | Contract enablement/pricing, auction recovery retry, player-material summary limit, and MySQL settings. Contract enablement/pricing/SQL may be overlaid by the runtime file. |
+| `safety` | Lands/CoreProtect requirements and the replaceable-material allowlist. |
+| `locales` and `default-locale` | Player-visible messages, including `locales.*.reload.{success,busy,failed}`. Keep `ru` and `en` complete. |
+
+The new scalar keys are read by `BuilderToolsConfig` at
+`src/main/kotlin/ru/arc/buildertools/BuilderToolsConfig.kt:22-100` and their
+bounds are enforced at `src/main/kotlin/ru/arc/buildertools/BuilderToolsConfig.kt:102-189`. Values not listed
+as runtime overlays above are read from the base file, not from an arbitrary
+runtime copy. `auto-build.yml` and `system-build-books.yml` are also reload
+inputs: the former is validated and the latter is path/hash checked when the
+candidate is enabled (`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:103-130`).
+
+Startup and an accepted reload both merge missing bundled defaults into the
+base builder and auto-build files, preserving operator values and unknown keys
+through arc-core's `mergeMissingFromBundled`. Reload first snapshots the exact
+bytes and POSIX permissions of both files. Each normal merge-forward is a
+single-file replacement through arc-core `Config.saveStrict`; exact rollback
+restores use `AtomicFileStore`. The two files are not one cross-file
+transaction, so if publication or config-cache reload fails, each snapshot is
+restored and the cache is reloaded as a best-effort rollback. Any rollback
+failure is propagated to the fail-closed path. Reload first validates the
+unmodified candidate; merge-forward is published only after the new runtime has
+been constructed (`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:325-389`).
+Malformed YAML, wrong scalar types, missing required files, invalid
+limits/locales, and enabled catalogue/auto-build failures reject the candidate.
+Disabled mode still validates shared schema, limits, timers and locales; only
+integrations that are genuinely inactive, such as catalogue digests and
+contract SQL connectivity, are deferred until enablement.
+
+Use `/builder reload` exactly (no extra arguments). It is available to console
+or a sender with `arcbuild.admin.reload`, declared as an operator permission in
+`src/main/resources/plugin.yml:18-21,81-83`. The tab completer adds `reload`
+only for that permission (`src/main/kotlin/ru/arc/buildertools/BuilderToolsModule.kt:79-90`);
+it is not exposed to unauthorized senders. Console uses the default locale;
+players use their locale. The three reload messages are declared in both
+locale trees at `src/main/resources/modules/builder-tools.yml:225-234,840-849`.
+
+An accepted reload is a runtime-generation replacement, not an in-place field
+edit. The active-state barrier is checked first. A safe candidate is then
+strictly parsed and validated while the old generation is intact; only then is
+the old runtime closed and a new runtime constructed and published
+(`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:43-93`). Consequently
+all settings consumed by `BuilderToolsRuntime` are applied together, but the
+following states must be drained first:
+
+| Refusal | Meaning |
+| --- | --- |
+| `STARTING_OR_RECOVERING` | Runtime is closing/starting, recovering, recovery-blocked, or has pending player recoveries. |
+| `ACTIVE_OPERATION` | Any ordinary player operation lease is active. |
+| `DURABLE_BOOK_FLOW` | Book/recovery locks, delivery-space waiters, release backlog, or book recovery is active. |
+| `PENDING_PREVIEW` | A pending ordinary preview or planned construction project exists. |
+| `VOLATILE_PLAYER_STATE` | A selection, clipboard, or global book preview is still open. |
+| `ACTIVE_CONSTRUCTION` | Construction writes/completions or any non-terminal persistent project exists. |
+
+These checks are the exact predicates in
+`src/main/kotlin/ru/arc/buildertools/BuilderToolsRuntime.kt:2293-2311`.
+Selections, clipboard contents, and global book previews are included in the
+barrier; `/builder reload` reports `busy` and leaves the old generation intact
+until they are closed. A runtime close still clears previews, selection, and
+clipboard (`src/main/kotlin/ru/arc/buildertools/BuilderToolsRuntime.kt:2352-2379`).
+Do not use reload as a way to interrupt a live operation.
+
+Reload outcomes are fail-closed:
+
+- `busy` leaves the old runtime untouched; wait for the reported state to drain
+  and retry.
+- `failed` leaves the old generation in service when preflight fails. If a
+  later activation or publication step fails, the candidate is closed, exact
+  file snapshots are restored when publication had begun, and the previous
+  config/runtime is recreated
+  (`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:68-93,325-389`).
+  Never hand-edit live state to “finish” a partial reload.
+- If rollback also fails, the service returns a rejected result with a
+  rollback failure, logs both failures, marks health down, and disables the
+  plugin (`src/main/kotlin/ru/arc/buildertools/BuilderToolsModule.kt:142-155`).
+  Treat that as disabled/fail-closed and restart ArcBuilder after correcting the
+  files.
+
+`enabled: true -> false` is a controlled disable: after the same barrier, the
+runtime is closed and `/builder` returns the disabled message. `false -> true`
+must pass the enabled candidate checks and construct all runtime owners; on any
+failure it remains disabled. `/builder reload` itself remains available while
+disabled because module routing handles it before the runtime
+(`src/main/kotlin/ru/arc/buildertools/BuilderToolsModule.kt:64-74,104-159`).
+
+Changing `plugin.yml`, permissions, command declarations, soft dependencies, or
+the Paper entry point requires a server restart; those are bootstrap metadata,
+not runtime settings. Changing a schematic root, MySQL identity, or book
+catalogue is reloadable only after a deliberate data/path review and a fully
+drained durable state. The optional `server-id` in
+`builder-tools-runtime.yml` is read only during plugin enable
+(`src/main/kotlin/ru/ruscrafting/builder/paper/ArcBuilderPlugin.kt:27-34`), so
+changing it requires a restart and is not a `/builder reload` setting. If a
+change must preserve active operations, recoveries, book leases, or persistent
+construction projects, schedule a restart instead.
+
 Compact player summaries should use localized MiniMessage hover text for
 domain terms or metrics whose meaning is not obvious from the label alone. The
 visible line remains short; the hover explains what the value includes and how
@@ -254,7 +369,7 @@ python3 ../arc-core/scripts/verify_consumer_architecture.py .
 
 Do not run `integrationTest`, Testcontainers, Docker, or the transitive
 integration gate locally. The production artifact is
-`build/libs/ArcBuilder-1.0.0.jar`.
+`build/libs/ArcBuilder-1.0.1.jar`.
 
 ## Adding another selection operation
 

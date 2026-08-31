@@ -24,11 +24,17 @@ import org.bukkit.event.entity.EntityExplodeEvent
 import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.inventory.InventoryClickEvent
 import org.bukkit.event.inventory.InventoryDragEvent
+import org.bukkit.event.inventory.InventoryMoveItemEvent
+import org.bukkit.event.inventory.InventoryOpenEvent
+import org.bukkit.event.inventory.InventoryPickupItemEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerDropItemEvent
 import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.entity.Player
+import org.bukkit.block.Container
+import org.bukkit.block.DoubleChest
+import org.bukkit.inventory.Inventory
 import org.bukkit.plugin.Plugin
 import java.util.Locale
 import java.util.UUID
@@ -91,6 +97,7 @@ internal data class BuilderActiveOperation(
 internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
     private val activeOperations = mutableMapOf<UUID, BuilderActiveOperation>()
     private val lockedBlocks = mutableMapOf<BuilderBlockPos, UUID>()
+    private val resourceLockedBlocks = mutableMapOf<BuilderBlockPos, UUID>()
     private val bookLockedPlayers = mutableSetOf<UUID>()
     private val recoveryLockedPlayers = mutableSetOf<UUID>()
     private var closed = false
@@ -107,6 +114,27 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
 
     fun unlock(plan: BuilderPlan) {
         plan.changes.forEach { change -> lockedBlocks.remove(change.position, plan.id) }
+    }
+
+    /**
+     * Isolates every physical holder of a durable resource receipt until its successor state is
+     * committed. This closes the inventory ABA window where an applied receipt could otherwise be
+     * externally restored to its exact `before` snapshot and replayed.
+     */
+    fun tryResourceLock(projectId: UUID, positions: Collection<BuilderBlockPos>): Boolean {
+        if (closed) return false
+        val distinct = positions.toSet()
+        if (distinct.any { position ->
+                lockedBlocks[position]?.let { it != projectId } == true ||
+                    resourceLockedBlocks[position]?.let { it != projectId } == true
+            }
+        ) return false
+        distinct.forEach { position -> resourceLockedBlocks[position] = projectId }
+        return true
+    }
+
+    fun unlockResources(projectId: UUID) {
+        resourceLockedBlocks.entries.removeIf { (_, owner) -> owner == projectId }
     }
 
     fun register(operation: BuilderActiveOperation) {
@@ -163,12 +191,36 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onInventoryClick(event: InventoryClickEvent) {
-        if ((event.whoClicked as? Player)?.uniqueId?.let(::isPlayerLocked) == true) event.isCancelled = true
+        if (
+            (event.whoClicked as? Player)?.uniqueId?.let(::isPlayerLocked) == true ||
+            isResourceInventoryLocked(event.view.topInventory) ||
+            event.clickedInventory?.let(::isResourceInventoryLocked) == true
+        ) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onInventoryDrag(event: InventoryDragEvent) {
-        if ((event.whoClicked as? Player)?.uniqueId?.let(::isPlayerLocked) == true) event.isCancelled = true
+        if (
+            (event.whoClicked as? Player)?.uniqueId?.let(::isPlayerLocked) == true ||
+            isResourceInventoryLocked(event.view.topInventory)
+        ) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onInventoryOpen(event: InventoryOpenEvent) {
+        if (isResourceInventoryLocked(event.inventory)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onInventoryMove(event: InventoryMoveItemEvent) {
+        if (isResourceInventoryLocked(event.source) || isResourceInventoryLocked(event.destination)) {
+            event.isCancelled = true
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onInventoryPickup(event: InventoryPickupItemEvent) {
+        if (isResourceInventoryLocked(event.inventory)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -280,7 +332,21 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
     }
 
     private fun isLocked(block: Block): Boolean =
-        BuilderBlockPos(block.world.uid, block.x, block.y, block.z) in lockedBlocks
+        BuilderBlockPos(block.world.uid, block.x, block.y, block.z).let { position ->
+            position in lockedBlocks || position in resourceLockedBlocks
+        }
+
+    private fun isResourceInventoryLocked(inventory: Inventory): Boolean =
+        inventoryHolderBlocks(inventory).any { block ->
+            BuilderBlockPos(block.world.uid, block.x, block.y, block.z) in resourceLockedBlocks
+        }
+
+    private fun inventoryHolderBlocks(inventory: Inventory): List<Block> = when (val holder = inventory.holder) {
+        is Container -> listOf(holder.block)
+        is DoubleChest -> listOf(holder.leftSide, holder.rightSide)
+            .mapNotNull { (it as? Container)?.block }
+        else -> emptyList()
+    }
 
     override fun close() {
         if (closed) return
@@ -288,6 +354,7 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
         HandlerList.unregisterAll(this)
         activeOperations.clear()
         lockedBlocks.clear()
+        resourceLockedBlocks.clear()
         bookLockedPlayers.clear()
         recoveryLockedPlayers.clear()
     }

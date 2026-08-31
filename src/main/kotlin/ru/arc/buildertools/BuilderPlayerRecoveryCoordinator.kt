@@ -16,6 +16,7 @@ import java.util.UUID
  */
 internal class BuilderPlayerRecoveryCoordinator(
     taskScope: LifecycleTaskScope,
+    retryPeriodTicks: Long = 100L,
     private val operationLocks: BuilderOperationLocks,
     private val playerLookup: (UUID) -> Player?,
     private val restoreInventory: (Player, BuilderJournalRecord) -> Unit,
@@ -35,8 +36,12 @@ internal class BuilderPlayerRecoveryCoordinator(
     )
 
     private val pending = linkedMapOf<UUID, PendingRecovery>()
+    init {
+        require(retryPeriodTicks in 20L..1_200L) { "Builder player-recovery retry period is invalid" }
+    }
+
     private val retryTask: ScheduledTask = checkNotNull(
-        taskScope.runTimer(RETRY_PERIOD_TICKS, RETRY_PERIOD_TICKS, ::retryPending),
+        taskScope.runTimer(retryPeriodTicks, retryPeriodTicks, ::retryPending),
     ) { "Builder player-recovery retry task was not scheduled" }
     private var closed = false
 
@@ -164,7 +169,4 @@ internal class BuilderPlayerRecoveryCoordinator(
         pending.clear()
     }
 
-    private companion object {
-        const val RETRY_PERIOD_TICKS = 100L
-    }
 }

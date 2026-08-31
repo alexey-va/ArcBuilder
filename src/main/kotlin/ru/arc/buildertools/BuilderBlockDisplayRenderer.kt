@@ -43,6 +43,8 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
 internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
     private val maxPlanDisplays: Int,
+    private val planDisplayRange: Double,
+    private val guidancePeriodTicks: Long,
     private val messages: LocalizedMiniMessage,
     taskScope: LifecycleTaskScope,
 ) : BuilderDisplayRenderer {
@@ -69,8 +71,10 @@ internal class BuilderBlockDisplayRenderer(
 
     init {
         require(maxPlanDisplays in 32..512)
+        require(planDisplayRange.isFinite() && planDisplayRange in 8.0..128.0)
+        require(guidancePeriodTicks in 5L..100L)
         checkNotNull(
-            taskScope.runTimer(0L, 20L) {
+            taskScope.runTimer(0L, guidancePeriodTicks) {
                 bookSites.values.toList().forEach { site ->
                     if (site.player.isOnline) showBookActionBar(site)
                 }
@@ -103,7 +107,7 @@ internal class BuilderBlockDisplayRenderer(
             val dx = change.position.x + .5 - eye.x
             val dy = change.position.y + .5 - eye.y
             val dz = change.position.z + .5 - eye.z
-            dx * dx + dy * dy + dz * dz <= 64.0 * 64.0
+            dx * dx + dy * dy + dz * dz <= planDisplayRange * planDisplayRange
         }.toList()
         val step = kotlin.math.ceil(visible.size / maxPlanDisplays.toDouble()).toInt().coerceAtLeast(1)
         val sampled = visible.asSequence().filterIndexed { index, _ -> index % step == 0 }.take(maxPlanDisplays).toList()

@@ -148,6 +148,7 @@ internal class BuilderBookAuctionCoordinator(
     private val send: (Player, String, Map<String, String>) -> Unit,
     private val lock: (UUID) -> Boolean,
     private val unlock: (UUID) -> Unit,
+    private val recoveryRetryMillis: Long = 30_000L,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : AutoCloseable {
     private var installedPort: BuilderBookAuctionPort? = null
@@ -403,7 +404,7 @@ internal class BuilderBookAuctionCoordinator(
                         "Builder-book auction transfer start failed: instance=${token.instanceId} lease=${token.leaseId} " +
                             "type=${BuilderToolsFailureType.of(failure)} result_present=${transfer != null}",
                     )
-                    retryAfterMillis[token] = clock() + RECOVERY_RETRY_MILLIS
+                    retryAfterMillis[token] = Math.addExact(clock(), recoveryRetryMillis)
                     notifyReview(player, token)
                     finishRecoveryAttempt(player, token)
                     return@runSync
@@ -468,7 +469,7 @@ internal class BuilderBookAuctionCoordinator(
                         "Builder-book auction transfer completion failed: instance=${token.instanceId} lease=${token.leaseId} " +
                             "type=${BuilderToolsFailureType.of(failure)} result=$completed",
                     )
-                    retryAfterMillis[token] = clock() + RECOVERY_RETRY_MILLIS
+                    retryAfterMillis[token] = Math.addExact(clock(), recoveryRetryMillis)
                     notifyReview(player, token)
                     finishRecoveryAttempt(player, token)
                 } else {
@@ -620,7 +621,9 @@ internal class BuilderBookAuctionCoordinator(
         reviewNotified.clear()
     }
 
-    private companion object {
-        const val RECOVERY_RETRY_MILLIS = 30_000L
+    init {
+        require(recoveryRetryMillis in 5_000L..600_000L) {
+            "Builder-book auction recovery retry is invalid"
+        }
     }
 }

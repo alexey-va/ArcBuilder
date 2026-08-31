@@ -18,7 +18,7 @@ softdepend:
 commands:
   builder:
     description: Survival-friendly builder tools
-    usage: /builder [help|wand|fill|replace|disconnect|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status]
+    usage: /builder [help|wand|fill|replace|disconnect|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status|reload]
 permissions:
   arcbuild.use:
     description: Use survival-friendly ArcBuilder tools
@@ -78,3 +78,6 @@ permissions:
     default: false
   arcbuild.book.use:
     default: false
+  arcbuild.admin.reload:
+    description: Validate and reload ArcBuilder configuration without restarting the server
+    default: op

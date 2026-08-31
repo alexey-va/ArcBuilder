@@ -68,6 +68,8 @@ internal class BuilderPreviewSessions(
 
     fun contains(playerId: UUID): Boolean = playerId in pending
 
+    val pendingCount: Int get() = pending.size
+
     fun remove(playerId: UUID, expected: BuilderPendingPlan): Boolean {
         val removed = pending.remove(playerId, expected)
         if (removed) {
