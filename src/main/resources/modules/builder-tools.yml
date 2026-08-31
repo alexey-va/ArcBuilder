@@ -265,7 +265,12 @@ locales:
       complete: |-
 
         <#8c8c8c>   Область <#d48763><x>×<y>×<z> <#8c8c8c>— <#e6fff3><volume> блоков
-        <#8c8c8c>   <click:run_command:'/builder copy'><#92bed8>[▶ Скопировать]</click> <#8c8c8c>   <click:run_command:'/builder clear'><#969696>[✖ Сбросить]</click>
+        <#8c8c8c>   <click:run_command:'/builder copy'><#92bed8><hover:show_text:'Сохранить временный чертёж выделения.'>[▶ Скопировать]</hover></click>
+        <#8c8c8c>   <click:suggest_command:'/builder fill '><#92bed8><hover:show_text:'Подставить команду и выбрать блок заполнения.'>[▶ Заполнить]</hover></click>
+        <#8c8c8c>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Подставить команду и указать старый и новый блок.'>[▶ Заменить]</hover></click>
+        <#8c8c8c>   <click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Показать план разъединения заборов в выделении.'>[▶ Разъединить]</hover></click>
+        <#8c8c8c>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Показать план демонтажа; блоки изменятся только после подтверждения.'>[▶ Демонтаж]</hover></click>
+        <#8c8c8c>   <click:run_command:'/builder clear'><#969696><hover:show_text:'Убрать выделение и его контур; чертёж сохранится.'>[✖ Сбросить]</hover></click>
       cleared: |-
 
         <prefix><#969696>Выделение очищено; частицы скрыты.
@@ -882,8 +887,12 @@ locales:
       complete: |-
 
         <dark_gray>   <gray>Area: <white><x>×<y>×<z></white> — <volume> blocks
-        <dark_gray>   <gray>The outline stays visible.
-        <dark_gray>   <click:run_command:'/builder copy'><#92bed8>[▶ Copy]</click> <dark_gray>   <click:run_command:'/builder clear'><#969696>[✖ Reset]</click>
+        <dark_gray>   <click:run_command:'/builder copy'><#92bed8><hover:show_text:'Save a temporary blueprint of this selection.'>[▶ Copy]</hover></click>
+        <dark_gray>   <click:suggest_command:'/builder fill '><#92bed8><hover:show_text:'Insert the command, then choose the fill block.'>[▶ Fill]</hover></click>
+        <dark_gray>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Insert the command, then enter the old and new blocks.'>[▶ Replace]</hover></click>
+        <dark_gray>   <click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Preview fence disconnection inside the selection.'>[▶ Disconnect]</hover></click>
+        <dark_gray>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Preview deconstruction; blocks change only after confirmation.'>[▶ Deconstruct]</hover></click>
+        <dark_gray>   <click:run_command:'/builder clear'><#969696><hover:show_text:'Clear the selection and outline; keep the saved clipboard.'>[✖ Reset]</hover></click>
       cleared: |-
 
         <prefix><gray>Selection cleared; particles hidden.

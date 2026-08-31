@@ -60,6 +60,13 @@ player-only selection and plan displays; preview rendering never mutates the
 world. Selection, clipboard, pending plan, and active operation are distinct
 states and must not be collapsed into one session object.
 
+The completed-selection chat surface exposes only operations that consume the
+current selection. `copy` runs immediately because it only records a temporary
+clipboard, while `disconnect` and `deconstruct` run only their preview-producing
+forms. Commands that require material arguments (`fill` and `replace`) use
+`suggest_command` with a trailing space so the player finishes the command;
+the surface never clicks an immediate-confirm variant.
+
 ## Plan and mutation transaction
 
 All ordinary world changes use `BuilderPlan` and `BuilderBlockChange` from

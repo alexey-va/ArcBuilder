@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import ru.arc.config.Config
@@ -189,15 +190,37 @@ class BuilderBookJourneyTest : FunSpec({
 
         val russian = config.string("locales.ru.selection.complete")
         russian shouldContain "<click:run_command:'/builder copy'>"
+        russian shouldContain "<click:suggest_command:'/builder fill '>"
+        russian shouldContain "<click:suggest_command:'/builder replace '>"
+        russian shouldContain "<click:run_command:'/builder disconnect'>"
+        russian shouldContain "<click:run_command:'/builder deconstruct'>"
         russian shouldContain "<click:run_command:'/builder clear'>"
-        russian shouldContain "<color:#92bed8>[▶ Скопировать]"
-        russian shouldContain "<color:#969696>[✖ Сбросить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Сохранить временный чертёж выделения.'>[▶ Скопировать]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Подставить команду и выбрать блок заполнения.'>[▶ Заполнить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Подставить команду и указать старый и новый блок.'>[▶ Заменить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Показать план разъединения заборов в выделении.'>[▶ Разъединить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Показать план демонтажа; блоки изменятся только после подтверждения.'>[▶ Демонтаж]"
+        russian shouldContain "<color:#969696><hover:show_text:'Убрать выделение и его контур; чертёж сохранится.'>[✖ Сбросить]"
+        russian shouldNotContain "<click:run_command:'/builder fill"
+        russian shouldNotContain "<click:run_command:'/builder replace"
+        russian shouldNotContain "/builder disconnect confirm"
 
         val english = config.string("locales.en.selection.complete")
         english shouldContain "<click:run_command:'/builder copy'>"
+        english shouldContain "<click:suggest_command:'/builder fill '>"
+        english shouldContain "<click:suggest_command:'/builder replace '>"
+        english shouldContain "<click:run_command:'/builder disconnect'>"
+        english shouldContain "<click:run_command:'/builder deconstruct'>"
         english shouldContain "<click:run_command:'/builder clear'>"
-        english shouldContain "<color:#92bed8>[▶ Copy]"
-        english shouldContain "<color:#969696>[✖ Reset]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Save a temporary blueprint of this selection.'>[▶ Copy]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Insert the command, then choose the fill block.'>[▶ Fill]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Insert the command, then enter the old and new blocks.'>[▶ Replace]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Preview fence disconnection inside the selection.'>[▶ Disconnect]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Preview deconstruction; blocks change only after confirmation.'>[▶ Deconstruct]"
+        english shouldContain "<color:#969696><hover:show_text:'Clear the selection and outline; keep the saved clipboard.'>[✖ Reset]"
+        english shouldNotContain "<click:run_command:'/builder fill"
+        english shouldNotContain "<click:run_command:'/builder replace"
+        english shouldNotContain "/builder disconnect confirm"
 
         val russianClipboard = config.string("locales.ru.clipboard.saved")
         russianClipboard shouldContain "<color:#92bed8>[▶ Вставить здесь]"
@@ -217,12 +240,12 @@ class BuilderBookJourneyTest : FunSpec({
                 config.stringList("locales.$locale.plan.market").single { it.contains("confirm buy") },
                 config.string("locales.$locale.operation.paste-again"),
             )
-            val buttonLabel = Regex("<click:[^>]+><color:[^>]+>\\[([^]]+)]")
+            val buttonLabel = Regex("<click:[^>]+><color:[^>]+>(?:<hover:[^>]+>)?\\[([^]]+)]")
             val labels = buttonSurfaces.flatMap { surface ->
                 buttonLabel.findAll(surface).map { match -> match.groupValues[1] }.toList()
             }
 
-            labels.size shouldBe 12
+            labels.size shouldBe 16
             labels.all { label -> label.startsWith("▶ ") || label.startsWith("✖ ") } shouldBe true
         }
     }
