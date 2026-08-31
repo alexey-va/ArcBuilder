@@ -44,6 +44,9 @@ permissions:
     default: false
   arcbuild.deconstruct:
     default: false
+  arcbuild.deconstruct.without-tool:
+    description: Allow ArcBuilder deconstruction without a held tool
+    default: false
   arcbuild.crown:
     default: false
   arcbuild.selection.size.20:

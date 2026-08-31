@@ -241,6 +241,9 @@ internal class BuilderToolsRuntime(
         host = object : BuilderDeconstructionHost {
             override fun ensurePermission(player: Player) = ensureFeaturePermission(player, BuilderFeature.DECONSTRUCT)
 
+            override fun canDeconstructWithoutTool(player: Player): Boolean =
+                BuilderPermissionPolicy.canDeconstructWithoutTool(player::hasPermission)
+
             override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
 
             override fun world(worldId: UUID): World = requireWorld(worldId)
@@ -1623,7 +1626,11 @@ internal class BuilderToolsRuntime(
             }
             if (record.plan.toolDamage > 0) {
                 operation.inventoryMutated = true
-                player.damageItemStack(EquipmentSlot.HAND, record.plan.toolDamage)
+                BuilderInventory.applyToolDamage(
+                    player,
+                    checkNotNull(record.plan.toolFingerprintBase64),
+                    record.plan.toolDamage,
+                )
             }
             player.updateInventory()
         } catch (failure: Throwable) {
@@ -1833,6 +1840,12 @@ internal class BuilderToolsRuntime(
         systemLootContainerPositions: Set<BuilderBlockPos> = emptySet(),
     ) {
         plan.validated(config.maxChanges)
+        if (
+            BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, plan) &&
+            !BuilderPermissionPolicy.canDeconstructWithoutTool(player::hasPermission)
+        ) {
+            throw BuilderUserFailure("errors.no-permission")
+        }
         plan.changes.forEach { change ->
             val block = block(requireWorld(change.position.worldId), change.position)
             val after = Bukkit.createBlockData(change.afterBlockData)

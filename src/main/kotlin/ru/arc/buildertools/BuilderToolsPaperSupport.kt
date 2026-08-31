@@ -24,6 +24,7 @@ import org.bukkit.block.data.type.Snow
 import org.bukkit.block.data.type.Stairs
 import org.bukkit.block.data.type.TrapDoor
 import org.bukkit.entity.Player
+import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.PlayerInventory
 import org.bukkit.inventory.meta.Damageable
@@ -203,6 +204,79 @@ internal class BuilderJournalUnknownOutcomeException(
     }
 }
 
+internal data class BuilderPooledToolUse(
+    val slot: Int,
+    val itemBase64: String,
+    val damage: Int,
+) {
+    fun validated(): BuilderPooledToolUse = apply {
+        require(slot in 0..35) { "Builder-tools pooled tool slot is outside player storage" }
+        require(itemBase64.length in 4..1_000_000) { "Builder-tools pooled tool payload is outside its size bound" }
+        require(damage in 1..BuilderPlan.ABSOLUTE_MAX_CHANGES) {
+            "Builder-tools pooled tool damage is outside its safety bound"
+        }
+    }
+}
+
+internal data class BuilderPooledToolPlan(
+    val uses: List<BuilderPooledToolUse>,
+    val bypassUsed: Boolean,
+) {
+    fun validated(): BuilderPooledToolPlan = apply {
+        require(uses.isNotEmpty() && uses.size <= 36) { "Builder-tools pooled tool count is invalid" }
+        require(uses.map(BuilderPooledToolUse::slot).toSet().size == uses.size) {
+            "Builder-tools pooled tool slots contain duplicates"
+        }
+        uses.forEach(BuilderPooledToolUse::validated)
+        require(uses.sumOf { it.damage.toLong() } <= BuilderPlan.ABSOLUTE_MAX_CHANGES) {
+            "Builder-tools pooled tool damage is outside its safety bound"
+        }
+    }
+}
+
+/** Versioned payload stored in the legacy plan fingerprint field to keep journal schema 1 readable. */
+internal object BuilderPooledToolCodec {
+    private const val MAGIC = "arc-builder-pooled-tools-v1"
+
+    fun encode(plan: BuilderPooledToolPlan): String {
+        val checked = plan.validated()
+        val text = buildString {
+            append(MAGIC).append('\n')
+            append(if (checked.bypassUsed) '1' else '0')
+            checked.uses.forEach { use ->
+                append('\n').append(use.slot).append('\t').append(use.damage).append('\t').append(use.itemBase64)
+            }
+        }
+        return Base64.getEncoder().encodeToString(text.toByteArray(StandardCharsets.UTF_8)).also { encoded ->
+            require(encoded.length <= 1_500_000) { "Builder-tools pooled tool plan is outside its size bound" }
+        }
+    }
+
+    fun isPooled(encoded: String): Boolean = runCatching {
+        String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8).startsWith("$MAGIC\n")
+    }.getOrDefault(false)
+
+    fun decode(encoded: String): BuilderPooledToolPlan {
+        val lines = String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8).split('\n')
+        require(lines.size >= 3 && lines.first() == MAGIC) { "Builder-tools pooled tool payload is invalid" }
+        val bypassUsed = when (lines[1]) {
+            "0" -> false
+            "1" -> true
+            else -> throw IllegalArgumentException("Builder-tools pooled tool bypass flag is invalid")
+        }
+        val uses = lines.drop(2).map { line ->
+            val fields = line.split('\t', limit = 3)
+            require(fields.size == 3) { "Builder-tools pooled tool entry is invalid" }
+            BuilderPooledToolUse(
+                slot = fields[0].toInt(),
+                damage = fields[1].toInt(),
+                itemBase64 = fields[2],
+            ).validated()
+        }
+        return BuilderPooledToolPlan(uses, bypassUsed).validated()
+    }
+}
+
 internal object BuilderInventory {
     private val stateCodec = PaperPlayerStateCodec()
 
@@ -237,12 +311,18 @@ internal object BuilderInventory {
             if (!insert(simulated, prototype, amount)) return false
         }
         if (toolFingerprintBase64 != null) {
-            val expected = BuilderItemCodec.decodePrototype(toolFingerprintBase64)
-            val held = simulated[player.inventory.heldItemSlot]
-            if (!itemEquals(held, expected)) return false
-            val damageable = held?.itemMeta as? Damageable ?: return false
-            val remaining = held.type.maxDurability.toInt() - damageable.damage
-            if (remaining <= toolDamage) return false
+            if (BuilderPooledToolCodec.isPooled(toolFingerprintBase64)) {
+                val pooled = runCatching { BuilderPooledToolCodec.decode(toolFingerprintBase64) }.getOrElse { return false }
+                if (pooled.uses.sumOf(BuilderPooledToolUse::damage) != toolDamage) return false
+                if (!pooled.uses.all { use -> toolUseMatches(simulated, use) }) return false
+            } else {
+                val expected = BuilderItemCodec.decodePrototype(toolFingerprintBase64)
+                val held = simulated[player.inventory.heldItemSlot]
+                if (!itemEquals(held, expected)) return false
+                val damageable = held?.itemMeta as? Damageable ?: return false
+                val remaining = BuilderToolDurability.maximumDamage(held) - damageable.damage
+                if (remaining <= toolDamage) return false
+            }
         }
         for (cost in costs) {
             val (prototype, amount) = BuilderItemCodec.decode(cost)
@@ -253,6 +333,27 @@ internal object BuilderInventory {
             if (!insert(simulated, prototype, amount)) return false
         }
         return true
+    }
+
+    fun applyToolDamage(player: Player, toolFingerprintBase64: String, toolDamage: Int) {
+        if (!BuilderPooledToolCodec.isPooled(toolFingerprintBase64)) {
+            player.damageItemStack(EquipmentSlot.HAND, toolDamage)
+            return
+        }
+        val pooled = BuilderPooledToolCodec.decode(toolFingerprintBase64)
+        check(pooled.uses.sumOf(BuilderPooledToolUse::damage) == toolDamage) {
+            "Builder-tools pooled tool damage changed after planning"
+        }
+        val contents = player.inventory.storageContents.map { it?.clone() }.toMutableList()
+        pooled.uses.forEach { use ->
+            check(toolUseMatches(contents, use)) { "Builder-tools pooled tool changed after planning" }
+            val item = checkNotNull(contents[use.slot])
+            val meta = item.itemMeta as Damageable
+            if (meta.isUnbreakable) return@forEach
+            meta.damage = Math.addExact(meta.damage, use.damage)
+            item.itemMeta = meta
+        }
+        player.inventory.storageContents = contents.toTypedArray()
     }
 
     fun missingCosts(player: Player, costs: List<BuilderItemAmount>): List<BuilderItemAmount> {
@@ -338,6 +439,15 @@ internal object BuilderInventory {
         return false
     }
 
+    private fun toolUseMatches(contents: List<ItemStack?>, use: BuilderPooledToolUse): Boolean {
+        val current = contents.getOrNull(use.slot) ?: return false
+        val expected = BuilderItemCodec.decodePrototype(use.itemBase64)
+        if (!itemEquals(current, expected)) return false
+        val damageable = current.itemMeta as? Damageable ?: return false
+        if (damageable.isUnbreakable) return true
+        return BuilderToolDurability.maximumDamage(current) - damageable.damage > use.damage
+    }
+
     private fun contentEquals(actual: List<ItemStack?>, expected: List<ItemStack?>): Boolean =
         actual.size == expected.size && actual.indices.all { itemEquals(actual[it], expected[it]) }
 
@@ -348,6 +458,13 @@ internal object BuilderInventory {
             left == null || right == null -> left == null && right == null
             else -> left.amount == right.amount && left.isSimilar(right)
         }
+    }
+}
+
+internal object BuilderToolDurability {
+    fun maximumDamage(item: ItemStack): Int {
+        val meta = item.itemMeta as? Damageable ?: return 0
+        return if (meta.hasMaxDamage()) meta.maxDamage else item.type.maxDurability.toInt()
     }
 }
 

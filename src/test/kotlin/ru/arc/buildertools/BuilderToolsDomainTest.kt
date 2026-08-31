@@ -503,6 +503,17 @@ class BuilderToolsDomainTest : FunSpec({
         BuilderPermissionPolicy.canUseAny(permissions("arcbuild.book.use")) shouldBe true
         BuilderPermissionPolicy.canUseAny(permissions("arc.build.book.create")) shouldBe false
         BuilderPermissionPolicy.canUseAny(permissions()) shouldBe false
+        BuilderPermissionPolicy.canDeconstructWithoutTool(permissions("arcbuild.deconstruct.without-tool")) shouldBe true
+        BuilderPermissionPolicy.canDeconstructWithoutTool(permissions("arcbuild.use")) shouldBe false
+    }
+
+    test("tool-free deconstruction permission is explicit and not inherited by arcbuild use") {
+        val description = checkNotNull(javaClass.classLoader.getResourceAsStream("plugin.yml"))
+            .use(::PluginDescriptionFile)
+        val umbrella = description.permissions.single { it.name == "arcbuild.use" }
+
+        description.permissions.any { it.name == "arcbuild.deconstruct.without-tool" } shouldBe true
+        umbrella.children.containsKey("arcbuild.deconstruct.without-tool") shouldBe false
     }
 
     test("build-book create permission grants the declared sell and use children") {

@@ -9,7 +9,6 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.Block
-import org.bukkit.block.data.type.Slab
 import org.bukkit.enchantments.Enchantment
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
@@ -19,62 +18,171 @@ import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.UUID
 
 class BuilderDeconstructionControllerTest : FunSpec({
-    test("refund policy accepts only the exact Silk Touch construction item") {
+    test("drop tool keeps ordinary enchantments but removes Silk Touch") {
         MockBukkitTestRuntime.open().use { paper ->
-            val slab = paper.server.createBlockData(Material.STONE_SLAB) as Slab
-            slab.type = Slab.Type.DOUBLE
+            val tool = ItemStack(Material.DIAMOND_PICKAXE).apply {
+                addUnsafeEnchantment(Enchantment.SILK_TOUCH, 1)
+                addUnsafeEnchantment(Enchantment.FORTUNE, 3)
+            }
 
-            BuilderDeconstructionRefunds.exactConstructionItem(slab, listOf(ItemStack(Material.STONE_SLAB, 2)))
-                ?.let { it.type to it.amount } shouldBe (Material.STONE_SLAB to 2)
-            BuilderDeconstructionRefunds.exactConstructionItem(
-                Material.DIAMOND_ORE.createBlockData(),
-                listOf(ItemStack(Material.DIAMOND, 4)),
-            ) shouldBe null
-            BuilderDeconstructionRefunds.exactConstructionItem(
-                Material.BUDDING_AMETHYST.createBlockData(),
-                emptyList(),
-            ) shouldBe null
-            BuilderDeconstructionRefunds.exactConstructionItem(
-                Material.STONE.createBlockData(),
-                listOf(ItemStack(Material.STONE, 2)),
-            ) shouldBe null
+            val dropsTool = BuilderDeconstructionDrops.withoutSilkTouch(tool)
+
+            dropsTool.containsEnchantment(Enchantment.SILK_TOUCH) shouldBe false
+            dropsTool.getEnchantmentLevel(Enchantment.FORTUNE) shouldBe 3
+            tool.containsEnchantment(Enchantment.SILK_TOUCH) shouldBe true
         }
     }
 
-    test("survival skips reward ores and refunds other construction items without Fortune amplification") {
+    test("survival pools suitable inventory tools and leaves one durability on each") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderDeconstructionRefundTest")
             val world = paper.addSimpleWorld("deconstruction-refund")
             val player = paper.addPlayer("DeconstructionOwner")
             player.teleport(Location(world, 0.5, 64.0, 2.5))
-            world.getBlockAt(0, 64, 0).type = Material.DIAMOND_ORE
-            val slab = paper.server.createBlockData(Material.STONE_SLAB) as Slab
-            slab.type = Slab.Type.DOUBLE
-            world.getBlockAt(1, 64, 0).blockData = slab
-            val harness = DeconstructionHarness(plugin)
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+            val harness = DeconstructionHarness(
+                plugin = plugin,
+                drops = { _, tool ->
+                    checkNotNull(tool).containsEnchantment(Enchantment.SILK_TOUCH) shouldBe false
+                    listOf(ItemStack(Material.COBBLESTONE))
+                },
+            )
             harness.select(world, 0, 64, 0, 1, 64, 0)
-            val tool = ItemStack(Material.DIAMOND_PICKAXE).apply {
+            val held = ItemStack(Material.DIAMOND_PICKAXE).apply {
                 editMeta { meta ->
+                    meta.addEnchant(Enchantment.SILK_TOUCH, 1, true)
                     meta.addEnchant(Enchantment.FORTUNE, 3, true)
-                    (meta as Damageable).damage = 7
+                    (meta as Damageable).damage = type.maxDurability.toInt() - 2
                 }
             }
-            player.inventory.setItemInMainHand(tool)
+            val reserve = ItemStack(Material.IRON_PICKAXE).apply {
+                editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 2 }
+            }
+            player.inventory.setItemInMainHand(held)
+            player.inventory.setItem(10, reserve)
 
-            val first = harness.controller.plan(player)
-            val second = harness.controller.plan(player)
+            val plan = harness.controller.plan(player)
+            val pooled = BuilderPooledToolCodec.decode(checkNotNull(plan.toolFingerprintBase64))
 
-            first.kind shouldBe BuilderPlanKind.DECONSTRUCT
-            first.changes.size shouldBe 1
-            first.rewards.materialAmounts() shouldBe mapOf(Material.STONE_SLAB to 2)
-            first.skippedUnsafeBlocks shouldBe 1
-            second.rewards shouldBe first.rewards
-            first.toolDamage shouldBe 1
-            BuilderItemCodec.decodePrototype(checkNotNull(first.toolFingerprintBase64)).isSimilar(tool) shouldBe true
-            harness.permissions shouldBe 2
+            plan.kind shouldBe BuilderPlanKind.DECONSTRUCT
+            plan.changes.size shouldBe 2
+            plan.rewards.materialAmounts() shouldBe mapOf(Material.COBBLESTONE to 2)
+            plan.toolDamage shouldBe 2
+            pooled.uses.map { it.slot to it.damage } shouldBe listOf(0 to 1, 10 to 1)
+            pooled.bypassUsed shouldBe false
+            player.inventory.setItem(10, null)
+            BuilderInventory.canApply(player, emptyList(), plan.rewards, plan.toolFingerprintBase64, plan.toolDamage) shouldBe false
+            player.inventory.setItem(10, reserve)
+            BuilderInventory.canApply(player, emptyList(), plan.rewards, plan.toolFingerprintBase64, plan.toolDamage) shouldBe true
+            BuilderInventory.applyToolDamage(player, checkNotNull(plan.toolFingerprintBase64), plan.toolDamage)
+            (player.inventory.getItem(0)?.itemMeta as Damageable).damage shouldBe
+                Material.DIAMOND_PICKAXE.maxDurability.toInt() - 1
+            (player.inventory.getItem(10)?.itemMeta as Damageable).damage shouldBe
+                Material.IRON_PICKAXE.maxDurability.toInt() - 1
+            harness.permissions shouldBe 1
             harness.mutableBlocks shouldBe 2
-            world.getBlockAt(0, 64, 0).type shouldBe Material.DIAMOND_ORE
-            (world.getBlockAt(1, 64, 0).blockData as Slab).type shouldBe Slab.Type.DOUBLE
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
+        }
+    }
+
+    test("explicit permission allows tool-free survival deconstruction") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderDeconstructionWithoutToolTest")
+            val world = paper.addSimpleWorld("deconstruction-without-tool")
+            val player = paper.addPlayer("ToolFreeOwner")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            val harness = DeconstructionHarness(
+                plugin = plugin,
+                withoutToolPermission = true,
+                drops = { _, tool ->
+                    tool shouldBe null
+                    emptyList()
+                },
+            )
+            harness.select(world, 0, 64, 0, 0, 64, 0)
+
+            val plan = harness.controller.plan(player)
+
+            plan.changes.size shouldBe 1
+            plan.rewards shouldBe emptyList()
+            plan.toolFingerprintBase64 shouldBe null
+            plan.toolDamage shouldBe 0
+            BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, plan) shouldBe true
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+        }
+    }
+
+    test("tool permission uses remaining pooled durability then falls back to tool-free drops") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderDeconstructionPartialToolTest")
+            val world = paper.addSimpleWorld("deconstruction-partial-tool")
+            val player = paper.addPlayer("PartialToolOwner")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+            val harness = DeconstructionHarness(
+                plugin = plugin,
+                withoutToolPermission = true,
+                drops = { _, tool -> listOf(ItemStack(if (tool == null) Material.FLINT else Material.COBBLESTONE)) },
+            )
+            harness.select(world, 0, 64, 0, 1, 64, 0)
+            player.inventory.setItemInMainHand(ItemStack(Material.DIAMOND_PICKAXE).apply {
+                editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 2 }
+            })
+
+            val plan = harness.controller.plan(player)
+            val pooled = BuilderPooledToolCodec.decode(checkNotNull(plan.toolFingerprintBase64))
+
+            plan.rewards.materialAmounts() shouldBe mapOf(Material.COBBLESTONE to 1, Material.FLINT to 1)
+            plan.toolDamage shouldBe 1
+            pooled.uses.map(BuilderPooledToolUse::damage) shouldBe listOf(1)
+            pooled.bypassUsed shouldBe true
+            BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, plan) shouldBe true
+        }
+    }
+
+    test("survival fails when pooled tools cannot cover the selection without permission") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderDeconstructionExhaustedToolsTest")
+            val world = paper.addSimpleWorld("deconstruction-exhausted-tools")
+            val player = paper.addPlayer("ExhaustedToolOwner")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+            val harness = DeconstructionHarness(plugin)
+            harness.select(world, 0, 64, 0, 1, 64, 0)
+            player.inventory.setItemInMainHand(ItemStack(Material.DIAMOND_PICKAXE).apply {
+                editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 2 }
+            })
+
+            shouldThrow<DeconstructionFailure> { harness.controller.plan(player) }.path shouldBe "errors.tool"
+        }
+    }
+
+    test("unbreakable pooled tools remain unchanged") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderDeconstructionUnbreakableToolTest")
+            val world = paper.addSimpleWorld("deconstruction-unbreakable-tool")
+            val player = paper.addPlayer("UnbreakableToolOwner")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            val harness = DeconstructionHarness(plugin)
+            harness.select(world, 0, 64, 0, 0, 64, 0)
+            val originalDamage = Material.DIAMOND_PICKAXE.maxDurability.toInt() - 1
+            player.inventory.setItemInMainHand(ItemStack(Material.DIAMOND_PICKAXE).apply {
+                editMeta { meta ->
+                    meta.isUnbreakable = true
+                    (meta as Damageable).damage = originalDamage
+                }
+            })
+
+            val plan = harness.controller.plan(player)
+            BuilderInventory.applyToolDamage(player, checkNotNull(plan.toolFingerprintBase64), plan.toolDamage)
+
+            (player.inventory.itemInMainHand.itemMeta as Damageable).damage shouldBe originalDamage
         }
     }
 
@@ -113,7 +221,9 @@ class BuilderDeconstructionControllerTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.STICK))
             shouldThrow<DeconstructionFailure> { harness.controller.plan(player) }.path shouldBe "errors.tool"
 
-            player.inventory.setItemInMainHand(ItemStack(Material.DIAMOND_PICKAXE))
+            player.inventory.setItemInMainHand(ItemStack(Material.DIAMOND_PICKAXE).apply {
+                editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 3 }
+            })
             shouldThrow<DeconstructionFailure> { harness.controller.plan(player) }.path shouldBe "errors.selection-too-large"
             world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
             world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
@@ -124,6 +234,10 @@ class BuilderDeconstructionControllerTest : FunSpec({
 private class DeconstructionHarness(
     plugin: Plugin,
     maximumChanges: Int = 64,
+    withoutToolPermission: Boolean = false,
+    drops: (Block, ItemStack?) -> Collection<ItemStack> = { block, _ ->
+        listOfNotNull(BuilderPlacementCost.itemOrNull(block.blockData))
+    },
 ) {
     private lateinit var selection: BuilderSelection
     private val safety = BuilderBlockSafety(plugin, setOf("AIR", "SHORT_GRASS"))
@@ -133,12 +247,14 @@ private class DeconstructionHarness(
     val controller = BuilderDeconstructionController(
         safety = safety,
         maximumChanges = maximumChanges,
-        isPreferredTool = { _, tool -> tool.type == Material.DIAMOND_PICKAXE },
-        constructionRefund = { block -> BuilderPlacementCost.itemOrNull(block.blockData) },
+        isPreferredTool = { _, tool -> tool.type.name.endsWith("_PICKAXE") },
+        blockDrops = { block, tool, _ -> drops(block, tool) },
         host = object : BuilderDeconstructionHost {
             override fun ensurePermission(player: Player) {
                 permissions++
             }
+
+            override fun canDeconstructWithoutTool(player: Player): Boolean = withoutToolPermission
 
             override fun requiredSelection(player: Player): BuilderSelection = selection
 

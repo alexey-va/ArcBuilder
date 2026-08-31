@@ -17,6 +17,7 @@ internal enum class BuilderFeature(
 
 internal object BuilderPermissionPolicy {
     private const val umbrellaPermission = "arcbuild.use"
+    private const val deconstructWithoutToolPermission = "arcbuild.deconstruct.without-tool"
     private val bookEntryPermissions = setOf(
         "arcbuild.book.create",
         "arcbuild.book.sell",
@@ -35,6 +36,9 @@ internal object BuilderPermissionPolicy {
 
     fun canUse(feature: BuilderFeature, hasPermission: (String) -> Boolean): Boolean =
         hasPermission(umbrellaPermission) || hasPermission(feature.canonicalPermission)
+
+    fun canDeconstructWithoutTool(hasPermission: (String) -> Boolean): Boolean =
+        hasPermission(deconstructWithoutToolPermission)
 
     fun maximumAxis(hasPermission: (String) -> Boolean, absoluteMaximum: Int): Int {
         val tier = sizeTiers.firstOrNull { size ->

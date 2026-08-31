@@ -131,6 +131,22 @@ Do not add coordinate persistence or block-physics listeners to this command.
 Persistent connection suppression would be a separate feature with a separate
 lifecycle and data model.
 
+## Deconstruction tools
+
+Survival deconstruction normally starts in tool mode only when the player holds
+a damageable item. The planner searches the held slot first and then all other
+storage slots for a preferred tool for each block. It pools their durability,
+never spends the final point on any tool, and snapshots every used slot into the
+journaled plan so confirmation fails if an item moves or changes.
+
+Drops use Paper's normal tool-aware drop query with Silk Touch removed from a
+clone of the selected tool; all other item state, including Fortune, is kept.
+The explicit `arcbuild.deconstruct.without-tool` permission permits bare-hand
+fallback when there is no suitable remaining tool. It is deliberately not a
+child of `arcbuild.use`, so operators must grant it separately. Because this
+permission is declared in `plugin.yml`, adding it to a running server requires
+the normal plugin restart path rather than `/builder reload`.
+
 ## Exact block replacement
 
 `/builder replace <old> <new>` scans the current selection for one exact vanilla
