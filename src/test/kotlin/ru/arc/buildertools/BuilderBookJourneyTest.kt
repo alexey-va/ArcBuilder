@@ -195,12 +195,12 @@ class BuilderBookJourneyTest : FunSpec({
         russian shouldContain "<click:run_command:'/builder disconnect'>"
         russian shouldContain "<click:run_command:'/builder deconstruct'>"
         russian shouldContain "<click:run_command:'/builder clear'>"
-        russian shouldContain "<color:#92bed8><hover:show_text:'Сохранить временный чертёж выделения.'>[▶ Скопировать]"
-        russian shouldContain "<color:#92bed8><hover:show_text:'Подставить команду и выбрать блок заполнения.'>[▶ Заполнить]"
-        russian shouldContain "<color:#92bed8><hover:show_text:'Подставить команду и указать старый и новый блок.'>[▶ Заменить]"
-        russian shouldContain "<color:#92bed8><hover:show_text:'Показать план разъединения заборов в выделении.'>[▶ Разъединить]"
-        russian shouldContain "<color:#92bed8><hover:show_text:'Показать план демонтажа; блоки изменятся только после подтверждения.'>[▶ Демонтаж]"
-        russian shouldContain "<color:#969696><hover:show_text:'Убрать выделение и его контур; чертёж сохранится.'>[✖ Сбросить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Сохраняет поддерживаемые блоки области как временный чертёж относительно вашей позиции. Мир не меняется; затем чертёж можно вставить или превратить в книгу.'>[▶ Скопировать]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Подставляет /builder fill в строку ввода: допишите название блока и отправьте команду. Сначала появится превью; заполнение начнётся только после подтверждения.'>[▶ Заполнить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Подставляет /builder replace в строку ввода: укажите сначала заменяемый, затем новый блок. Подходящие блоки изменятся только после превью и подтверждения.'>[▶ Заменить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Разрывает текущие соединения обычных заборов внутри области, чтобы они не цеплялись за соседние блоки. Сначала появится превью; соседнее обновление позже может соединить забор снова.'>[▶ Разъединить]"
+        russian shouldContain "<color:#92bed8><hover:show_text:'Создаёт план разборки поддерживаемых блоков с обычными дропами. Подходящие инструменты берутся из инвентаря по очереди и не расходуются ниже 1 единицы прочности; ничего не ломается до подтверждения.'>[▶ Демонтаж]"
+        russian shouldContain "<color:#969696><hover:show_text:'Удаляет обе точки и скрывает контур выделения. Временный скопированный чертёж и блоки мира не изменяются.'>[✘ Сбросить]"
         russian shouldNotContain "<click:run_command:'/builder fill"
         russian shouldNotContain "<click:run_command:'/builder replace"
         russian shouldNotContain "/builder disconnect confirm"
@@ -212,15 +212,31 @@ class BuilderBookJourneyTest : FunSpec({
         english shouldContain "<click:run_command:'/builder disconnect'>"
         english shouldContain "<click:run_command:'/builder deconstruct'>"
         english shouldContain "<click:run_command:'/builder clear'>"
-        english shouldContain "<color:#92bed8><hover:show_text:'Save a temporary blueprint of this selection.'>[▶ Copy]"
-        english shouldContain "<color:#92bed8><hover:show_text:'Insert the command, then choose the fill block.'>[▶ Fill]"
-        english shouldContain "<color:#92bed8><hover:show_text:'Insert the command, then enter the old and new blocks.'>[▶ Replace]"
-        english shouldContain "<color:#92bed8><hover:show_text:'Preview fence disconnection inside the selection.'>[▶ Disconnect]"
-        english shouldContain "<color:#92bed8><hover:show_text:'Preview deconstruction; blocks change only after confirmation.'>[▶ Deconstruct]"
-        english shouldContain "<color:#969696><hover:show_text:'Clear the selection and outline; keep the saved clipboard.'>[✖ Reset]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Saves supported blocks in this area as a temporary blueprint relative to your position. The world does not change; you can then paste it or turn it into a book.'>[▶ Copy]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Inserts /builder fill into chat input: add the block name and send the command. A preview appears first; filling starts only after confirmation.'>[▶ Fill]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Inserts /builder replace into chat input: enter the old block first and the new block second. Matching blocks change only after preview and confirmation.'>[▶ Replace]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Clears current connections on ordinary fences in the area so they stop attaching to neighboring blocks. A preview appears first; a later neighbor update may reconnect a fence.'>[▶ Disconnect]"
+        english shouldContain "<color:#92bed8><hover:show_text:'Creates a deconstruction plan with normal drops. Suitable tools are taken from inventory in order and never reduced below 1 durability; nothing breaks before confirmation.'>[▶ Deconstruct]"
+        english shouldContain "<color:#969696><hover:show_text:'Removes both selection points and hides the outline. The temporary copied blueprint and world blocks remain unchanged.'>[✘ Reset]"
         english shouldNotContain "<click:run_command:'/builder fill"
         english shouldNotContain "<click:run_command:'/builder replace"
         english shouldNotContain "/builder disconnect confirm"
+
+        listOf(russian, english).forEach { complete ->
+            val actionRows = complete.lines().filter { line -> line.contains("<click:") }
+            actionRows.size shouldBe 3
+            actionRows.map { row -> Regex("<click:").findAll(row).count() } shouldBe listOf(2, 2, 2)
+        }
+
+        config.string("locales.ru.errors.tool").also { toolError ->
+            toolError shouldContain "основной инвентарь"
+            toolError shouldContain "используются по очереди"
+            toolError shouldNotContain "основной руке"
+        }
+        config.string("locales.en.errors.tool").also { toolError ->
+            toolError shouldContain "main inventory"
+            toolError shouldContain "used in order"
+        }
 
         val russianClipboard = config.string("locales.ru.clipboard.saved")
         russianClipboard shouldContain "<color:#92bed8>[▶ Вставить здесь]"
@@ -246,7 +262,7 @@ class BuilderBookJourneyTest : FunSpec({
             }
 
             labels.size shouldBe 16
-            labels.all { label -> label.startsWith("▶ ") || label.startsWith("✖ ") } shouldBe true
+            labels.all { label -> label.startsWith("▶ ") || label.startsWith("✘ ") } shouldBe true
         }
     }
 

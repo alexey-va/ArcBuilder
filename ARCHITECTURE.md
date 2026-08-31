@@ -140,11 +140,11 @@ lifecycle and data model.
 
 ## Deconstruction tools
 
-Survival deconstruction normally starts in tool mode only when the player holds
-a damageable item. The planner searches the held slot first and then all other
-storage slots for a preferred tool for each block. It pools their durability,
-never spends the final point on any tool, and snapshots every used slot into the
-journaled plan so confirmation fails if an item moves or changes.
+Survival deconstruction scans the complete storage inventory for damageable
+tools. The planner searches the held slot first and then all other storage slots
+for a preferred tool for each block. It pools their durability, never spends the
+final point on any tool, and snapshots every used slot into the journaled plan
+so confirmation fails if an item moves or changes.
 
 Drops use Paper's normal tool-aware drop query with Silk Touch removed from a
 clone of the selected tool; all other item state, including Fortune, is kept.

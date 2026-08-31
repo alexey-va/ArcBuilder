@@ -30,7 +30,7 @@ jobs:
         run: ./gradlew --no-daemon test shadowJar
       - name: Verify production artifact
         run: |
-          jar_path="build/libs/ArcBuilder-1.0.3.jar"
+          jar_path="build/libs/ArcBuilder-1.0.4.jar"
           test -s "$jar_path"
           jar tf "$jar_path" | grep -Fx plugin.yml
           jar tf "$jar_path" | grep -Fq 'kotlin/collections/CollectionsKt.class'
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ArcBuilder-${{ github.sha }}
-          path: build/libs/ArcBuilder-1.0.3.jar
+          path: build/libs/ArcBuilder-1.0.4.jar
           if-no-files-found: error
 
   mysql-integration:

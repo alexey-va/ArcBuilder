@@ -45,7 +45,7 @@ permissions:
   arcbuild.deconstruct:
     default: false
   arcbuild.deconstruct.without-tool:
-    description: Allow ArcBuilder deconstruction without a held tool
+    description: Allow ArcBuilder deconstruction without a suitable inventory tool
     default: false
   arcbuild.crown:
     default: false

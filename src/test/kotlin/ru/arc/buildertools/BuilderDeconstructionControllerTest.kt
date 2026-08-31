@@ -87,6 +87,33 @@ class BuilderDeconstructionControllerTest : FunSpec({
         }
     }
 
+    test("survival discovers a suitable tool outside the held slot") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderDeconstructionInventoryToolTest")
+            val world = paper.addSimpleWorld("deconstruction-inventory-tool")
+            val player = paper.addPlayer("InventoryToolOwner")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            val harness = DeconstructionHarness(plugin)
+            harness.select(world, 0, 64, 0, 0, 64, 0)
+            player.inventory.setItemInMainHand(ItemStack(Material.STICK))
+            val inventoryTool = ItemStack(Material.IRON_PICKAXE).apply {
+                editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 2 }
+            }
+            player.inventory.setItem(10, inventoryTool)
+
+            val plan = harness.controller.plan(player)
+            val pooled = BuilderPooledToolCodec.decode(checkNotNull(plan.toolFingerprintBase64))
+
+            pooled.uses.map { it.slot to it.damage } shouldBe listOf(10 to 1)
+            plan.toolDamage shouldBe 1
+            BuilderInventory.applyToolDamage(player, checkNotNull(plan.toolFingerprintBase64), plan.toolDamage)
+            player.inventory.itemInMainHand.type shouldBe Material.STICK
+            (player.inventory.getItem(10)?.itemMeta as Damageable).damage shouldBe
+                Material.IRON_PICKAXE.maxDurability.toInt() - 1
+        }
+    }
+
     test("explicit permission allows tool-free survival deconstruction") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderDeconstructionWithoutToolTest")

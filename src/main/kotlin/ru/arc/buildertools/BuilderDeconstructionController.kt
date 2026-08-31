@@ -57,9 +57,9 @@ internal class BuilderDeconstructionController(
         val world = host.world(selection.worldId)
         val usesInventory = BuilderGameModePolicy.usesInventory(player.gameMode)
         val canBypassTool = usesInventory && host.canDeconstructWithoutTool(player)
-        val usesTools = usesInventory && BuilderToolDurability.maximumDamage(player.inventory.itemInMainHand) > 0
+        val tools = if (usesInventory) pooledTools(player) else emptyList()
+        val usesTools = tools.any(PooledTool::available)
         if (usesInventory && !usesTools && !canBypassTool) host.fail("errors.tool")
-        val tools = if (usesTools) pooledTools(player) else emptyList()
         val changes = mutableListOf<BuilderBlockChange>()
         val refunds = mutableListOf<ItemStack>()
         val air = Material.AIR.createBlockData().asString
