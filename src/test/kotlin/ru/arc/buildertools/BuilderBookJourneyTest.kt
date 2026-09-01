@@ -227,6 +227,16 @@ class BuilderBookJourneyTest : FunSpec({
             actionRows.size shouldBe 3
             actionRows.map { row -> Regex("<click:").findAll(row).count() } shouldBe listOf(2, 2, 2)
         }
+        russian.lines().filter { line -> line.contains("<click:") }.also { rows ->
+            rows[0] shouldContain "</click>  <click:"
+            rows[1] shouldContain "</click><bold>     </bold><click:"
+            rows[2] shouldContain "</click>      <click:"
+        }
+        english.lines().filter { line -> line.contains("<click:") }.also { rows ->
+            rows[0] shouldContain "</click>         <bold>  </bold><click:"
+            rows[1] shouldContain "</click>    <bold>   </bold><click:"
+            rows[2] shouldContain "</click>  <click:"
+        }
 
         config.string("locales.ru.errors.tool").also { toolError ->
             toolError shouldContain "основной инвентарь"
