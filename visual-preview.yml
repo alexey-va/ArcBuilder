@@ -340,7 +340,7 @@ surfaces:
           material: GRAY_DYE
           name: builder:construction.site.menu.control.readonly.name
           lore: builder:construction.site.menu.control.readonly.lore
-    - id: construction-control-transition
+    - id: construction-control-unavailable
       extends: construction-control-active
       placeholders:
         state: складывает блоки

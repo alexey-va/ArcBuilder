@@ -1375,18 +1375,25 @@ internal class BuilderToolsRuntime(
 
     private fun startConstructionProject(
         player: Player,
-        prepared: BuilderConstructionProjectRecord,
+        planned: BuilderConstructionProjectRecord,
         plannedMode: GameMode,
     ) {
-        plannedConstructionProjects.remove(prepared.projectId)
+        plannedConstructionProjects.remove(planned.projectId)
         if (player.gameMode != plannedMode) {
-            books.releasePlanReservation(prepared.plan)
+            books.releasePlanReservation(planned.plan)
             throw BuilderUserFailure("errors.game-mode-changed")
         }
         if (constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
-            books.releasePlanReservation(prepared.plan)
+            books.releasePlanReservation(planned.plan)
             throw BuilderUserFailure("errors.busy")
         }
+        val prepared = planned.copy(
+            sitePanelFace = BuilderConstructionSiteDisplayLayout.nearestFace(
+                planned,
+                player.location.x,
+                player.location.z,
+            ),
+        ).validated(config.maxChanges)
         var durablePrepared: BuilderConstructionProjectRecord? = null
         var attemptedTarget: BuilderConstructionProjectRecord? = null
         var constructionLeaseHeld = false

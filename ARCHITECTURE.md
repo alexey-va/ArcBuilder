@@ -206,6 +206,12 @@ Missing material or output space is a waiting state, not a failed build.
 Ambiguous block, permission, persistence, or output-delivery state fails closed
 into `RECOVERY_REQUIRED`.
 
+At confirmation, the project durably records the vertical construction face
+whose center is nearest to the player. The global site display recreates its
+fixed text panel outside that face after restart, with a face-specific yaw;
+`construction.site.panel.face` is only the fallback for legacy records that do
+not contain this presentation field.
+
 Every book debit, step debit, and recovered-block delivery uses a durable
 write-ahead receipt containing the exact source identity plus before/after
 inventory slots. Replaying a receipt recognizes an already-applied effect,

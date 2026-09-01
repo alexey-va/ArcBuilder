@@ -147,18 +147,26 @@ class BuilderConstructionProjectStoreTest : FunSpec({
 
     test("legacy project JSON without a title remains compatible while current JSON preserves it") {
         val gson = GsonBuilder().disableHtmlEscaping().create()
-        val titled = prepared().copy(projectTitle = "Подводный стартовый дом").validated()
+        val titled = prepared().copy(
+            projectTitle = "Подводный стартовый дом",
+            sitePanelFace = BuilderConstructionSitePanelFace.MIN_X,
+        ).validated()
         val currentJson = gson.toJsonTree(titled).asJsonObject
 
         gson.fromJson(currentJson, BuilderConstructionProjectRecord::class.java)
             .validated()
             .projectTitle shouldBe "Подводный стартовый дом"
+        gson.fromJson(currentJson, BuilderConstructionProjectRecord::class.java)
+            .validated()
+            .sitePanelFace shouldBe BuilderConstructionSitePanelFace.MIN_X
 
         currentJson.remove("projectTitle")
+        currentJson.remove("sitePanelFace")
         currentJson.remove("completionFinalizedAtMillis")
         val legacy = gson.fromJson(currentJson, BuilderConstructionProjectRecord::class.java).validated()
 
         legacy.projectTitle shouldBe null
+        legacy.sitePanelFace shouldBe null
         legacy.completionFinalizedAtMillis shouldBe null
         legacy.plan shouldBe titled.plan
         legacy.steps shouldBe titled.steps

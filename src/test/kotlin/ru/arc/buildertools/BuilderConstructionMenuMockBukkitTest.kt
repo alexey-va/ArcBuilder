@@ -92,6 +92,42 @@ class BuilderConstructionMenuMockBukkitTest : FunSpec({
         }
     }
 
+    test("durable internal step states keep the owner pause control visually stable") {
+        withMenuFixture { fixture ->
+            val owner = fixture.paper.addPlayer("StableOwner").also {
+                it.setLocale(Locale.forLanguageTag("ru-RU"))
+            }
+            var project = fixture.project(owner.uniqueId)
+            fixture.openManager(
+                projectLookup = { project },
+                canControl = { player, record -> player.uniqueId == record.playerId },
+                requestPaused = { _, _, _ -> true },
+            ).use { menu ->
+                menu.open(owner, project)
+                val inventory = owner.openInventory.topInventory
+
+                inventory.getItem(16)?.type shouldBe Material.REDSTONE_TORCH
+                plain(inventory.getItem(10)!!.itemMeta.lore().orEmpty()[1]) shouldContain "строится"
+
+                project = project.copy(
+                    state = BuilderConstructionProjectState.INPUT_PREPARED,
+                    updatedAtMillis = project.updatedAtMillis + 1,
+                ).validated()
+                menu.refreshProject(project.projectId)
+                inventory.getItem(16)?.type shouldBe Material.REDSTONE_TORCH
+                plain(inventory.getItem(10)!!.itemMeta.lore().orEmpty()[1]) shouldContain "строится"
+
+                project = project.copy(
+                    state = BuilderConstructionProjectState.WORLD_PREPARED,
+                    updatedAtMillis = project.updatedAtMillis + 1,
+                ).validated()
+                menu.refreshProject(project.projectId)
+                inventory.getItem(16)?.type shouldBe Material.REDSTONE_TORCH
+                plain(inventory.getItem(10)!!.itemMeta.lore().orEmpty()[1]) shouldContain "строится"
+            }
+        }
+    }
+
     test("reopening the same project keeps refresh active, shows pause, and closes a terminal project") {
         withMenuFixture { fixture ->
             val owner = fixture.paper.addPlayer("RefreshOwner").also {

@@ -44,7 +44,7 @@ construction:
       glow-color: '#FFB142'
     panel:
       enabled: true
-      # Switch between MIN_Z and MAX_Z, then /builder reload; MAX_Z is the player-facing side used by build books.
+      # Fallback for legacy projects. New projects persist the nearest vertical face to the owner at confirmation.
       face: MAX_Z
       height-offset: 2.25
       front-offset: 0.4

@@ -24,6 +24,13 @@ internal enum class BuilderConstructionProjectState(val terminal: Boolean) {
     CANCELLED(true),
 }
 
+enum class BuilderConstructionSitePanelFace(val yaw: Float) {
+    MIN_X(90f),
+    MAX_X(270f),
+    MIN_Z(180f),
+    MAX_Z(0f),
+}
+
 internal data class BuilderConstructionStep(
     val change: BuilderBlockChange,
     val requiredMaterial: BuilderItemAmount?,
@@ -51,6 +58,7 @@ internal data class BuilderConstructionProjectRecord(
     val playerId: UUID,
     val playerName: String,
     val projectTitle: String? = null,
+    val sitePanelFace: BuilderConstructionSitePanelFace? = null,
     val plan: BuilderPlan,
     val steps: List<BuilderConstructionStep>,
     val bookCost: BuilderItemAmount,
@@ -450,6 +458,7 @@ internal object BuilderConstructionProjectTransitionRules {
         playerId,
         playerName,
         projectTitle,
+        sitePanelFace,
         plan,
         steps,
         bookCost,

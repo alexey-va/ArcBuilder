@@ -46,11 +46,6 @@ internal data class BuilderConstructionSiteDisplaySettings(
     val defaultLocale: String,
 )
 
-enum class BuilderConstructionSitePanelFace {
-    MIN_Z,
-    MAX_Z,
-}
-
 internal fun BuilderToolsConfig.constructionSiteDisplaySettings() = BuilderConstructionSiteDisplaySettings(
     enabled = constructionSiteEnabled,
     outlineEnabled = constructionSiteOutlineEnabled,
@@ -75,7 +70,15 @@ internal data class BuilderConstructionSiteDisplayModel(
     val panelX: Double,
     val panelY: Double,
     val panelZ: Double,
+    val panelYaw: Float,
 )
+
+internal object BuilderConstructionSitePanelOrientation {
+    fun apply(display: TextDisplay, yaw: Float) {
+        display.billboard = Display.Billboard.FIXED
+        display.setRotation(yaw, 0f)
+    }
+}
 
 internal object BuilderConstructionSiteDisplayLayout {
     fun create(
@@ -86,21 +89,65 @@ internal object BuilderConstructionSiteDisplayLayout {
         require(positions.isNotEmpty())
         val worldId = positions.first().worldId
         require(positions.all { it.worldId == worldId })
-        val minX = positions.minOf { it.x }.toDouble()
-        val minY = positions.minOf { it.y }.toDouble()
-        val minZ = positions.minOf { it.z }.toDouble()
-        val maxX = positions.maxOf { it.x } + 1.0
-        val maxZ = positions.maxOf { it.z } + 1.0
+        val bounds = bounds(positions)
+        val face = project.sitePanelFace ?: settings.panelFace
+        val panel = panelCenter(bounds, face, settings.panelFrontOffset)
         return BuilderConstructionSiteDisplayModel(
             worldId = worldId,
             edges = BuilderDisplayGeometry.bounds(positions, settings.outlineThickness),
-            panelX = (minX + maxX) / 2.0,
-            panelY = minY + settings.panelHeightOffset,
-            panelZ = when (settings.panelFace) {
-                BuilderConstructionSitePanelFace.MIN_Z -> minZ - settings.panelFrontOffset
-                BuilderConstructionSitePanelFace.MAX_Z -> maxZ + settings.panelFrontOffset
-            },
+            panelX = panel.first,
+            panelY = bounds.minY + settings.panelHeightOffset,
+            panelZ = panel.second,
+            panelYaw = face.yaw,
         )
+    }
+
+    fun nearestFace(
+        project: BuilderConstructionProjectRecord,
+        viewerX: Double,
+        viewerZ: Double,
+    ): BuilderConstructionSitePanelFace {
+        val bounds = bounds(project.steps.map { it.change.position })
+        return BuilderConstructionSitePanelFace.entries.minBy { face ->
+            val (panelX, panelZ) = panelCenter(bounds, face, frontOffset = 0.0)
+            val deltaX = viewerX - panelX
+            val deltaZ = viewerZ - panelZ
+            deltaX * deltaX + deltaZ * deltaZ
+        }
+    }
+
+    private data class Bounds(
+        val minX: Double,
+        val minY: Double,
+        val minZ: Double,
+        val maxX: Double,
+        val maxZ: Double,
+    )
+
+    private fun bounds(positions: List<BuilderBlockPos>): Bounds {
+        require(positions.isNotEmpty())
+        return Bounds(
+            minX = positions.minOf { it.x }.toDouble(),
+            minY = positions.minOf { it.y }.toDouble(),
+            minZ = positions.minOf { it.z }.toDouble(),
+            maxX = positions.maxOf { it.x } + 1.0,
+            maxZ = positions.maxOf { it.z } + 1.0,
+        )
+    }
+
+    private fun panelCenter(
+        bounds: Bounds,
+        face: BuilderConstructionSitePanelFace,
+        frontOffset: Double,
+    ): Pair<Double, Double> {
+        val centerX = (bounds.minX + bounds.maxX) / 2.0
+        val centerZ = (bounds.minZ + bounds.maxZ) / 2.0
+        return when (face) {
+            BuilderConstructionSitePanelFace.MIN_X -> bounds.minX - frontOffset to centerZ
+            BuilderConstructionSitePanelFace.MAX_X -> bounds.maxX + frontOffset to centerZ
+            BuilderConstructionSitePanelFace.MIN_Z -> centerX to bounds.minZ - frontOffset
+            BuilderConstructionSitePanelFace.MAX_Z -> centerX to bounds.maxZ + frontOffset
+        }
     }
 }
 
@@ -191,7 +238,7 @@ internal class BuilderConstructionSiteDisplayManager(
                 panel = world.spawn(location, TextDisplay::class.java) { display ->
                     configure(display, project.projectId)
                     display.text(panelText(project))
-                    display.billboard = Display.Billboard.CENTER
+                    BuilderConstructionSitePanelOrientation.apply(display, model.panelYaw)
                     display.lineWidth = settings.panelLineWidth
                     display.backgroundColor = settings.panelBackgroundColor
                     display.isShadowed = true
