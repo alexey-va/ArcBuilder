@@ -87,6 +87,28 @@ class BuilderConstructionProjectDomainTest : FunSpec({
         completed.terminal shouldBe true
     }
 
+    test("completed project records finalization exactly once without changing completion time") {
+        val completed = prepared()
+            .activated(createdAt + 1)
+            .advanced(createdAt + 2)
+            .advanced(createdAt + 3)
+        val finalized = completed.completionFinalized(createdAt + 4)
+
+        completed.completionFinalizedAtMillis shouldBe null
+        finalized.completionFinalizedAtMillis shouldBe createdAt + 4
+        finalized.completedAtMillis shouldBe createdAt + 3
+        finalized.updatedAtMillis shouldBe createdAt + 3
+        finalized.state shouldBe BuilderConstructionProjectState.COMPLETED
+
+        shouldThrow<IllegalArgumentException> { finalized.completionFinalized(createdAt + 5) }
+        shouldThrow<IllegalArgumentException> {
+            completed.copy(completionFinalizedAtMillis = createdAt + 2).validated()
+        }
+        shouldThrow<IllegalArgumentException> {
+            prepared().activated(createdAt + 1).copy(completionFinalizedAtMillis = createdAt + 2).validated()
+        }
+    }
+
     test("missing input and full output storage pause without losing the current step") {
         val active = prepared().activated(createdAt + 1)
         val waitingMaterial = active.waitingForMaterials(createdAt + 2)

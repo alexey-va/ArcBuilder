@@ -102,6 +102,20 @@ class BuilderConstructionProjectStoreTest : FunSpec({
         reloaded?.pendingResourceMutation?.sources?.single()?.after shouldBe receipt.sources.single().after
     }
 
+    test("store persists completion finalization and makes its retry idempotent") {
+        val root = Files.createTempDirectory("arc-builder-construction-finalized-")
+        val store = BuilderConstructionProjectStore(root, maxChanges = 10_000)
+        val prepared = store.commit(prepared())
+        val active = store.transition(prepared, prepared.activated(createdAt + 1))
+        val completed = store.transition(active, active.advanced(createdAt + 2))
+        val finalized = completed.completionFinalized(createdAt + 3)
+
+        store.transition(completed, finalized) shouldBe finalized
+        store.transition(completed, finalized) shouldBe finalized
+        BuilderConstructionProjectStore(root, maxChanges = 10_000)
+            .loadOrNull(projectId) shouldBe finalized
+    }
+
     test("store restart preserves a reviewed chest loot-table step") {
         val root = Files.createTempDirectory("arc-builder-construction-project-loot-")
         val chestChange = BuilderBlockChange(
@@ -141,9 +155,11 @@ class BuilderConstructionProjectStoreTest : FunSpec({
             .projectTitle shouldBe "Подводный стартовый дом"
 
         currentJson.remove("projectTitle")
+        currentJson.remove("completionFinalizedAtMillis")
         val legacy = gson.fromJson(currentJson, BuilderConstructionProjectRecord::class.java).validated()
 
         legacy.projectTitle shouldBe null
+        legacy.completionFinalizedAtMillis shouldBe null
         legacy.plan shouldBe titled.plan
         legacy.steps shouldBe titled.steps
     }

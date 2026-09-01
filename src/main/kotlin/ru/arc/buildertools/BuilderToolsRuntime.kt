@@ -1496,7 +1496,9 @@ internal class BuilderToolsRuntime(
                 constructionProjects[record.projectId] = record
                 constructionSiteDisplays.upsert(record)
                 when (record.state) {
-                    BuilderConstructionProjectState.COMPLETED -> finalizeConstructionCompletion(record)
+                    BuilderConstructionProjectState.COMPLETED -> if (record.completionFinalizedAtMillis == null) {
+                        finalizeConstructionCompletion(record)
+                    }
                     BuilderConstructionProjectState.RECOVERY_REQUIRED -> {
                         Bukkit.getPlayer(record.playerId)?.takeIf(Player::isOnline)?.let {
                             send(it, "construction.recovery-required")
@@ -1677,26 +1679,42 @@ internal class BuilderToolsRuntime(
     }
 
     private fun finalizeConstructionCompletion(record: BuilderConstructionProjectRecord) {
+        if (record.completionFinalizedAtMillis != null) return
         if (!constructionCompletions.add(record.projectId)) return
         constructionSiteDisplays.remove(record.projectId)
         val completed = {
-            constructionCompletions.remove(record.projectId)
-            constructionResources.forget(record.projectId)
-            unlockConstruction(record)
-            Bukkit.getPlayer(record.playerId)?.takeIf(Player::isOnline)?.let { player ->
-                send(
-                    player,
-                    "construction.completed",
-                    mapOf("count" to messages.literal(record.steps.size)),
-                )
-            }
-            info(
-                debugLine.line(
-                    "event" to "construction_completed",
-                    "operation" to record.projectId,
-                    "player" to record.playerId,
-                    "blocks" to record.steps.size,
-                ),
+            val finalized = record.completionFinalized(System.currentTimeMillis())
+            writeAsync(
+                action = { constructionStore.transition(record, finalized) },
+                callback = { durable, failure ->
+                    constructionCompletions.remove(record.projectId)
+                    if (failure != null || durable == null) {
+                        recoveryBlocked = true
+                        error("Builder construction completion finalization requires recovery for ${record.projectId}", failure)
+                        Bukkit.getPlayer(record.playerId)?.takeIf(Player::isOnline)?.let { player ->
+                            send(player, "construction.recovery-required")
+                        }
+                        return@writeAsync
+                    }
+                    constructionProjects[durable.projectId] = durable
+                    constructionResources.forget(durable.projectId)
+                    unlockConstruction(durable)
+                    Bukkit.getPlayer(durable.playerId)?.takeIf(Player::isOnline)?.let { player ->
+                        send(
+                            player,
+                            "construction.completed",
+                            mapOf("count" to messages.literal(durable.steps.size)),
+                        )
+                    }
+                    info(
+                        debugLine.line(
+                            "event" to "construction_completed",
+                            "operation" to durable.projectId,
+                            "player" to durable.playerId,
+                            "blocks" to durable.steps.size,
+                        ),
+                    )
+                },
             )
         }
         if (record.plan.bookInstanceId == null) {

@@ -59,6 +59,7 @@ internal data class BuilderConstructionProjectRecord(
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
     val completedAtMillis: Long? = null,
+    val completionFinalizedAtMillis: Long? = null,
 ) {
     val terminal: Boolean get() = state.terminal
 
@@ -106,6 +107,14 @@ internal data class BuilderConstructionProjectRecord(
         }
         completedAtMillis?.let {
             require(it == updatedAtMillis) { "Builder construction project completion time is invalid" }
+        }
+        completionFinalizedAtMillis?.let { finalizedAt ->
+            require(state == BuilderConstructionProjectState.COMPLETED) {
+                "Only a completed builder construction project may be finalized"
+            }
+            require(finalizedAt >= checkNotNull(completedAtMillis)) {
+                "Builder construction project finalization predates completion"
+            }
         }
         require((state in OUTPUT_STATES) == (pendingOutput != null)) {
             "Builder construction project pending output does not match its state"
@@ -266,6 +275,13 @@ internal data class BuilderConstructionProjectRecord(
         ),
     )
 
+    fun completionFinalized(nowMillis: Long): BuilderConstructionProjectRecord {
+        require(state == BuilderConstructionProjectState.COMPLETED && completionFinalizedAtMillis == null) {
+            "Only an unfinalized completed builder construction project may be finalized"
+        }
+        return transitionTo(copy(completionFinalizedAtMillis = nowMillis))
+    }
+
     private fun advanceFromCurrent(nowMillis: Long): BuilderConstructionProjectRecord {
         val nextCursor = cursor + 1
         val completed = nextCursor == steps.size
@@ -317,7 +333,22 @@ internal object BuilderConstructionProjectTransitionRules {
         require(after.updatedAtMillis >= before.updatedAtMillis) {
             "Builder construction project transition moved time backwards"
         }
+        if (before.state == BuilderConstructionProjectState.COMPLETED) {
+            require(before.completionFinalizedAtMillis == null) {
+                "A finalized builder construction project cannot transition"
+            }
+            require(after == before.copy(completionFinalizedAtMillis = after.completionFinalizedAtMillis)) {
+                "Builder construction project finalization changed unrelated data"
+            }
+            require(after.completionFinalizedAtMillis != null) {
+                "Builder construction project finalization timestamp is missing"
+            }
+            return
+        }
         require(!before.terminal) { "A terminal builder construction project cannot transition" }
+        require(after.completionFinalizedAtMillis == before.completionFinalizedAtMillis) {
+            "Builder construction project was finalized before completion"
+        }
         val sameCursor = after.cursor == before.cursor
         val advancedOne = after.cursor == before.cursor + 1
         val valid = when (before.state) {
