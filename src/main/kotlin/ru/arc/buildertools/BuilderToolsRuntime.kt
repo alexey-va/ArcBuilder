@@ -1523,7 +1523,7 @@ internal class BuilderToolsRuntime(
                 record.state == BuilderConstructionProjectState.WORLD_PREPARED ||
                 record.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
                 record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT ||
-                BuilderConstructionRecoveryPolicy.canResumeAppliedNoExchangeStep(record)
+                canRetryAppliedConstructionRecovery(record)
         }
         candidates.forEach { expected ->
             if (!constructionWrites.add(expected.projectId)) return@forEach
@@ -1600,6 +1600,13 @@ internal class BuilderToolsRuntime(
                 },
             )
         }
+    }
+
+    private fun canRetryAppliedConstructionRecovery(record: BuilderConstructionProjectRecord): Boolean {
+        if (!BuilderConstructionRecoveryPolicy.canResumeAppliedNoExchangeStep(record)) return false
+        val position = record.steps[record.cursor].change.position
+        val world = Bukkit.getWorld(position.worldId) ?: return false
+        return world.isChunkLoaded(position.x shr 4, position.z shr 4)
     }
 
     private fun recoverRejectedConstructionMutation(
