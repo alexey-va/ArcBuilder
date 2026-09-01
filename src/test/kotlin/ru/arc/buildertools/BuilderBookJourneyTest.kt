@@ -200,7 +200,7 @@ class BuilderBookJourneyTest : FunSpec({
         russian shouldContain "<color:#92bed8><hover:show_text:'Подставляет /builder replace в строку ввода: укажите сначала заменяемый, затем новый блок. Подходящие блоки изменятся только после превью и подтверждения.'>[▶ Заменить]"
         russian shouldContain "<color:#92bed8><hover:show_text:'Разрывает текущие соединения обычных заборов внутри области, чтобы они не цеплялись за соседние блоки. Сначала появится превью; соседнее обновление позже может соединить забор снова.'>[▶ Разъединить]"
         russian shouldContain "<color:#92bed8><hover:show_text:'Создаёт план разборки поддерживаемых блоков с обычными дропами. Подходящие инструменты берутся из инвентаря по очереди и не расходуются ниже 1 единицы прочности; ничего не ломается до подтверждения.'>[▶ Демонтаж]"
-        russian shouldContain "<color:#969696><hover:show_text:'Удаляет обе точки и скрывает контур выделения. Временный скопированный чертёж и блоки мира не изменяются.'>[✘ Сбросить]"
+        russian shouldContain "<color:#969696><hover:show_text:'Удаляет обе точки и скрывает контур выделения. Временный скопированный чертёж и блоки мира не изменяются.'>[❌ Сбросить]"
         russian shouldNotContain "<click:run_command:'/builder fill"
         russian shouldNotContain "<click:run_command:'/builder replace"
         russian shouldNotContain "/builder disconnect confirm"
@@ -217,7 +217,7 @@ class BuilderBookJourneyTest : FunSpec({
         english shouldContain "<color:#92bed8><hover:show_text:'Inserts /builder replace into chat input: enter the old block first and the new block second. Matching blocks change only after preview and confirmation.'>[▶ Replace]"
         english shouldContain "<color:#92bed8><hover:show_text:'Clears current connections on ordinary fences in the area so they stop attaching to neighboring blocks. A preview appears first; a later neighbor update may reconnect a fence.'>[▶ Disconnect]"
         english shouldContain "<color:#92bed8><hover:show_text:'Creates a deconstruction plan with normal drops. Suitable tools are taken from inventory in order and never reduced below 1 durability; nothing breaks before confirmation.'>[▶ Deconstruct]"
-        english shouldContain "<color:#969696><hover:show_text:'Removes both selection points and hides the outline. The temporary copied blueprint and world blocks remain unchanged.'>[✘ Reset]"
+        english shouldContain "<color:#969696><hover:show_text:'Removes both selection points and hides the outline. The temporary copied blueprint and world blocks remain unchanged.'>[❌ Reset]"
         english shouldNotContain "<click:run_command:'/builder fill"
         english shouldNotContain "<click:run_command:'/builder replace"
         english shouldNotContain "/builder disconnect confirm"
@@ -272,7 +272,7 @@ class BuilderBookJourneyTest : FunSpec({
             }
 
             labels.size shouldBe 16
-            labels.all { label -> label.startsWith("▶ ") || label.startsWith("✘ ") } shouldBe true
+            labels.all { label -> label.startsWith("▶ ") || label.startsWith("❌ ") } shouldBe true
         }
     }
 

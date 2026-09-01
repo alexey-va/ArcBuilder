@@ -270,7 +270,7 @@ locales:
         <#8c8c8c>   Область <#d48763><x>×<y>×<z> <#8c8c8c>— <#e6fff3><volume> блоков
         <#8c8c8c>   <click:run_command:'/builder copy'><#92bed8><hover:show_text:'Сохраняет поддерживаемые блоки области как временный чертёж относительно вашей позиции. Мир не меняется; затем чертёж можно вставить или превратить в книгу.'>[▶ Скопировать]</hover></click>  <click:suggest_command:'/builder fill '><#92bed8><hover:show_text:'Подставляет /builder fill в строку ввода: допишите название блока и отправьте команду. Сначала появится превью; заполнение начнётся только после подтверждения.'>[▶ Заполнить]</hover></click>
         <#8c8c8c>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Подставляет /builder replace в строку ввода: укажите сначала заменяемый, затем новый блок. Подходящие блоки изменятся только после превью и подтверждения.'>[▶ Заменить]</hover></click><bold>     </bold><click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Разрывает текущие соединения обычных заборов внутри области, чтобы они не цеплялись за соседние блоки. Сначала появится превью; соседнее обновление позже может соединить забор снова.'>[▶ Разъединить]</hover></click>
-        <#8c8c8c>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Создаёт план разборки поддерживаемых блоков с обычными дропами. Подходящие инструменты берутся из инвентаря по очереди и не расходуются ниже 1 единицы прочности; ничего не ломается до подтверждения.'>[▶ Демонтаж]</hover></click>      <click:run_command:'/builder clear'><#969696><hover:show_text:'Удаляет обе точки и скрывает контур выделения. Временный скопированный чертёж и блоки мира не изменяются.'>[✘ Сбросить]</hover></click>
+        <#8c8c8c>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Создаёт план разборки поддерживаемых блоков с обычными дропами. Подходящие инструменты берутся из инвентаря по очереди и не расходуются ниже 1 единицы прочности; ничего не ломается до подтверждения.'>[▶ Демонтаж]</hover></click>      <click:run_command:'/builder clear'><#969696><hover:show_text:'Удаляет обе точки и скрывает контур выделения. Временный скопированный чертёж и блоки мира не изменяются.'>[❌ Сбросить]</hover></click>
       cleared: |-
 
         <prefix><#969696>Выделение очищено; частицы скрыты.
@@ -532,7 +532,7 @@ locales:
         <#8c8c8c>   <hover:show_text:'Стоимость материалов, которые продаются в строительном админшопе.'>Из админшопа</hover>: <#e6fff3><materials>
         <#8c8c8c>   <hover:show_text:'Материалы, которых нет в админшопе; они не входят в денежную цену.'>Принести с собой</hover>: <#d48763><required>
         <#8c8c8c>   <hover:show_text:'Плата за строительство поверх стоимости материалов.'>Работа</hover>: <#e6fff3><labor> <#8c8c8c>— <hover:show_text:'Сумма материалов из админшопа и работы.'>Итого</hover>: <#2bba43><price>
-        <#8c8c8c>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[✘ Отмена]</click>
+        <#8c8c8c>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[❌ Отмена]</click>
       preview-opened: |-
 
         <prefix><#d48763>«<name>» <#8c8c8c>— <state>
@@ -639,11 +639,11 @@ locales:
         <#8c8c8c>   <hover:show_text:'Предметы, которые операция заберёт для выполнения плана.'>Расход</hover>: <#d48763><cost>
         <#8c8c8c>   <hover:show_text:'Предметы, которые операция отдаст за снятые или заменённые блоки.'>Возврат</hover>: <#d48763><reward>
       actions:
-        ready: "<#8c8c8c>   <click:run_command:'/builder confirm'><#92bed8>[▶ Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✘ Отмена]</click>"
+        ready: "<#8c8c8c>   <click:run_command:'/builder confirm'><#92bed8>[▶ Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[❌ Отмена]</click>"
       skipped: "<#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки план намеренно не меняет.'>Пропущено безопасно</hover>: <#969696><count>"
       market:
         - "<#8c8c8c>   <hover:show_text:'Полная цена всех расходуемых материалов по админшопу.'>Смета</hover> <#d48763><full_price> <#8c8c8c>— <hover:show_text:'Цена только тех материалов, которых сейчас не хватает в инвентаре.'>докупить</hover> <#e6fff3><missing_price>"
-        - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Купить и построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✘ Отмена]</click>"
+        - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Купить и построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[❌ Отмена]</click>"
       market-item: "<#8c8c8c>     <#e6fff3><amount>× <material>"
       market-unavailable: "<prefix><#ff9f0f>В админшопе нет: <#d48763><material>"
       market-more: "<#8c8c8c>     <#969696>Ещё материалов: <count>"
@@ -891,7 +891,7 @@ locales:
         <dark_gray>   <gray>Area: <white><x>×<y>×<z></white> — <volume> blocks
         <dark_gray>   <click:run_command:'/builder copy'><#92bed8><hover:show_text:'Saves supported blocks in this area as a temporary blueprint relative to your position. The world does not change; you can then paste it or turn it into a book.'>[▶ Copy]</hover></click>         <bold>  </bold><click:suggest_command:'/builder fill '><#92bed8><hover:show_text:'Inserts /builder fill into chat input: add the block name and send the command. A preview appears first; filling starts only after confirmation.'>[▶ Fill]</hover></click>
         <dark_gray>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Inserts /builder replace into chat input: enter the old block first and the new block second. Matching blocks change only after preview and confirmation.'>[▶ Replace]</hover></click>    <bold>   </bold><click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Clears current connections on ordinary fences in the area so they stop attaching to neighboring blocks. A preview appears first; a later neighbor update may reconnect a fence.'>[▶ Disconnect]</hover></click>
-        <dark_gray>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Creates a deconstruction plan with normal drops. Suitable tools are taken from inventory in order and never reduced below 1 durability; nothing breaks before confirmation.'>[▶ Deconstruct]</hover></click>  <click:run_command:'/builder clear'><#969696><hover:show_text:'Removes both selection points and hides the outline. The temporary copied blueprint and world blocks remain unchanged.'>[✘ Reset]</hover></click>
+        <dark_gray>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Creates a deconstruction plan with normal drops. Suitable tools are taken from inventory in order and never reduced below 1 durability; nothing breaks before confirmation.'>[▶ Deconstruct]</hover></click>  <click:run_command:'/builder clear'><#969696><hover:show_text:'Removes both selection points and hides the outline. The temporary copied blueprint and world blocks remain unchanged.'>[❌ Reset]</hover></click>
       cleared: |-
 
         <prefix><gray>Selection cleared; particles hidden.
@@ -1146,7 +1146,7 @@ locales:
         <dark_gray>   <hover:show_text:'Cost of materials sold by the building admin shop.'>From the shop</hover>: <white><materials>
         <dark_gray>   <hover:show_text:'Materials absent from the admin shop and therefore not included in the money price.'>Bring yourself</hover>: <aqua><required>
         <dark_gray>   <hover:show_text:'The construction fee added to material cost.'>Work</hover>: <white><labor> <dark_gray>— <hover:show_text:'Shop materials plus construction work.'>Total</hover>: <green><price>
-        <dark_gray>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Confirm]</click>  <click:run_command:'/builder book cancel'><#969696>[✘ Cancel]</click>
+        <dark_gray>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Confirm]</click>  <click:run_command:'/builder book cancel'><#969696>[❌ Cancel]</click>
       preview-opened: |-
 
         <prefix><aqua>“<name>” <dark_gray>— <state>
@@ -1242,11 +1242,11 @@ locales:
         <dark_gray>   <hover:show_text:'Items the operation will consume to execute this plan.'>Cost</hover>: <white><cost>
         <dark_gray>   <hover:show_text:'Items returned for blocks removed or replaced by the operation.'>Return</hover>: <white><reward>
       actions:
-        ready: "<dark_gray>   <click:run_command:'/builder confirm'><#92bed8>[▶ Build]</click>  <click:run_command:'/builder cancel'><#969696>[✘ Cancel]</click>"
+        ready: "<dark_gray>   <click:run_command:'/builder confirm'><#92bed8>[▶ Build]</click>  <click:run_command:'/builder cancel'><#969696>[❌ Cancel]</click>"
       skipped: "<dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks are deliberately left unchanged.'>Skipped safely</hover>: <gray><count>"
       market:
         - "<dark_gray>   <hover:show_text:'The full admin-shop price of all consumed materials.'>Estimate</hover> <white><full_price> <dark_gray>— <hover:show_text:'The price of only the materials currently missing from your inventory.'>missing</hover> <gray><missing_price>"
-        - "<dark_gray>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Buy and build]</click>  <click:run_command:'/builder cancel'><#969696>[✘ Cancel]</click>"
+        - "<dark_gray>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Buy and build]</click>  <click:run_command:'/builder cancel'><#969696>[❌ Cancel]</click>"
       market-item: "<dark_gray>     <gray>Need <white><amount>×<material></white>"
       market-unavailable: "<prefix><yellow>Shop: unavailable <white><material></white>."
       market-more: "<prefix><gray>More lines: <white><count></white>."
