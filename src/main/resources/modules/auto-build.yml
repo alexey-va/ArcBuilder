@@ -136,10 +136,10 @@ display:
 start-message: |-
 
   <white>🛠</white> <#e6fff3>Превью открыто.
-  <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — продолжить
+  <#8c8c8c>   Нажмите на плашку — настроить или продолжить.
 confirm-time: 180
 construction:
-  # Default limit for books without arc:cooldown_seconds. Set a book to 0 for unlimited simple builds.
+  # Legacy import value. The durable builder-tools cooldown is authoritative and cannot be weakened by book PDC.
   default-cooldown-seconds: 3600
   # Citizens holograms use legacy colors. The prompt stays visible for the whole confirmation phase.
   npc-prompt:

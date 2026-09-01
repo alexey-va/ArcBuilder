@@ -4,6 +4,7 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.title.Title
 import org.bukkit.Bukkit
+import org.bukkit.Color
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
@@ -293,6 +294,7 @@ internal class BuilderToolsRuntime(
     private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionMenus: BuilderConstructionMenuManager
     private val constructionSiteDisplays: BuilderConstructionSiteDisplayManager
+    private val bookPreviewPresentation: BuilderBookPreviewPresentation
     private val constructionWrites = mutableSetOf<UUID>()
     private val constructionCompletions = mutableSetOf<UUID>()
     private val constructionLocks = mutableSetOf<UUID>()
@@ -480,6 +482,7 @@ internal class BuilderToolsRuntime(
         var initializedPlayerRecoveries: BuilderPlayerRecoveryCoordinator? = null
         var initializedConstructionMenus: BuilderConstructionMenuManager? = null
         var initializedConstructionSiteDisplays: BuilderConstructionSiteDisplayManager? = null
+        var initializedBookPreviewPresentation: BuilderBookPreviewPresentation? = null
         try {
             constructionMenus = BuilderConstructionMenuManager(
                 plugin = plugin,
@@ -497,8 +500,55 @@ internal class BuilderToolsRuntime(
                 projectLookup = constructionProjects::get,
                 onInspect = constructionMenus::open,
             ).also { initializedConstructionSiteDisplays = it }
-            BuildingManager.installPreviewBridge(displayRenderer)
+            bookPreviewPresentation = BuilderBookPreviewPresentation(
+                plugin = plugin,
+                renderer = displayRenderer,
+                messages = messages,
+                host = object : BuilderBookPreviewPresentationHost {
+                    override fun adjust(player: Player, adjustment: ru.arc.autobuild.BuildBookPreviewAdjustment): ConstructionSite? =
+                        adjustBookPreview(player, adjustment)
+
+                    override fun prepare(player: Player, site: ConstructionSite): BuilderBookPreviewConfirmation? =
+                        prepareBookPreviewConfirmation(player, site)
+
+                    override fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation? =
+                        currentBookPreviewConfirmation(player)
+
+                    override fun confirm(player: Player): Boolean = confirmBookPreview(player)
+
+                    override fun restore(
+                        player: Player,
+                        snapshot: ru.arc.autobuild.ConstructionSiteSnapshot,
+                    ): ConstructionSite? = restoreBookPreview(player, snapshot)
+
+                    override fun cancel(player: Player) {
+                        runBookPreviewAction(player) { cancelPlan(player) }
+                    }
+                },
+                panelHeightOffset = config.constructionSitePanelHeightOffset,
+                panelFrontOffset = config.constructionSitePanelFrontOffset,
+                panelInteractionWidth = config.constructionSitePanelInteractionWidth,
+                panelInteractionHeight = config.constructionSitePanelInteractionHeight,
+                panelLineWidth = config.constructionSitePanelLineWidth,
+                panelBackgroundColor = Color.fromARGB(
+                    config.constructionSitePanelBackgroundColor.removePrefix("#").toLong(16).toInt(),
+                ),
+                panelGlowColor = Color.fromRGB(config.constructionSiteGlowColor.removePrefix("#").toInt(16)),
+                viewRange = config.constructionSiteViewRange,
+                backgroundItem = config.constructionSiteMenuBackgroundItem,
+                backgroundFallback = config.constructionSiteMenuBackgroundFallback,
+            ).also { initializedBookPreviewPresentation = it }
+            BuildingManager.installPreviewBridge(bookPreviewPresentation)
             Bukkit.getPluginManager().registerEvents(this, plugin)
+            checkNotNull(
+                taskScope.runTimer(20L, 20L) {
+                    BuildingManager.expirePreviews(System.currentTimeMillis()).forEach { playerId ->
+                        Bukkit.getPlayer(playerId)?.takeIf(Player::isOnline)?.let { player ->
+                            send(player, "book.preview-expired")
+                        }
+                    }
+                },
+            ) { "Builder build-book preview expiry task was not scheduled" }
             previews = BuilderPreviewSessions(
                 taskScope = taskScope,
                 periodTicks = config.previewPeriodTicks,
@@ -701,6 +751,7 @@ internal class BuilderToolsRuntime(
             initializedCrown?.close()
             initializedPreviews?.close()
             initializedConstructionSiteDisplays?.close()
+            initializedBookPreviewPresentation?.close()
             initializedConstructionMenus?.close()
             taskScope.close()
             operationLocks.close()
@@ -1263,6 +1314,81 @@ internal class BuilderToolsRuntime(
         false
     }
 
+    private fun adjustBookPreview(
+        player: Player,
+        adjustment: ru.arc.autobuild.BuildBookPreviewAdjustment,
+    ): ConstructionSite? = runBookPreviewAction(player) {
+        val site = BuildingManager.pending(player.uniqueId) ?: throw BuilderUserFailure("errors.expired")
+        requireMatchingPreviewBook(player, site)
+        BuildingManager.adjustPendingPlacement(player, adjustment, System.currentTimeMillis())
+            ?: throw BuilderUserFailure("errors.expired")
+    }
+
+    private fun prepareBookPreviewConfirmation(
+        player: Player,
+        site: ConstructionSite,
+    ): BuilderBookPreviewConfirmation? = runBookPreviewAction(player) {
+        val book = player.inventory.itemInMainHand
+        val data = requireMatchingPreviewBook(player, site)
+        if (data.draft) {
+            books.handleCommand(player, listOf("activate"))
+            return@runBookPreviewAction null
+        }
+        if (!startPlayerBuildBook(player, site, book)) return@runBookPreviewAction null
+        currentBookPreviewConfirmation(player)
+    }
+
+    private fun currentBookPreviewConfirmation(player: Player): BuilderBookPreviewConfirmation? {
+        val plan = previews.plan(player.uniqueId)?.takeIf { it.kind == BuilderPlanKind.BUILD_BOOK } ?: return null
+        val project = plannedConstructionProjects[plan.id] ?: return null
+        return BuilderBookPreviewConfirmation(
+            plan = plan,
+            title = project.projectTitle ?: project.plan.bookBuildingId ?: "Постройка",
+            cooldownRemaining = bookApplicationCooldownRemaining(player),
+        )
+    }
+
+    private fun confirmBookPreview(player: Player): Boolean = runBookPreviewAction(player) {
+        confirm(player, buildBook = true)
+        previews.plan(player.uniqueId)?.kind != BuilderPlanKind.BUILD_BOOK
+    } ?: false
+
+    private fun restoreBookPreview(
+        player: Player,
+        snapshot: ru.arc.autobuild.ConstructionSiteSnapshot,
+    ): ConstructionSite? = runBookPreviewAction(player) {
+        requireMatchingPreviewBook(player, snapshot.bookData)
+        discardPreparedBookPlan(player.uniqueId)
+        BuildingManager.restorePreview(snapshot, System.currentTimeMillis())
+            ?: throw BuilderUserFailure("errors.expired")
+    }
+
+    private fun requireMatchingPreviewBook(player: Player, site: ConstructionSite): BuildBookData =
+        requireMatchingPreviewBook(player, site.bookData)
+
+    private fun requireMatchingPreviewBook(player: Player, expected: BuildBookData): BuildBookData {
+        val item = player.inventory.itemInMainHand
+        val raw = BuildBookCodec.read(item) ?: throw BuilderUserFailure("book.missing")
+        val canonical = canonicalBook(player, item, raw).second
+        if (canonical != expected) throw BuilderUserFailure("book.missing")
+        return canonical
+    }
+
+    private fun <T> runBookPreviewAction(player: Player, action: () -> T): T? = try {
+        action()
+    } catch (failure: BuilderUserFailure) {
+        send(player, failure.path, failure.values)
+        null
+    } catch (failure: IllegalArgumentException) {
+        warn("Builder-book preview action was rejected for {}: {}", player.name, failure.message)
+        send(player, "book.failed")
+        null
+    } catch (failure: Throwable) {
+        error("Builder-book preview action failed for ${player.name}", failure)
+        send(player, "book.failed")
+        null
+    }
+
     private fun confirm(player: Player, buyMissing: Boolean = false, buildBook: Boolean = false) {
         val pending = previews[player.uniqueId] ?: throw BuilderUserFailure("errors.expired")
         val plan = pending.plan
@@ -1278,6 +1404,7 @@ internal class BuilderToolsRuntime(
             throw BuilderUserFailure("errors.game-mode-changed")
         }
         val construction = plannedConstructionProjects[plan.id]
+        if (construction != null) ensureBookApplicationCooldown(player)
         revalidatePlan(
             player,
             plan,
@@ -1378,6 +1505,7 @@ internal class BuilderToolsRuntime(
         planned: BuilderConstructionProjectRecord,
         plannedMode: GameMode,
     ) {
+        ensureBookApplicationCooldown(player)
         plannedConstructionProjects.remove(planned.projectId)
         if (player.gameMode != plannedMode) {
             books.releasePlanReservation(planned.plan)
@@ -1401,7 +1529,11 @@ internal class BuilderToolsRuntime(
             val activationMutation = checkNotNull(
                 constructionResources.preparePlayerDebit(player.uniqueId, prepared, prepared.bookCost),
             ) { "Builder construction book disappeared before durable preparation" }
-            val activationPrepared = prepared.activationPrepared(activationMutation)
+            val applicationStartedAtMillis = System.currentTimeMillis()
+            val activationPrepared = prepared.activationPrepared(activationMutation).copy(
+                applicationStartedAtMillis = applicationStartedAtMillis,
+                updatedAtMillis = applicationStartedAtMillis,
+            ).validated(config.maxChanges)
             check(lockConstruction(activationPrepared)) { "Builder construction area is already locked" }
             val now = System.currentTimeMillis()
             durablePrepared = constructionStore.commit(activationPrepared.copy(updatedAtMillis = now))
@@ -2028,6 +2160,7 @@ internal class BuilderToolsRuntime(
         }
         if (previews.contains(player.uniqueId)) {
             discardPendingPlan(player.uniqueId)
+            bookPreviewPresentation.clearPlayer(player.uniqueId)
             send(player, "plan.cancelled")
         } else if (BuildingManager.closePreview(player.uniqueId)) {
             send(player, "book.preview-cancelled")
@@ -2220,6 +2353,28 @@ internal class BuilderToolsRuntime(
 
     private fun hourlyLimit(player: Player): Int =
         BuilderPermissionPolicy.hourlyChanges(player::hasPermission, config.baseHourlyChanges)
+
+    private fun bookApplicationCooldownRemaining(player: Player): java.time.Duration =
+        BuilderBookApplicationCooldown.remaining(
+            playerId = player.uniqueId,
+            records = constructionProjects.values,
+            nowMillis = System.currentTimeMillis(),
+            cooldown = config.bookApplicationCooldown,
+            bypass = player.hasPermission(BOOK_COOLDOWN_BYPASS_PERMISSION),
+        )
+
+    private fun ensureBookApplicationCooldown(player: Player) {
+        val remaining = bookApplicationCooldownRemaining(player)
+        if (remaining.isZero) return
+        val totalMinutes = (remaining.seconds + 59L) / 60L
+        throw BuilderUserFailure(
+            "book.cooldown",
+            mapOf(
+                "hours" to messages.literal(totalMinutes / 60L),
+                "minutes" to messages.literal(totalMinutes % 60L),
+            ),
+        )
+    }
 
     private fun itemsSummary(player: Player, items: List<BuilderItemAmount>): Component =
         if (items.isEmpty()) {
@@ -2460,7 +2615,13 @@ internal class BuilderToolsRuntime(
                     if (decision == BuilderBookInteractionDecision.REPLACE_PLAN_WITH_PREVIEW) {
                         discardPendingPlan(player.uniqueId)
                     }
-                    val opened = BuildingManager.openPreview(player, checkNotNull(clickedLocation), effectiveData)
+                    val opened = BuildingManager.openPreview(
+                        player = player,
+                        location = checkNotNull(clickedLocation),
+                        data = effectiveData,
+                        expiresAtMillis = System.currentTimeMillis() + config.bookPreviewTtl.toMillis(),
+                        maxPlacementOffset = config.bookPreviewMaxOffset,
+                    )
                     ?: throw BuilderUserFailure("book.invalid")
                     if (current?.isExactOpenPreview(player, effectiveData) != true) {
                         send(
@@ -2653,6 +2814,7 @@ internal class BuilderToolsRuntime(
         books.close()
         constructionSiteDisplays.close()
         constructionMenus.close()
+        bookPreviewPresentation.close()
         taskScope.close()
         closeStorageExecutor()
         shop.close()
@@ -2680,6 +2842,7 @@ internal class BuilderToolsRuntime(
     private companion object {
         const val STORAGE_SHUTDOWN_TIMEOUT_SECONDS = 5L
         const val CONSTRUCTION_ADMIN_PERMISSION = "arcbuild.admin.construction"
+        const val BOOK_COOLDOWN_BYPASS_PERMISSION = "arcbuild.book.cooldown.bypass"
         val PAUSABLE_CONSTRUCTION_STATES = setOf(
             BuilderConstructionProjectState.ACTIVE,
             BuilderConstructionProjectState.WAITING_MATERIALS,

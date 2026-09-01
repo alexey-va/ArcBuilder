@@ -23,6 +23,8 @@ timers:
   journal-retention: 2h
 
 construction:
+  # Starts only after the construction project is durably committed. Operators may bypass it.
+  book-application-cooldown: 12h
   # Ordinary chests, trapped chests and barrels in this shell feed persistent projects.
   container-radius: 4
   # An online owner's inventory participates only while they remain near the site.
@@ -102,6 +104,10 @@ preview:
   block-display-scale: 1.0
   plan-display-range: 64
   guidance-period-ticks: 20
+  # A book preview is volatile and never survives longer than three minutes.
+  book-ttl: 3m
+  # Session-only movement bound; this never changes book metadata.
+  book-max-offset: 16
   plan-title:
     fade-in-ticks: 5
     stay-ticks: 45
@@ -573,14 +579,104 @@ locales:
       preview-opened: |-
 
         <prefix><#d48763>«<name>» <#8c8c8c>— <state>
-        <#8c8c8c>   ПКМ по блоку — переставить предпросмотр.
-        <#8c8c8c>   ПКМ в воздух — подготовить план.
+        <#8c8c8c>   Плашка — настройка и продолжение.
+        <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✖ Убрать превью]</click>
+        <#8c8c8c>   Закроется само через 3 минуты.
+      preview-panel: |-
+        <#ffb142><bold>Проверьте расположение</bold>
+        <#e6fff3><name>
+        <#92bed8>ПКМ — настроить и продолжить
       preview:
         title: "<#ffb142>Предпросмотр размещён"
-        subtitle: "<#e6fff3>ПКМ в воздух — подготовить план"
-        actionbar: "<#d48763>ПКМ по блоку: переставить   <#8c8c8c>—   <#e6fff3>ПКМ в воздух: план"
+        subtitle: "<#e6fff3>Нажмите на плашку перед постройкой"
+        actionbar: "<#d48763>Плашка: настроить и продолжить   <#8c8c8c>—   <#969696>/builder cancel"
         bossbar-draft: "<#ffb142>Черновик «<name>» — выберите место"
         bossbar-active: "<#2bba43>Книга «<name>» — проверьте место"
+      preview-menu:
+        placement:
+          title: "<#ffb142>Размещение: <name>"
+          rotate-left:
+            name: "<#92bed8>Повернуть влево"
+            lore:
+              - "<#8c8c8c>Поворот превью на 90° против часовой стрелки."
+              - "<#969696>Книга и её настройки не изменятся."
+          left:
+            name: "<#92bed8>Сдвинуть влево"
+            lore:
+              - "<#8c8c8c>На один блок влево от вашего взгляда."
+              - "<#969696>Опора: <x>, <y>, <z>."
+          up:
+            name: "<#2bba43>Поднять"
+            lore:
+              - "<#8c8c8c>На один блок вверх по миру."
+              - "<#969696>Опора: <x>, <y>, <z>."
+          reset:
+            name: "<#e6fff3>Вернуть исходное место"
+            lore:
+              - "<#8c8c8c>Сбросить сдвиг и поворот этой сессии."
+              - "<#969696>Сейчас: <x>, <y>, <z>; <rotation>°."
+          down:
+            name: "<#969696>Опустить"
+            lore:
+              - "<#8c8c8c>На один блок вниз по миру."
+              - "<#969696>Опора: <x>, <y>, <z>."
+          right:
+            name: "<#92bed8>Сдвинуть вправо"
+            lore:
+              - "<#8c8c8c>На один блок вправо от вашего взгляда."
+              - "<#969696>Опора: <x>, <y>, <z>."
+          rotate-right:
+            name: "<#92bed8>Повернуть вправо"
+            lore:
+              - "<#8c8c8c>Поворот превью на 90° по часовой стрелке."
+              - "<#969696>Книга и её настройки не изменятся."
+          cancel:
+            name: "<#c42323>Убрать превью"
+            lore:
+              - "<#8c8c8c>Закрыть это превью без изменений мира."
+          continue:
+            name: "<#2bba43>Продолжить"
+            lore:
+              - "<#e6fff3>Рассчитать блоки и материалы."
+              - "<#969696>Мир пока не изменится."
+        confirmation:
+          title: "<#2bba43>Подтверждение: <name>"
+          overview:
+            name: "<#e6fff3>План строительства"
+            lore:
+              - "<#8c8c8c>Изменится блоков: <#92bed8><count>"
+              - "<#969696>Проверьте всё перед запуском."
+          materials:
+            name: "<#ffb142>Материалы"
+            lore:
+              - "<#8c8c8c>Всего предметов: <#e6fff3><items>"
+              - "<#8c8c8c>Типов предметов: <#e6fff3><types>"
+          ready:
+            name: "<#2bba43>Можно строить"
+            lore:
+              - "<#8c8c8c>Кулдаун не мешает запуску."
+          cooldown:
+            name: "<#ff9f0f>Кулдаун активен"
+            lore:
+              - "<#8c8c8c>Осталось: <#e6fff3><hours> ч <minutes> мин."
+              - "<#969696>Место можно менять и проверять."
+          back:
+            name: "<#92bed8>Назад к размещению"
+            lore:
+              - "<#8c8c8c>Вернуться к этому же превью."
+          start:
+            name: "<#2bba43>Начать строительство"
+            lore:
+              - "<#e6fff3>Книга будет применена один раз."
+              - "<#969696>Кулдаун начнётся после надёжной записи проекта."
+          blocked:
+            name: "<#ff9f0f>Пока недоступно"
+            lore:
+              - "<#8c8c8c>Осталось: <#e6fff3><hours> ч <minutes> мин."
+          cancel:
+            name: "<#c42323>Отменить"
+            lore:
+              - "<#8c8c8c>Закрыть план. Мир не изменится."
       plan-ready:
         title: "<#2bba43>План готов"
         subtitle: "<#e6fff3>Подтвердите действие в чате"
@@ -596,6 +692,11 @@ locales:
 
         <prefix><#969696>Предпросмотр книги отменён.
         <#8c8c8c>   <#e6fff3>ПКМ книгой по блоку — разместить заново.
+      preview-expired: "<prefix><#969696>Предпросмотр закрыт: прошло 3 минуты. Мир не изменён."
+      cooldown: |-
+
+        <prefix><#ff9f0f>Строить по книге пока рано.
+        <#8c8c8c>   <#e6fff3>Осталось: <hours> ч <minutes> мин.
       nothing-to-cancel: "<prefix><#969696>Нет открытого превью или сметы."
       economy-unavailable: "<prefix><#c42323>Экономика недоступна. Деньги не списаны."
       insufficient-funds: "<prefix><#ff9f0f>Не хватает денег. Черновик сохранён."
@@ -1254,14 +1355,104 @@ locales:
       preview-opened: |-
 
         <prefix><aqua>“<name>” <dark_gray>— <state>
-        <dark_gray>   Right-click a block to reposition the preview.
-        <dark_gray>   Right-click air to prepare the build plan.
+        <dark_gray>   Plaque — adjust or continue.
+        <dark_gray>   <click:run_command:'/builder cancel'><gray>[✖ Remove preview]</click>
+        <dark_gray>   Closes automatically after 3 minutes.
+      preview-panel: |-
+        <gold><bold>Check the placement</bold>
+        <white><name>
+        <aqua>Right-click — adjust and continue
       preview:
         title: "<gold>Preview placed"
-        subtitle: "<white>Right-click air to prepare the plan"
-        actionbar: "<aqua>Block click: reposition   <dark_gray>—   <white>Air click: plan"
+        subtitle: "<white>Click the plaque in front of the build"
+        actionbar: "<aqua>Plaque: adjust and continue   <dark_gray>—   <gray>/builder cancel"
         bossbar-draft: "<gold>Draft “<name>” — choose its position"
         bossbar-active: "<green>Book “<name>” — verify its position"
+      preview-menu:
+        placement:
+          title: "<gold>Placement: <name>"
+          rotate-left:
+            name: "<aqua>Rotate left"
+            lore:
+              - "<gray>Rotate this preview 90° counter-clockwise."
+              - "<dark_gray>The book and its settings stay unchanged."
+          left:
+            name: "<aqua>Move left"
+            lore:
+              - "<gray>One block left relative to your view."
+              - "<dark_gray>Anchor: <x>, <y>, <z>."
+          up:
+            name: "<green>Move up"
+            lore:
+              - "<gray>One world block upward."
+              - "<dark_gray>Anchor: <x>, <y>, <z>."
+          reset:
+            name: "<white>Restore original placement"
+            lore:
+              - "<gray>Reset this session's movement and rotation."
+              - "<dark_gray>Current: <x>, <y>, <z>; <rotation>°."
+          down:
+            name: "<gray>Move down"
+            lore:
+              - "<gray>One world block downward."
+              - "<dark_gray>Anchor: <x>, <y>, <z>."
+          right:
+            name: "<aqua>Move right"
+            lore:
+              - "<gray>One block right relative to your view."
+              - "<dark_gray>Anchor: <x>, <y>, <z>."
+          rotate-right:
+            name: "<aqua>Rotate right"
+            lore:
+              - "<gray>Rotate this preview 90° clockwise."
+              - "<dark_gray>The book and its settings stay unchanged."
+          cancel:
+            name: "<red>Remove preview"
+            lore:
+              - "<gray>Close this preview without changing the world."
+          continue:
+            name: "<green>Continue"
+            lore:
+              - "<white>Calculate blocks and materials."
+              - "<dark_gray>The world is still unchanged."
+        confirmation:
+          title: "<green>Confirmation: <name>"
+          overview:
+            name: "<white>Construction plan"
+            lore:
+              - "<gray>Blocks changed: <aqua><count>"
+              - "<dark_gray>Review everything before starting."
+          materials:
+            name: "<gold>Materials"
+            lore:
+              - "<gray>Total items: <white><items>"
+              - "<gray>Item types: <white><types>"
+          ready:
+            name: "<green>Ready to build"
+            lore:
+              - "<gray>The cooldown does not block this start."
+          cooldown:
+            name: "<yellow>Cooldown active"
+            lore:
+              - "<gray>Remaining: <white><hours>h <minutes>m."
+              - "<dark_gray>You may still inspect and move the preview."
+          back:
+            name: "<aqua>Back to placement"
+            lore:
+              - "<gray>Return to the same preview session."
+          start:
+            name: "<green>Start construction"
+            lore:
+              - "<white>The book will be applied once."
+              - "<dark_gray>Cooldown starts after the project is durable."
+          blocked:
+            name: "<yellow>Not ready yet"
+            lore:
+              - "<gray>Remaining: <white><hours>h <minutes>m."
+          cancel:
+            name: "<red>Cancel"
+            lore:
+              - "<gray>Close the plan. The world stays unchanged."
       plan-ready:
         title: "<green>Plan ready"
         subtitle: "<white>Confirm it in chat"
@@ -1277,6 +1468,11 @@ locales:
 
         <prefix><gray>Book preview cancelled.
         <dark_gray>   <gray>Right-click a block with the book to place it again.
+      preview-expired: "<prefix><gray>Preview closed after 3 minutes. The world was not changed."
+      cooldown: |-
+
+        <prefix><yellow>This build book is still on cooldown.
+        <dark_gray>   <gray>Remaining: <hours>h <minutes>m.
       nothing-to-cancel: "<prefix><gray>There is no open preview or quote."
       economy-unavailable: "<prefix><red>The economy is unavailable. No money was charged."
       insufficient-funds: "<prefix><yellow>Not enough money. Your draft is unchanged."

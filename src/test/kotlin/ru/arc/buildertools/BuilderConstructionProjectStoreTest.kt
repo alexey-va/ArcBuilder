@@ -102,6 +102,23 @@ class BuilderConstructionProjectStoreTest : FunSpec({
         reloaded?.pendingResourceMutation?.sources?.single()?.after shouldBe receipt.sources.single().after
     }
 
+    test("store restart preserves the durable book application time") {
+        val root = Files.createTempDirectory("arc-builder-construction-project-cooldown-")
+        val store = BuilderConstructionProjectStore(root, maxChanges = 10_000)
+        val startedAt = createdAt + 15_000
+
+        store.commit(
+            prepared().copy(
+                applicationStartedAtMillis = startedAt,
+                updatedAtMillis = startedAt,
+            ).validated(),
+        )
+
+        BuilderConstructionProjectStore(root, maxChanges = 10_000)
+            .loadOrNull(projectId)
+            ?.applicationStartedAtMillis shouldBe startedAt
+    }
+
     test("store persists completion finalization and makes its retry idempotent") {
         val root = Files.createTempDirectory("arc-builder-construction-finalized-")
         val store = BuilderConstructionProjectStore(root, maxChanges = 10_000)
@@ -163,11 +180,13 @@ class BuilderConstructionProjectStoreTest : FunSpec({
         currentJson.remove("projectTitle")
         currentJson.remove("sitePanelFace")
         currentJson.remove("completionFinalizedAtMillis")
+        currentJson.remove("applicationStartedAtMillis")
         val legacy = gson.fromJson(currentJson, BuilderConstructionProjectRecord::class.java).validated()
 
         legacy.projectTitle shouldBe null
         legacy.sitePanelFace shouldBe null
         legacy.completionFinalizedAtMillis shouldBe null
+        legacy.applicationStartedAtMillis shouldBe null
         legacy.plan shouldBe titled.plan
         legacy.steps shouldBe titled.steps
     }

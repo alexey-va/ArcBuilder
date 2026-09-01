@@ -73,6 +73,13 @@ internal data class BuilderConstructionSiteDisplayModel(
     val panelYaw: Float,
 )
 
+internal data class BuilderSitePanelPlacement(
+    val x: Double,
+    val y: Double,
+    val z: Double,
+    val yaw: Float,
+)
+
 internal object BuilderConstructionSitePanelOrientation {
     fun apply(display: TextDisplay, yaw: Float) {
         display.billboard = Display.Billboard.FIXED
@@ -91,14 +98,14 @@ internal object BuilderConstructionSiteDisplayLayout {
         require(positions.all { it.worldId == worldId })
         val bounds = bounds(positions)
         val face = project.sitePanelFace ?: settings.panelFace
-        val panel = panelCenter(bounds, face, settings.panelFrontOffset)
+        val panel = panelPlacement(positions, face, settings.panelHeightOffset, settings.panelFrontOffset)
         return BuilderConstructionSiteDisplayModel(
             worldId = worldId,
             edges = BuilderDisplayGeometry.bounds(positions, settings.outlineThickness),
-            panelX = panel.first,
-            panelY = bounds.minY + settings.panelHeightOffset,
-            panelZ = panel.second,
-            panelYaw = face.yaw,
+            panelX = panel.x,
+            panelY = panel.y,
+            panelZ = panel.z,
+            panelYaw = panel.yaw,
         )
     }
 
@@ -106,14 +113,31 @@ internal object BuilderConstructionSiteDisplayLayout {
         project: BuilderConstructionProjectRecord,
         viewerX: Double,
         viewerZ: Double,
+    ): BuilderConstructionSitePanelFace = nearestFace(project.steps.map { it.change.position }, viewerX, viewerZ)
+
+    fun nearestFace(
+        positions: List<BuilderBlockPos>,
+        viewerX: Double,
+        viewerZ: Double,
     ): BuilderConstructionSitePanelFace {
-        val bounds = bounds(project.steps.map { it.change.position })
+        val bounds = bounds(positions)
         return BuilderConstructionSitePanelFace.entries.minBy { face ->
             val (panelX, panelZ) = panelCenter(bounds, face, frontOffset = 0.0)
             val deltaX = viewerX - panelX
             val deltaZ = viewerZ - panelZ
             deltaX * deltaX + deltaZ * deltaZ
         }
+    }
+
+    fun panelPlacement(
+        positions: List<BuilderBlockPos>,
+        face: BuilderConstructionSitePanelFace,
+        heightOffset: Double,
+        frontOffset: Double,
+    ): BuilderSitePanelPlacement {
+        val bounds = bounds(positions)
+        val (x, z) = panelCenter(bounds, face, frontOffset)
+        return BuilderSitePanelPlacement(x, bounds.minY + heightOffset, z, face.yaw)
     }
 
     private data class Bounds(

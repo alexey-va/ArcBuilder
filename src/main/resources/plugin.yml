@@ -81,6 +81,9 @@ permissions:
     default: false
   arcbuild.book.use:
     default: false
+  arcbuild.book.cooldown.bypass:
+    description: Bypass the durable build-book application cooldown
+    default: op
   arcbuild.admin.reload:
     description: Validate and reload ArcBuilder configuration without restarting the server
     default: op

@@ -7,7 +7,7 @@ selection, fill, exact block replacement, copy/paste with player-relative
 anchors and rotation, deconstruction, procedural tree crowns, construction-book
 drafts, pricing, activation, copying, selling, and one-time-use protection.
 
-The plugin uses arc-core 2.1.2 and does not depend on the ARC monolith.
+The plugin uses arc-core 2.2.5 and does not depend on the ARC monolith.
 
 ## Player flow
 
@@ -33,9 +33,13 @@ The plugin uses arc-core 2.1.2 and does not depend on the ARC monolith.
   Ordinary stone, sand, and concrete powder are supported.
 - Wilderness is buildable. Inside a Lands claim the normal place/break checks
   still apply. WorldGuard is not a dependency.
-- Construction books start as free drafts. Right click opens the world preview;
-  right click again shows the exact activation or build quote. Shift-right click
-  opens the compact symmetric transform menu.
+- Construction books start as free drafts. Right click opens an owner-only world
+  preview for at most three minutes. Its fixed glowing plaque appears on the
+  nearest face and opens session-only move/rotate controls plus the final build
+  confirmation; these controls never rewrite the book. A chat button cancels the
+  preview. Ordinary players may durably apply one construction book every 12
+  hours; operators have an explicit bypass permission. Shift-right click still
+  opens the authoring transform menu for intentionally editing future copies.
 - Money is represented internally as integer minor units. Decimal provider APIs
   are normalized only at the integration boundary.
 
@@ -86,7 +90,7 @@ vanilla item textures, and declared custom item models such as
 Generation fails if a new player-visible key is not assigned to a surface or a
 placeholder has no representative value.
 
-The production artifact is `build/libs/ArcBuilder-1.0.8.jar`. From the ops
+The production artifact is `build/libs/ArcBuilder-1.0.9.jar`. From the ops
 repository it is deployed independently with:
 
 ```bash

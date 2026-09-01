@@ -68,6 +68,7 @@ internal data class BuilderConstructionProjectRecord(
     val pendingResourceMutation: BuilderResourceMutation? = null,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
+    val applicationStartedAtMillis: Long? = null,
     val completedAtMillis: Long? = null,
     val completionFinalizedAtMillis: Long? = null,
 ) {
@@ -111,6 +112,11 @@ internal data class BuilderConstructionProjectRecord(
         require(cursor in 0..steps.size) { "Builder construction project cursor is outside its plan" }
         require(createdAtMillis == plan.createdAtMillis && updatedAtMillis >= createdAtMillis) {
             "Builder construction project timestamps are invalid"
+        }
+        applicationStartedAtMillis?.let { startedAt ->
+            require(startedAt in createdAtMillis..updatedAtMillis) {
+                "Builder construction application time is invalid"
+            }
         }
         require((completedAtMillis != null) == state.terminal) {
             "Builder construction project completion time does not match its state"

@@ -19,18 +19,32 @@ internal object BuildBookRelativeRotation {
 }
 
 /** Lightweight placement model; construction itself is owned by BuilderPlan. */
-class ConstructionSite(
+class ConstructionSite internal constructor(
     val building: Building,
-    val centerBlock: Location,
+    centerBlock: Location,
     val player: Player,
-    val rotation: Int,
+    rotation: Int,
     val world: World,
     bookData: BuildBookData,
+    val expiresAtMillis: Long,
+    maxPlacementOffset: Int,
+    initialPlacement: BuildBookPreviewPlacement? = null,
 ) {
     data class Corners(val corner1: BlockVector3, val corner2: BlockVector3)
 
     var bookData: BuildBookData = bookData
         private set
+
+    private var placement: BuildBookPreviewPlacement = initialPlacement ?: BuildBookPreviewPlacement(
+        originalAnchor = BlockVector3.at(centerBlock.blockX, centerBlock.blockY, centerBlock.blockZ),
+        baseRotation = rotation,
+        maxOffset = maxPlacementOffset,
+    )
+
+    val centerBlock: Location get() = placement.anchor.let { anchor ->
+        Location(world, anchor.x().toDouble(), anchor.y().toDouble(), anchor.z().toDouble())
+    }
+    val rotation: Int get() = placement.rotation
 
     val fullRotation: Int get() = BuildBookRelativeRotation.resolve(
         rotation,
@@ -61,6 +75,27 @@ class ConstructionSite(
         return PreviewTransformUpdateResult.UPDATED
     }
 
+    internal fun move(direction: BuildBookPreviewMove, playerRotation: Int) {
+        placement = placement.move(direction, playerRotation)
+    }
+
+    internal fun rotate(delta: Int) {
+        placement = placement.rotate(delta)
+    }
+
+    internal fun resetPlacement() {
+        placement = placement.reset()
+    }
+
+    internal fun snapshot(): ConstructionSiteSnapshot = ConstructionSiteSnapshot(
+        building = building,
+        player = player,
+        world = world,
+        bookData = bookData,
+        expiresAtMillis = expiresAtMillis,
+        placement = placement,
+    )
+
     fun relativePositionsBottomUp(): Sequence<BlockVector3> = sequence {
         val bounds = corners
         for (y in bounds.corner1.y()..bounds.corner2.y()) {
@@ -79,3 +114,12 @@ class ConstructionSite(
         return true
     }
 }
+
+internal data class ConstructionSiteSnapshot(
+    val building: Building,
+    val player: Player,
+    val world: World,
+    val bookData: BuildBookData,
+    val expiresAtMillis: Long,
+    val placement: BuildBookPreviewPlacement,
+)

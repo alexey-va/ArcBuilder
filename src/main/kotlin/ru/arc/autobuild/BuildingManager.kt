@@ -13,6 +13,12 @@ internal interface BuildBookPreviewBridge {
     fun close(playerId: UUID)
 }
 
+internal sealed interface BuildBookPreviewAdjustment {
+    data class Move(val direction: BuildBookPreviewMove) : BuildBookPreviewAdjustment
+    data class Rotate(val delta: Int) : BuildBookPreviewAdjustment
+    data object Reset : BuildBookPreviewAdjustment
+}
+
 object BuildingManager {
     private val buildings = ConcurrentHashMap<String, Building>()
     private val previews = ConcurrentHashMap<UUID, ConstructionSite>()
@@ -33,23 +39,89 @@ object BuildingManager {
     }
 
     @JvmStatic fun hasExactOpenPreview(player: Player, expected: BuildBookData): Boolean =
-        previews[player.uniqueId]?.isExactOpenPreview(player, expected) == true
+        pending(player.uniqueId)?.isExactOpenPreview(player, expected) == true
 
     @JvmStatic internal fun updatePendingTransform(player: Player, next: BuildBookData): PreviewTransformUpdateResult {
-        val site = previews[player.uniqueId] ?: return PreviewTransformUpdateResult.NO_PREVIEW
+        val site = pending(player.uniqueId) ?: return PreviewTransformUpdateResult.NO_PREVIEW
         val result = site.update(next)
         if (result == PreviewTransformUpdateResult.UPDATED) previewBridge?.refresh(site)
         return result
     }
 
-    internal fun openPreview(player: Player, location: Location, data: BuildBookData): ConstructionSite? {
+    internal fun openPreview(
+        player: Player,
+        location: Location,
+        data: BuildBookData,
+        expiresAtMillis: Long,
+        maxPlacementOffset: Int,
+    ): ConstructionSite? {
         val building = getBuilding(data.buildingId) ?: return null
         val center = location.block.location
-        val site = ConstructionSite(building, center, player, rotationFromYaw(player.yaw), player.world, data)
+        val site = ConstructionSite(
+            building,
+            center,
+            player,
+            rotationFromYaw(player.yaw),
+            player.world,
+            data,
+            expiresAtMillis,
+            maxPlacementOffset,
+        )
         previews.put(player.uniqueId, site)?.let { previewBridge?.close(player.uniqueId) }
         previewBridge?.open(site)
         return site
     }
+
+    internal fun restorePreview(snapshot: ConstructionSiteSnapshot, nowMillis: Long): ConstructionSite? {
+        if (snapshot.expiresAtMillis <= nowMillis || !snapshot.player.isOnline || snapshot.player.world.uid != snapshot.world.uid) {
+            return null
+        }
+        val anchor = snapshot.placement.anchor
+        val site = ConstructionSite(
+            building = snapshot.building,
+            centerBlock = Location(snapshot.world, anchor.x().toDouble(), anchor.y().toDouble(), anchor.z().toDouble()),
+            player = snapshot.player,
+            rotation = snapshot.placement.rotation,
+            world = snapshot.world,
+            bookData = snapshot.bookData,
+            expiresAtMillis = snapshot.expiresAtMillis,
+            maxPlacementOffset = snapshot.placement.maxOffset,
+            initialPlacement = snapshot.placement,
+        )
+        previews.put(snapshot.player.uniqueId, site)?.let { previewBridge?.close(snapshot.player.uniqueId) }
+        previewBridge?.open(site)
+        return site
+    }
+
+    internal fun adjustPendingPlacement(
+        player: Player,
+        adjustment: BuildBookPreviewAdjustment,
+        nowMillis: Long,
+    ): ConstructionSite? {
+        val site = previews[player.uniqueId] ?: return null
+        if (site.expiresAtMillis <= nowMillis) {
+            closePreview(player.uniqueId)
+            return null
+        }
+        when (adjustment) {
+            is BuildBookPreviewAdjustment.Move -> site.move(adjustment.direction, rotationFromYaw(player.yaw))
+            is BuildBookPreviewAdjustment.Rotate -> site.rotate(adjustment.delta)
+            BuildBookPreviewAdjustment.Reset -> site.resetPlacement()
+        }
+        previewBridge?.refresh(site)
+        return site
+    }
+
+    internal fun expirePreviews(nowMillis: Long): List<UUID> = previews.entries
+        .filter { (_, site) -> site.expiresAtMillis <= nowMillis }
+        .mapNotNull { (playerId, site) ->
+            if (previews.remove(playerId, site)) {
+                previewBridge?.close(playerId)
+                playerId
+            } else {
+                null
+            }
+        }
 
     internal fun closePreview(playerId: UUID): Boolean {
         val removed = previews.remove(playerId) != null
@@ -61,7 +133,12 @@ object BuildingManager {
         previews.keys.toList().forEach(::closePreview)
     }
 
-    internal fun pending(playerId: UUID): ConstructionSite? = previews[playerId]
+    internal fun pending(playerId: UUID): ConstructionSite? {
+        val site = previews[playerId] ?: return null
+        if (site.expiresAtMillis > System.currentTimeMillis()) return site
+        if (previews.remove(playerId, site)) previewBridge?.close(playerId)
+        return null
+    }
 
     internal val pendingCount: Int get() = previews.size
 

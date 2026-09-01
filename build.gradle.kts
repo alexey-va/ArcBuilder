@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.8"
+version = "1.0.9"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -31,11 +31,11 @@ kotlin { jvmToolchain(25) }
 
 dependencies {
     implementation(kotlin("stdlib"))
-    implementation("ru.ruscrafting.arc:arc-core:2.1.2")
-    implementation("ru.ruscrafting.arc:arc-core-logging:2.1.2")
-    implementation("ru.ruscrafting.arc:arc-core-paper:2.1.2")
+    implementation("ru.ruscrafting.arc:arc-core:2.2.5")
+    implementation("ru.ruscrafting.arc:arc-core-logging:2.2.5")
+    implementation("ru.ruscrafting.arc:arc-core-paper:2.2.5")
     implementation("org.snakeyaml:snakeyaml-engine:3.0.1")
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.1.2")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.2.5")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.github.stefvanschie.inventoryframework:IF:0.12.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
@@ -59,7 +59,7 @@ dependencies {
     testImplementation("io.mockk:mockk:1.14.7")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.1.2")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.2.5")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
         exclude(group = "org.bukkit", module = "bukkit")
@@ -68,7 +68,7 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.0.3")
 
     "integrationTestImplementation"(sourceSets.test.get().output)
-    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.1.2")
+    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.2.5")
     configurations["integrationTestImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["integrationTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
 }

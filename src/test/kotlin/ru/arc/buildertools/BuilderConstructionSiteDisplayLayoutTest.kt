@@ -88,6 +88,28 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
             BuilderConstructionSitePanelFace.MAX_Z
     }
 
+    "preview panel uses the nearest face of arbitrary preview blocks" {
+        val worldId = UUID.randomUUID()
+        val positions = listOf(
+            BuilderBlockPos(worldId, 10, 64, 20),
+            BuilderBlockPos(worldId, 14, 68, 26),
+        )
+
+        val face = BuilderConstructionSiteDisplayLayout.nearestFace(positions, 12.0, 10.0)
+        val panel = BuilderConstructionSiteDisplayLayout.panelPlacement(
+            positions = positions,
+            face = face,
+            heightOffset = 2.25,
+            frontOffset = 0.4,
+        )
+
+        face shouldBe BuilderConstructionSitePanelFace.MIN_Z
+        panel.x shouldBe (12.5 plusOrMinus .00001)
+        panel.y shouldBe (66.25 plusOrMinus .00001)
+        panel.z shouldBe (19.6 plusOrMinus .00001)
+        panel.yaw shouldBe 180f
+    }
+
     "construction panel orientation is fixed and applies its persisted face yaw" {
         val display = mockk<TextDisplay>(relaxed = true)
 

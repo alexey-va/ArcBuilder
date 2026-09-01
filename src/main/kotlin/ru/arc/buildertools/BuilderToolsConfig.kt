@@ -38,6 +38,8 @@ class BuilderToolsConfig(
     val constructionContainerRadius: Int get() = config.integer("construction.container-radius", 4)
     val constructionOnlineInventoryRange: Double get() = config.double("construction.online-inventory-range", 48.0)
     val constructionTickPeriod: Long get() = config.long("construction.tick-period-ticks", 1L)
+    val bookApplicationCooldown: Duration
+        get() = config.duration("construction.book-application-cooldown", Duration.ofHours(12))
     val constructionMaxContainerProbesPerTick: Int
         get() = config.integer("construction.max-container-probes-per-tick", 512)
     val constructionMaxCachedContainersPerProject: Int
@@ -115,6 +117,8 @@ class BuilderToolsConfig(
     val previewBlockDisplayScale: Float get() = config.double("preview.block-display-scale", 1.0).toFloat()
     val previewPlanDisplayRange: Double get() = config.double("preview.plan-display-range", 64.0)
     val previewGuidancePeriodTicks: Long get() = config.long("preview.guidance-period-ticks", 20L)
+    val bookPreviewTtl: Duration get() = config.duration("preview.book-ttl", Duration.ofMinutes(3))
+    val bookPreviewMaxOffset: Int get() = config.integer("preview.book-max-offset", 16)
     val previewPlanTitleFadeInTicks: Int get() = config.integer("preview.plan-title.fade-in-ticks", 5)
     val previewPlanTitleStayTicks: Int get() = config.integer("preview.plan-title.stay-ticks", 45)
     val previewPlanTitleFadeOutTicks: Int get() = config.integer("preview.plan-title.fade-out-ticks", 10)
@@ -186,6 +190,9 @@ class BuilderToolsConfig(
             "Builder construction online inventory range is invalid"
         }
         require(constructionTickPeriod in 1L..100L) { "Builder construction tick period is invalid" }
+        require(bookApplicationCooldown in Duration.ofHours(12)..Duration.ofDays(7)) {
+            "Builder build-book application cooldown must be between 12 hours and 7 days"
+        }
         require(constructionMaxContainerProbesPerTick in 1..4_096) {
             "Builder construction container probe budget is invalid"
         }
@@ -290,6 +297,10 @@ class BuilderToolsConfig(
             "Builder-tools plan display range is invalid"
         }
         require(previewGuidancePeriodTicks in 5L..100L) { "Builder-tools preview guidance period is invalid" }
+        require(bookPreviewTtl in Duration.ofSeconds(10)..Duration.ofMinutes(3)) {
+            "Builder build-book preview TTL must be between 10 seconds and 3 minutes"
+        }
+        require(bookPreviewMaxOffset in 1..64) { "Builder build-book preview offset is invalid" }
         require(previewPlanTitleFadeInTicks in 0..100) { "Builder-tools plan title fade-in is invalid" }
         require(previewPlanTitleStayTicks in 1..400) { "Builder-tools plan title stay is invalid" }
         require(previewPlanTitleFadeOutTicks in 0..100) { "Builder-tools plan title fade-out is invalid" }
@@ -452,10 +463,15 @@ class BuilderToolsConfig(
                 "book.preview.actionbar",
                 "book.preview.bossbar-draft",
                 "book.preview.bossbar-active",
+                "book.preview-panel",
+                "book.preview-menu.placement.title",
+                "book.preview-menu.confirmation.title",
                 "book.plan-ready.title",
                 "book.plan-ready.subtitle",
                 "book.preview-cancelled",
+                "book.preview-expired",
                 "book.nothing-to-cancel",
+                "book.cooldown",
                 "book.state.draft",
                 "book.state.active",
                 "book.active-required",
@@ -543,6 +559,23 @@ class BuilderToolsConfig(
                 "status.selection-second",
                 "status.plan",
                 "status.idle",
+                "book.preview-menu.placement.rotate-left.name",
+                "book.preview-menu.placement.left.name",
+                "book.preview-menu.placement.up.name",
+                "book.preview-menu.placement.reset.name",
+                "book.preview-menu.placement.down.name",
+                "book.preview-menu.placement.right.name",
+                "book.preview-menu.placement.rotate-right.name",
+                "book.preview-menu.placement.cancel.name",
+                "book.preview-menu.placement.continue.name",
+                "book.preview-menu.confirmation.overview.name",
+                "book.preview-menu.confirmation.materials.name",
+                "book.preview-menu.confirmation.ready.name",
+                "book.preview-menu.confirmation.cooldown.name",
+                "book.preview-menu.confirmation.back.name",
+                "book.preview-menu.confirmation.start.name",
+                "book.preview-menu.confirmation.blocked.name",
+                "book.preview-menu.confirmation.cancel.name",
             ) + BuilderPlanKind.entries.map { kind ->
                 "kinds.${kind.name.lowercase(Locale.ROOT)}"
             } + BuilderConstructionProjectState.entries.map { state ->
@@ -569,6 +602,23 @@ class BuilderToolsConfig(
                 "construction.site.menu.control.resume.lore",
                 "construction.site.menu.control.unavailable.lore",
                 "construction.site.menu.control.readonly.lore",
+                "book.preview-menu.placement.rotate-left.lore",
+                "book.preview-menu.placement.left.lore",
+                "book.preview-menu.placement.up.lore",
+                "book.preview-menu.placement.reset.lore",
+                "book.preview-menu.placement.down.lore",
+                "book.preview-menu.placement.right.lore",
+                "book.preview-menu.placement.rotate-right.lore",
+                "book.preview-menu.placement.cancel.lore",
+                "book.preview-menu.placement.continue.lore",
+                "book.preview-menu.confirmation.overview.lore",
+                "book.preview-menu.confirmation.materials.lore",
+                "book.preview-menu.confirmation.ready.lore",
+                "book.preview-menu.confirmation.cooldown.lore",
+                "book.preview-menu.confirmation.back.lore",
+                "book.preview-menu.confirmation.start.lore",
+                "book.preview-menu.confirmation.blocked.lore",
+                "book.preview-menu.confirmation.cancel.lore",
             ),
         )
 
