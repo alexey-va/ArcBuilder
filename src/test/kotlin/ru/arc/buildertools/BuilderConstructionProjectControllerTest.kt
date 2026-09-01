@@ -246,6 +246,47 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         drifted.applied shouldBe 0
     }
 
+    test("an atomic bed companion already placed over seagrass advances instead of entering recovery") {
+        val foot = BuilderBlockChange(
+            BuilderBlockPos(worldId, 10, 46, 10),
+            "minecraft:water[level=0]",
+            "minecraft:brown_bed[facing=north,occupied=false,part=foot]",
+        )
+        val head = BuilderBlockChange(
+            BuilderBlockPos(worldId, 10, 46, 9),
+            "minecraft:seagrass",
+            "minecraft:brown_bed[facing=north,occupied=false,part=head]",
+        )
+        val bedPlan = plan.copy(
+            changes = listOf(foot, head),
+            costs = listOf(book),
+            rewards = emptyList(),
+        )
+        val bedProject = BuilderConstructionProjectRecord(
+            projectId = projectId,
+            playerId = playerId,
+            playerName = "Builder",
+            plan = bedPlan,
+            steps = listOf(
+                BuilderConstructionStep(foot, requiredMaterial = null, output = null),
+                BuilderConstructionStep(head, requiredMaterial = null, output = null),
+            ),
+            bookCost = book,
+            state = BuilderConstructionProjectState.ACTIVE,
+            cursor = 1,
+            createdAtMillis = createdAt,
+            updatedAtMillis = createdAt + 1,
+        ).validated()
+        val port = FakePort(blockData = head.afterBlockData)
+
+        val completed = BuilderConstructionProjectController.tick(bedProject, createdAt + 2, port)
+
+        completed?.state shouldBe BuilderConstructionProjectState.COMPLETED
+        completed?.cursor shouldBe 2
+        port.applied shouldBe 0
+        port.removed shouldBe 0
+    }
+
     test("world-prepared replay observes an already applied block without applying or debiting twice") {
         val port = FakePort()
         val inputPrepared = checkNotNull(BuilderConstructionProjectController.tick(active(), createdAt + 2, port))

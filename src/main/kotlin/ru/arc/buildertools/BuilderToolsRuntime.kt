@@ -1,6 +1,7 @@
 package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.JoinConfiguration
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.title.Title
 import org.bukkit.Bukkit
@@ -291,6 +292,7 @@ internal class BuilderToolsRuntime(
     private val consumedUndoSources = mutableSetOf<UUID>()
     private val plannedConstructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
+    private val constructionSiteDisplays: BuilderConstructionSiteDisplayManager
     private val constructionWrites = mutableSetOf<UUID>()
     private val constructionCompletions = mutableSetOf<UUID>()
     private val constructionLocks = mutableSetOf<UUID>()
@@ -476,7 +478,15 @@ internal class BuilderToolsRuntime(
         var initializedCrown: BuilderCrownController? = null
         var initializedBooks: BuilderBookLifecycle? = null
         var initializedPlayerRecoveries: BuilderPlayerRecoveryCoordinator? = null
+        var initializedConstructionSiteDisplays: BuilderConstructionSiteDisplayManager? = null
         try {
+            constructionSiteDisplays = BuilderConstructionSiteDisplayManager(
+                plugin = plugin,
+                settings = config.constructionSiteDisplaySettings(),
+                messages = messages,
+                projectLookup = constructionProjects::get,
+                onInspect = ::showConstructionSiteDetails,
+            ).also { initializedConstructionSiteDisplays = it }
             BuildingManager.installPreviewBridge(displayRenderer)
             Bukkit.getPluginManager().registerEvents(this, plugin)
             previews = BuilderPreviewSessions(
@@ -680,6 +690,7 @@ internal class BuilderToolsRuntime(
             initializedBooks?.close()
             initializedCrown?.close()
             initializedPreviews?.close()
+            initializedConstructionSiteDisplays?.close()
             taskScope.close()
             operationLocks.close()
             closeStorageExecutor()
@@ -1012,6 +1023,7 @@ internal class BuilderToolsRuntime(
                 projectId = plan.id,
                 playerId = player.uniqueId,
                 playerName = player.name,
+                projectTitle = data.title,
                 plan = plan,
                 steps = construction.steps,
                 bookCost = construction.bookCost,
@@ -1395,6 +1407,7 @@ internal class BuilderToolsRuntime(
                 constructionStore.transition(durablePrepared, attemptedTarget)
             }
             constructionProjects[current.projectId] = current
+            constructionSiteDisplays.upsert(current)
             if (current.state != BuilderConstructionProjectState.RECOVERY_REQUIRED) {
                 constructionPlayerLeases.release(current.projectId)
                 constructionLeaseHeld = false
@@ -1419,6 +1432,7 @@ internal class BuilderToolsRuntime(
             val durable = durablePrepared
             if (durable != null) {
                 constructionProjects[durable.projectId] = durable
+                constructionSiteDisplays.upsert(durable)
                 val postEffectRejection = attemptedTarget?.let { target ->
                     BuilderConstructionTransitionFailurePolicy.requiresRecovery(durable, target)
                 } == true
@@ -1450,8 +1464,23 @@ internal class BuilderToolsRuntime(
     private fun loadConstructionProjects() {
         try {
             constructionStore.loadAll().forEach { loaded ->
-                val normalized = BuilderConstructionRecoveryPolicy.normalizeLoaded(loaded, System.currentTimeMillis())
-                val record = if (normalized == loaded) loaded else constructionStore.transition(loaded, normalized)
+                val now = System.currentTimeMillis()
+                val normalized = BuilderConstructionRecoveryPolicy.normalizeLoaded(loaded, now)
+                val safelyResumed = if (loaded.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) {
+                    BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(normalized, now, constructionPort)
+                } else {
+                    normalized
+                }
+                val record = if (safelyResumed == loaded) loaded else constructionStore.transition(loaded, safelyResumed)
+                if (safelyResumed != normalized) {
+                    info(
+                        debugLine.line(
+                            "event" to "construction_reconciled_applied_companion",
+                            "operation" to safelyResumed.projectId,
+                            "cursor" to safelyResumed.cursor,
+                        ),
+                    )
+                }
                 check(record.terminal || lockConstruction(record)) {
                     "Builder construction area overlaps an existing operation: ${record.projectId}"
                 }
@@ -1465,6 +1494,7 @@ internal class BuilderToolsRuntime(
                     ) { "Builder construction receipt source overlaps another active flow: ${record.projectId}" }
                 }
                 constructionProjects[record.projectId] = record
+                constructionSiteDisplays.upsert(record)
                 when (record.state) {
                     BuilderConstructionProjectState.COMPLETED -> finalizeConstructionCompletion(record)
                     BuilderConstructionProjectState.RECOVERY_REQUIRED -> {
@@ -1492,7 +1522,8 @@ internal class BuilderToolsRuntime(
                 record.state == BuilderConstructionProjectState.INPUT_PREPARED ||
                 record.state == BuilderConstructionProjectState.WORLD_PREPARED ||
                 record.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
-                record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT
+                record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT ||
+                BuilderConstructionRecoveryPolicy.canResumeAppliedNoExchangeStep(record)
         }
         candidates.forEach { expected ->
             if (!constructionWrites.add(expected.projectId)) return@forEach
@@ -1507,7 +1538,15 @@ internal class BuilderToolsRuntime(
                 return@forEach
             }
             val target = try {
-                BuilderConstructionProjectController.tick(expected, System.currentTimeMillis(), constructionPort)
+                if (expected.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) {
+                    BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(
+                        expected,
+                        System.currentTimeMillis(),
+                        constructionPort,
+                    ).takeUnless { it == expected }
+                } else {
+                    BuilderConstructionProjectController.tick(expected, System.currentTimeMillis(), constructionPort)
+                }
             } catch (failure: Throwable) {
                 constructionWrites.remove(expected.projectId)
                 constructionPlayerLeases.release(expected.projectId)
@@ -1542,6 +1581,7 @@ internal class BuilderToolsRuntime(
                         return@writeAsync
                     }
                     constructionProjects[durable.projectId] = durable
+                    constructionSiteDisplays.upsert(durable)
                     if (
                         durable.state != BuilderConstructionProjectState.RECOVERY_REQUIRED ||
                         durable.pendingResourceMutation == null
@@ -1583,6 +1623,7 @@ internal class BuilderToolsRuntime(
                     return@writeAsync
                 }
                 constructionProjects[durable.projectId] = durable
+                constructionSiteDisplays.upsert(durable)
                 notifyConstructionTransition(expected, durable)
                 // RECOVERY_REQUIRED deliberately retains the player/container lease. The durable
                 // receipt must remain isolated until an operator resolves the ambiguous value flow.
@@ -1630,6 +1671,7 @@ internal class BuilderToolsRuntime(
 
     private fun finalizeConstructionCompletion(record: BuilderConstructionProjectRecord) {
         if (!constructionCompletions.add(record.projectId)) return
+        constructionSiteDisplays.remove(record.projectId)
         val completed = {
             constructionCompletions.remove(record.projectId)
             constructionResources.forget(record.projectId)
@@ -2025,6 +2067,84 @@ internal class BuilderToolsRuntime(
             else -> send(player, "status.idle")
         }
     }
+
+    private fun showConstructionSiteDetails(
+        player: Player,
+        construction: BuilderConstructionProjectRecord,
+    ) {
+        val remaining = aggregateConstructionAmounts(
+            construction.steps.drop(construction.cursor).mapNotNull(BuilderConstructionStep::requiredMaterial),
+        )
+        val visibleMaterials = remaining.take(config.constructionSiteMaxMaterialLines).map { amount ->
+            val material = Material.matchMaterial(amount.materialKey) ?: BuilderItemCodec.decodePrototype(amount.itemBase64).type
+            messages.render(
+                "construction.site.material-line",
+                locale(player),
+                mapOf(
+                    "material" to BuilderMaterialPresentation.label(player, material),
+                    "amount" to messages.literal(amount.amount),
+                ),
+            )
+        }.toMutableList()
+        if (remaining.size > visibleMaterials.size) {
+            visibleMaterials += messages.render(
+                "construction.site.material-more",
+                locale(player),
+                mapOf("count" to messages.literal(remaining.size - visibleMaterials.size)),
+            )
+        }
+        val materials = if (visibleMaterials.isEmpty()) {
+            messages.render("items.none", locale(player))
+        } else {
+            Component.join(JoinConfiguration.newlines(), visibleMaterials)
+        }
+        val missing = construction.steps.getOrNull(construction.cursor)?.requiredMaterial
+            ?.takeIf { construction.state == BuilderConstructionProjectState.WAITING_MATERIALS }
+            ?.let { amount ->
+                val material = Material.matchMaterial(amount.materialKey)
+                    ?: BuilderItemCodec.decodePrototype(amount.itemBase64).type
+                messages.render(
+                    "construction.site.missing",
+                    locale(player),
+                    mapOf(
+                        "material" to BuilderMaterialPresentation.label(player, material),
+                        "amount" to messages.literal(amount.amount),
+                    ),
+                )
+            }
+            ?: messages.render("construction.site.missing-none", locale(player))
+        val title = construction.projectTitle?.let(messages::literal)
+            ?: construction.plan.bookBuildingId?.let(messages::literal)
+            ?: messages.render("construction.site.unknown-name", locale(player))
+        val first = construction.steps.first().change.position
+        val percent = (construction.cursor.toLong() * 100L / construction.steps.size).toInt()
+        sendPlayerMessage(
+            player,
+            messages.render(
+                "construction.site.details",
+                locale(player),
+                mapOf(
+                    "name" to title,
+                    "owner" to messages.literal(construction.playerName),
+                    "state" to constructionStateLabel(player, construction.state),
+                    "count" to messages.literal(construction.cursor),
+                    "total" to messages.literal(construction.steps.size),
+                    "percent" to messages.literal(percent),
+                    "materials" to materials,
+                    "missing" to missing,
+                    "x" to messages.literal(first.x),
+                    "y" to messages.literal(first.y),
+                    "z" to messages.literal(first.z),
+                ),
+            ),
+        )
+    }
+
+    private fun aggregateConstructionAmounts(items: List<BuilderItemAmount>): List<BuilderItemAmount> = items
+        .groupBy { it.itemBase64 to it.materialKey }
+        .values
+        .map { grouped -> grouped.first().copy(amount = grouped.sumOf(BuilderItemAmount::amount)).validated() }
+        .sortedBy(BuilderItemAmount::materialKey)
 
     private fun ensureMutable(player: Player, block: Block, placing: Material? = null) {
         ensureInRangeAndLoaded(player, block)
@@ -2454,8 +2574,8 @@ internal class BuilderToolsRuntime(
                 BuilderToolsReloadBlocker.PENDING_PREVIEW
             selections.pendingCount > 0 || clipboardController.pendingCount > 0 || BuildingManager.pendingCount > 0 ->
                 BuilderToolsReloadBlocker.VOLATILE_PLAYER_STATE
-            constructionWrites.isNotEmpty() || constructionCompletions.isNotEmpty() ||
-                constructionProjects.values.any { !it.terminal } -> BuilderToolsReloadBlocker.ACTIVE_CONSTRUCTION
+            builderConstructionReloadBlocked(constructionWrites.size, constructionCompletions.size) ->
+                BuilderToolsReloadBlocker.ACTIVE_CONSTRUCTION
             else -> null
         }
     }
@@ -2518,6 +2638,7 @@ internal class BuilderToolsRuntime(
         }
         playerRecoveries.close()
         books.close()
+        constructionSiteDisplays.close()
         taskScope.close()
         closeStorageExecutor()
         shop.close()

@@ -83,6 +83,19 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         failure.message.orEmpty() shouldContain "construction.effects.sounds.volume"
     }
 
+    test("reload preflight strictly validates construction site presentation settings") {
+        val root = configRoot()
+        val path = root.resolve("modules/builder-tools.yml")
+        Files.writeString(
+            path,
+            Files.readString(path).replace("interaction-width: 3.0", "interaction-width: wide"),
+        )
+
+        val failure = shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+
+        failure.message.orEmpty() shouldContain "construction.site.panel.interaction-width"
+    }
+
     test("invalid boolean and partial duration syntax are rejected strictly") {
         val root = configRoot()
         val path = root.resolve("modules/builder-tools.yml")
@@ -108,6 +121,8 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         merged.integer("preview.max-plan-displays") shouldBe 512
         merged.double("preview.block-display-scale") shouldBe 1.0
         merged.integer("construction.effects.interval-blocks") shouldBe 4
+        merged.string("construction.site.outline.material") shouldBe "ORANGE_STAINED_GLASS"
+        merged.double("construction.site.panel.interaction-width") shouldBe 3.0
         merged.string("operator-owned-note") shouldBe "keep-me"
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe false
     }

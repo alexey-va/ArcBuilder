@@ -48,6 +48,7 @@ internal data class BuilderConstructionProjectRecord(
     val projectId: UUID,
     val playerId: UUID,
     val playerName: String,
+    val projectTitle: String? = null,
     val plan: BuilderPlan,
     val steps: List<BuilderConstructionStep>,
     val bookCost: BuilderItemAmount,
@@ -68,6 +69,11 @@ internal data class BuilderConstructionProjectRecord(
         }
         require(playerName.matches(Regex("[A-Za-z0-9_]{1,16}"))) {
             "Builder construction project player name is invalid"
+        }
+        projectTitle?.let { title ->
+            require(title.isNotBlank() && title.length <= 48 && title.none(Char::isISOControl)) {
+                "Builder construction project title is invalid"
+            }
         }
         plan.validated(maxChanges)
         require(plan.kind == BuilderPlanKind.BUILD_BOOK) {
@@ -218,7 +224,12 @@ internal data class BuilderConstructionProjectRecord(
         ),
     )
 
-    fun advanced(nowMillis: Long): BuilderConstructionProjectRecord = advanceFromCurrent(nowMillis)
+    fun advanced(nowMillis: Long): BuilderConstructionProjectRecord {
+        require(state != BuilderConstructionProjectState.RECOVERY_REQUIRED) {
+            "A recovery-held builder construction project needs explicit reconciliation"
+        }
+        return advanceFromCurrent(nowMillis)
+    }
 
     fun outputDelivered(nowMillis: Long): BuilderConstructionProjectRecord = advanceFromCurrent(nowMillis)
 
@@ -229,6 +240,21 @@ internal data class BuilderConstructionProjectRecord(
             updatedAtMillis = nowMillis,
         ),
     )
+
+    /**
+     * Advances a recovery hold only after startup reconciliation proved that a
+     * no-exchange companion step was already applied atomically by its neighbour.
+     */
+    fun recoveredAppliedStep(nowMillis: Long): BuilderConstructionProjectRecord {
+        require(state == BuilderConstructionProjectState.RECOVERY_REQUIRED) {
+            "Only a recovery-held builder construction project can reconcile an applied step"
+        }
+        val step = steps[cursor]
+        require(step.requiredMaterial == null && step.output == null && pendingResourceMutation == null) {
+            "A builder construction exchange cannot be auto-reconciled"
+        }
+        return advanceFromCurrent(nowMillis)
+    }
 
     fun cancelled(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
         copy(
@@ -338,7 +364,9 @@ internal object BuilderConstructionProjectTransitionRules {
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.RECOVERY_REQUIRED ->
-                after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
+                after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
+                    after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
+                    after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.COMPLETED,
             BuilderConstructionProjectState.CANCELLED,
             -> false
@@ -346,11 +374,12 @@ internal object BuilderConstructionProjectTransitionRules {
         require(valid) { "Builder construction project transition is invalid" }
     }
 
-    private fun BuilderConstructionProjectRecord.immutableIdentity(): List<Any> = listOf(
+    private fun BuilderConstructionProjectRecord.immutableIdentity(): List<Any?> = listOf(
         schemaVersion,
         projectId,
         playerId,
         playerName,
+        projectTitle,
         plan,
         steps,
         bookCost,
@@ -483,6 +512,13 @@ internal interface BuilderConstructionProjectPort {
 internal class BuilderConstructionTemporarilyUnavailableException : RuntimeException()
 
 internal object BuilderConstructionRecoveryPolicy {
+    fun canResumeAppliedNoExchangeStep(record: BuilderConstructionProjectRecord): Boolean =
+        record.state == BuilderConstructionProjectState.RECOVERY_REQUIRED &&
+            record.pendingResourceMutation == null &&
+            record.steps.getOrNull(record.cursor)?.let { step ->
+                step.requiredMaterial == null && step.output == null
+            } == true
+
     fun normalizeLoaded(
         record: BuilderConstructionProjectRecord,
         nowMillis: Long,
@@ -497,6 +533,25 @@ internal object BuilderConstructionRecoveryPolicy {
         record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT && record.pendingResourceMutation == null ->
             record.recoveryRequired(nowMillis)
         else -> record
+    }
+
+    /**
+     * A paired block (bed, door, tall plant) may apply its companion before the
+     * companion's durable cursor transition. This is the only recovery state
+     * that is safe to resume automatically: no item exchange is pending and the
+     * complete step, including owned block-entity data, already matches.
+     */
+    fun resumeAppliedNoExchangeStep(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+    ): BuilderConstructionProjectRecord = if (
+        canResumeAppliedNoExchangeStep(record) &&
+        runCatching { port.isStepApplied(record.steps[record.cursor]) }.getOrDefault(false)
+    ) {
+        record.recoveredAppliedStep(nowMillis)
+    } else {
+        record
     }
 }
 
@@ -603,7 +658,11 @@ internal object BuilderConstructionProjectController {
         val step = record.steps[record.cursor]
         when (worldMatchesBefore(step, port)) {
             null -> return null
-            false -> return record.recoveryRequired(nowMillis)
+            false -> return when (worldMatchesAfter(step, port)) {
+                null -> null
+                false -> record.recoveryRequired(nowMillis)
+                true -> appliedStep(record, step, nowMillis)
+            }
             true -> Unit
         }
         when (canModify(record, step, port)) {

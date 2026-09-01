@@ -156,6 +156,95 @@ class BuilderConstructionProjectDomainTest : FunSpec({
         shouldThrow<IllegalArgumentException> {
             recovery.activated(createdAt + 3)
         }
+        shouldThrow<IllegalArgumentException> {
+            recovery.advanced(createdAt + 3)
+        }
         recovery.cancelled(createdAt + 3).state shouldBe BuilderConstructionProjectState.CANCELLED
+    }
+
+    test("startup recovery advances an already-applied companion only when it has no item exchange") {
+        val companionChange = BuilderBlockChange(
+            position = BuilderBlockPos(worldId, 12, 64, 10),
+            beforeBlockData = "minecraft:seagrass",
+            afterBlockData = "minecraft:brown_bed[facing=north,occupied=false,part=head]",
+        )
+        val companionPlan = BuilderPlan(
+            id = projectId,
+            playerId = playerId,
+            kind = BuilderPlanKind.BUILD_BOOK,
+            changes = listOf(companionChange),
+            costs = listOf(book),
+            rewards = emptyList(),
+            createdAtMillis = createdAt,
+            expiresAtMillis = createdAt + 60_000,
+        )
+        val held = BuilderConstructionProjectRecord(
+            projectId = projectId,
+            playerId = playerId,
+            playerName = "Builder",
+            projectTitle = "Underwater starter house",
+            plan = companionPlan,
+            steps = listOf(BuilderConstructionStep(companionChange, requiredMaterial = null, output = null)),
+            bookCost = book,
+            state = BuilderConstructionProjectState.RECOVERY_REQUIRED,
+            cursor = 0,
+            createdAtMillis = createdAt,
+            updatedAtMillis = createdAt + 1,
+        ).validated()
+        val appliedPort = object : BuilderConstructionProjectPort {
+            override fun currentBlockData(position: BuilderBlockPos): String = companionChange.afterBlockData
+            override fun canModify(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) = true
+            override fun prepareInput(playerId: UUID, project: BuilderConstructionProjectRecord, input: BuilderItemAmount) = null
+            override fun prepareOutput(playerId: UUID, project: BuilderConstructionProjectRecord, output: BuilderItemAmount) = null
+            override fun reconcileResource(project: BuilderConstructionProjectRecord, mutation: BuilderResourceMutation) =
+                BuilderResourceMutationResult.RETRY
+            override fun rollbackResource(project: BuilderConstructionProjectRecord, mutation: BuilderResourceMutation) =
+                BuilderResourceMutationResult.RETRY
+            override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) = Unit
+        }
+
+        val resumed = BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(
+            held,
+            createdAt + 2,
+            appliedPort,
+        )
+
+        resumed.state shouldBe BuilderConstructionProjectState.COMPLETED
+        resumed.cursor shouldBe 1
+        resumed.completedAtMillis shouldBe createdAt + 2
+
+        val driftedPort = object : BuilderConstructionProjectPort by appliedPort {
+            override fun currentBlockData(position: BuilderBlockPos): String = companionChange.beforeBlockData
+            override fun isStepApplied(step: BuilderConstructionStep): Boolean = false
+        }
+        BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(
+            held,
+            createdAt + 3,
+            driftedPort,
+        ) shouldBe held
+
+        val unavailablePort = object : BuilderConstructionProjectPort by appliedPort {
+            override fun isStepApplied(step: BuilderConstructionStep): Boolean =
+                throw BuilderConstructionTemporarilyUnavailableException()
+        }
+        BuilderConstructionRecoveryPolicy.canResumeAppliedNoExchangeStep(held) shouldBe true
+        BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(
+            held,
+            createdAt + 3,
+            unavailablePort,
+        ) shouldBe held
+
+        val exchangeHeld = prepared()
+            .activated(createdAt + 1)
+            .recoveryRequired(createdAt + 2)
+        val exchangeAppliedPort = object : BuilderConstructionProjectPort by appliedPort {
+            override fun isStepApplied(step: BuilderConstructionStep): Boolean = true
+        }
+        BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(
+            exchangeHeld,
+            createdAt + 3,
+            exchangeAppliedPort,
+        ) shouldBe exchangeHeld
+        BuilderConstructionRecoveryPolicy.canResumeAppliedNoExchangeStep(exchangeHeld) shouldBe false
     }
 })

@@ -33,6 +33,26 @@ construction:
   # Per-project cache and per-call resolution caps keep dense storage areas bounded.
   max-cached-containers-per-project: 256
   max-resolved-containers-per-call: 32
+  site:
+    # Global non-persistent displays are recreated from durable projects after enable/reload.
+    enabled: true
+    view-range: 64
+    outline:
+      enabled: true
+      material: ORANGE_STAINED_GLASS
+      thickness: 0.035
+      glow-color: '#FFB142'
+    panel:
+      enabled: true
+      # The panel is centred just outside the minimum-Z face of the project cuboid.
+      height-offset: 2.25
+      front-offset: 0.4
+      interaction-width: 3.0
+      interaction-height: 1.5
+      line-width: 180
+      max-material-lines: 8
+      # ARGB: semi-transparent dark builder surface.
+      background-color: '#B21C2328'
   effects:
     # Cosmetic feedback is sampled by completed block number, so large builds stay quiet enough.
     enabled: true
@@ -715,6 +735,26 @@ locales:
         <#8c8c8c>   <#e6fff3>Нужна безопасная проверка администратора.
         <#8c8c8c>   <#e6fff3>Проект не продолжает работу вслепую.
       status: "<prefix><#e6fff3>Стройка: <#d48763><state> <#8c8c8c>— <hover:show_text:'Уже обработанные блоки и полный размер проекта.'><#e6fff3><count>/<total> блоков</hover>."
+      site:
+        unknown-name: "Строительный проект"
+        panel: |-
+          <#ffb142><bold>СТРОЙПЛОЩАДКА</bold>
+          <#e6fff3><name>
+          <#2bba43><count>/<#d48763><total> <#8c8c8c>— <#e6fff3><percent>%
+          <#92bed8>ПКМ — подробности
+        details: |-
+          <prefix><#ffb142><bold><name></bold>
+          <#8c8c8c>   <#e6fff3>Владелец: <#d48763><owner>
+          <#8c8c8c>   <#e6fff3>Состояние: <#d48763><state>
+          <#8c8c8c>   <#e6fff3>Прогресс: <#2bba43><count>/<#d48763><total> <#8c8c8c>(<#e6fff3><percent>%<#8c8c8c>)
+          <#8c8c8c>   <#e6fff3>Осталось вложить по плану:
+          <materials>
+          <missing>
+          <#8c8c8c>   <#969696>Ориентир участка: <x> <y> <z>
+        material-line: "<#8c8c8c>      — <#e6fff3><material> <#d48763>×<amount>"
+        material-more: "<#8c8c8c>      — <#969696>и ещё <#d48763><count> <#969696>видов"
+        missing: "<#8c8c8c>   <#ff9f0f>Сейчас не хватает: <#d48763><material> ×<amount>"
+        missing-none: "<#8c8c8c>   <#969696>Остановка по нехватке материалов: нет"
       states:
         prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
         active: "<hover:show_text:'Стройка обрабатывает блоки по одному.'>строится</hover>"
@@ -1310,6 +1350,26 @@ locales:
         <dark_gray>   <gray>An administrator must review it.
         <dark_gray>   <gray>The project will not continue blindly.
       status: "<prefix><gray>Construction: <white><state></white> — <hover:show_text:'Processed blocks and the full project size.'><white><count>/<total></white> blocks</hover>."
+      site:
+        unknown-name: "Construction project"
+        panel: |-
+          <#ffb142><bold>CONSTRUCTION SITE</bold>
+          <#e6fff3><name>
+          <#2bba43><count>/<#d48763><total> <#8c8c8c>— <#e6fff3><percent>%
+          <#92bed8>Right-click for details
+        details: |-
+          <prefix><#ffb142><bold><name></bold>
+          <dark_gray>   <gray>Owner: <#d48763><owner>
+          <dark_gray>   <gray>State: <#d48763><state>
+          <dark_gray>   <gray>Progress: <green><count>/<#d48763><total> <dark_gray>(<gray><percent>%<dark_gray>)
+          <dark_gray>   <gray>Remaining planned inputs:
+          <materials>
+          <missing>
+          <dark_gray>   <gray>Site reference: <x> <y> <z>
+        material-line: "<dark_gray>      — <gray><material> <#d48763>×<amount>"
+        material-more: "<dark_gray>      — <gray>and <#d48763><count> <gray>more types"
+        missing: "<dark_gray>   <yellow>Currently missing: <#d48763><material> ×<amount>"
+        missing-none: "<dark_gray>   <gray>Paused for missing materials: no"
       states:
         prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"
         active: "<hover:show_text:'The project is processing one block at a time.'>building</hover>"

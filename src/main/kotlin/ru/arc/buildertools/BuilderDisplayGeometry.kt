@@ -34,7 +34,7 @@ internal object BuilderDisplaySceneDiff {
 
 /** Exact twelve-edge cuboid used by every selection and preview layer. */
 internal object BuilderDisplayGeometry {
-    private const val THICKNESS = .035f
+    private const val DEFAULT_THICKNESS = .035f
 
     fun blockTransform(scale: Float): BuilderDisplayBlockTransform {
         require(scale.isFinite() && scale in .5f..1f)
@@ -44,24 +44,28 @@ internal object BuilderDisplayGeometry {
         )
     }
 
-    fun bounds(positions: List<BuilderBlockPos>): List<BuilderDisplayEdge> {
+    fun bounds(
+        positions: List<BuilderBlockPos>,
+        thickness: Float = DEFAULT_THICKNESS,
+    ): List<BuilderDisplayEdge> {
         if (positions.isEmpty()) return emptyList()
+        require(thickness.isFinite() && thickness > 0f)
         val minX = positions.minOf { it.x }.toDouble()
         val minY = positions.minOf { it.y }.toDouble()
         val minZ = positions.minOf { it.z }.toDouble()
         val maxX = positions.maxOf { it.x } + 1.0
         val maxY = positions.maxOf { it.y } + 1.0
         val maxZ = positions.maxOf { it.z } + 1.0
-        val half = THICKNESS / 2.0
+        val half = thickness / 2.0
         return buildList(12) {
             for (y in listOf(minY, maxY)) for (z in listOf(minZ, maxZ)) {
-                add(BuilderDisplayEdge(minX, y - half, z - half, (maxX - minX).toFloat(), THICKNESS, THICKNESS))
+                add(BuilderDisplayEdge(minX, y - half, z - half, (maxX - minX).toFloat(), thickness, thickness))
             }
             for (x in listOf(minX, maxX)) for (z in listOf(minZ, maxZ)) {
-                add(BuilderDisplayEdge(x - half, minY, z - half, THICKNESS, (maxY - minY).toFloat(), THICKNESS))
+                add(BuilderDisplayEdge(x - half, minY, z - half, thickness, (maxY - minY).toFloat(), thickness))
             }
             for (x in listOf(minX, maxX)) for (y in listOf(minY, maxY)) {
-                add(BuilderDisplayEdge(x - half, y - half, minZ, THICKNESS, THICKNESS, (maxZ - minZ).toFloat()))
+                add(BuilderDisplayEdge(x - half, y - half, minZ, thickness, thickness, (maxZ - minZ).toFloat()))
             }
         }
     }

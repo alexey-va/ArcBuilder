@@ -274,7 +274,7 @@ operator-tunable groups are:
 | --- | --- |
 | `enabled`, `allowed-worlds`, `storage` | Gate the module, select worlds, and select the schematic root. `enabled`/worlds/root may be overlaid by `builder-tools-runtime.yml`. |
 | `limits`, `timers` | Change caps, range, plan/clipboard/undo lifetimes, and journal retention. |
-| `construction` | Container search radius, online-inventory range, tick period, probe budget, bounded per-project container cache, per-call resolution budget, and sampled sound/particle feedback. |
+| `construction` | Container search radius, online-inventory range, tick period, probe budget, bounded per-project container cache, per-call resolution budget, sampled sound/particle feedback, and the construction-site outline/panel presentation. |
 | `runtime` | In-memory health refresh period, player-recovery retry period, and progress cadence. Lifecycle health-log cadence remains platform-owned. |
 | `preview` | Preview cadence/radius, selection particle budget, nearest-block display budget, plan display range, guidance/recentering cadence, and plan-title timings. |
 | `shop` | Read-only quote and auto-buy gates/limits. |
@@ -330,7 +330,7 @@ following states must be drained first:
 | `DURABLE_BOOK_FLOW` | Book/recovery locks, delivery-space waiters, release backlog, or book recovery is active. |
 | `PENDING_PREVIEW` | A pending ordinary preview or planned construction project exists. |
 | `VOLATILE_PLAYER_STATE` | A selection, clipboard, or global book preview is still open. |
-| `ACTIVE_CONSTRUCTION` | Construction writes/completions or any non-terminal persistent project exists. |
+| `ACTIVE_CONSTRUCTION` | A construction write or completion cleanup is currently crossing its durable boundary. Stable persistent projects are recreated from their journal by the new runtime and may continue through reload. |
 
 These checks are the exact predicates in
 `src/main/kotlin/ru/arc/buildertools/BuilderToolsRuntime.kt:2293-2311`.
@@ -338,7 +338,10 @@ Selections, clipboard contents, and global book previews are included in the
 barrier; `/builder reload` reports `busy` and leaves the old generation intact
 until they are closed. A runtime close still clears previews, selection, and
 clipboard (`src/main/kotlin/ru/arc/buildertools/BuilderToolsRuntime.kt:2352-2379`).
-Do not use reload as a way to interrupt a live operation.
+Do not use reload as a way to interrupt an ordinary live operation. Durable
+construction projects are the exception: when no construction write is in
+flight, the replacement runtime reloads their records, rebuilds their site
+displays with the new configuration, reacquires their locks, and continues.
 
 Reload outcomes are fail-closed:
 
@@ -399,7 +402,7 @@ python3 ../arc-core/scripts/verify_consumer_architecture.py .
 
 Do not run `integrationTest`, Testcontainers, Docker, or the transitive
 integration gate locally. The production artifact is
-`build/libs/ArcBuilder-1.0.3.jar`.
+`build/libs/ArcBuilder-1.0.5.jar`.
 
 ## Adding another selection operation
 

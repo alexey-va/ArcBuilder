@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import com.google.gson.GsonBuilder
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -128,5 +129,22 @@ class BuilderConstructionProjectStoreTest : FunSpec({
             ?.steps
             ?.single()
             ?.lootTableKey shouldBe "minecraft:chests/spawn_bonus_chest"
+    }
+
+    test("legacy project JSON without a title remains compatible while current JSON preserves it") {
+        val gson = GsonBuilder().disableHtmlEscaping().create()
+        val titled = prepared().copy(projectTitle = "Подводный стартовый дом").validated()
+        val currentJson = gson.toJsonTree(titled).asJsonObject
+
+        gson.fromJson(currentJson, BuilderConstructionProjectRecord::class.java)
+            .validated()
+            .projectTitle shouldBe "Подводный стартовый дом"
+
+        currentJson.remove("projectTitle")
+        val legacy = gson.fromJson(currentJson, BuilderConstructionProjectRecord::class.java).validated()
+
+        legacy.projectTitle shouldBe null
+        legacy.plan shouldBe titled.plan
+        legacy.steps shouldBe titled.steps
     }
 })

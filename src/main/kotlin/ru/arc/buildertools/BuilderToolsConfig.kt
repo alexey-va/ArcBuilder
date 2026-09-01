@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import org.bukkit.Material
 import ru.arc.ARC
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
@@ -57,6 +58,29 @@ class BuilderToolsConfig(
     val constructionParticlesEnabled: Boolean get() = config.bool("construction.effects.particles.enabled", true)
     val constructionParticleCount: Int get() = config.integer("construction.effects.particles.count", 3)
     val constructionParticleSpread: Double get() = config.double("construction.effects.particles.spread", 0.2)
+    val constructionSiteEnabled: Boolean get() = config.bool("construction.site.enabled", true)
+    val constructionSiteOutlineEnabled: Boolean get() = config.bool("construction.site.outline.enabled", true)
+    val constructionSiteOutlineMaterial: Material
+        get() = Material.matchMaterial(config.string("construction.site.outline.material", "ORANGE_STAINED_GLASS"))
+            ?: Material.AIR
+    val constructionSiteOutlineThickness: Float
+        get() = config.double("construction.site.outline.thickness", 0.035).toFloat()
+    val constructionSiteGlowColor: String get() = config.string("construction.site.outline.glow-color", "#FFB142")
+    val constructionSitePanelEnabled: Boolean get() = config.bool("construction.site.panel.enabled", true)
+    val constructionSitePanelHeightOffset: Double
+        get() = config.double("construction.site.panel.height-offset", 2.25)
+    val constructionSitePanelFrontOffset: Double
+        get() = config.double("construction.site.panel.front-offset", 0.4)
+    val constructionSitePanelInteractionWidth: Float
+        get() = config.double("construction.site.panel.interaction-width", 3.0).toFloat()
+    val constructionSitePanelInteractionHeight: Float
+        get() = config.double("construction.site.panel.interaction-height", 1.5).toFloat()
+    val constructionSitePanelLineWidth: Int get() = config.integer("construction.site.panel.line-width", 180)
+    val constructionSiteMaxMaterialLines: Int
+        get() = config.integer("construction.site.panel.max-material-lines", 8)
+    val constructionSitePanelBackgroundColor: String
+        get() = config.string("construction.site.panel.background-color", "#B21C2328")
+    val constructionSiteViewRange: Double get() = config.double("construction.site.view-range", 64.0)
     val healthRefreshPeriodTicks: Long get() = config.long("runtime.health-refresh-period-ticks", 20L)
     val playerRecoveryRetryPeriodTicks: Long get() = config.long("runtime.player-recovery-retry-period-ticks", 100L)
     val progressEveryBatches: Int get() = config.integer("runtime.progress-every-batches", 10)
@@ -104,6 +128,7 @@ class BuilderToolsConfig(
     val requireCoreProtect: Boolean get() = config.bool("safety.require-coreprotect", true)
     val replaceableMaterials: Set<String>
         get() = config.stringList("safety.replaceable-materials").map { it.uppercase(Locale.ROOT) }.toSet()
+    val defaultLocaleTag: String get() = config.string("default-locale", "ru")
 
     fun allowsWorld(worldName: String): Boolean =
         "*" in allowedWorlds || worldName.lowercase(Locale.ROOT) in allowedWorlds
@@ -161,6 +186,39 @@ class BuilderToolsConfig(
         }
         require(constructionParticleSpread.isFinite() && constructionParticleSpread in 0.0..1.0) {
             "Builder construction particle spread is invalid"
+        }
+        require(constructionSiteOutlineMaterial.isBlock && !constructionSiteOutlineMaterial.isAir) {
+            "Builder construction site outline material is invalid"
+        }
+        require(constructionSiteOutlineThickness.isFinite() && constructionSiteOutlineThickness in 0.02f..0.25f) {
+            "Builder construction site outline thickness is invalid"
+        }
+        require(RGB_COLOR.matches(constructionSiteGlowColor)) {
+            "Builder construction site glow color is invalid"
+        }
+        require(constructionSitePanelHeightOffset.isFinite() && constructionSitePanelHeightOffset in 0.5..8.0) {
+            "Builder construction site panel height offset is invalid"
+        }
+        require(constructionSitePanelFrontOffset.isFinite() && constructionSitePanelFrontOffset in 0.1..4.0) {
+            "Builder construction site panel front offset is invalid"
+        }
+        require(constructionSitePanelInteractionWidth.isFinite() && constructionSitePanelInteractionWidth in 0.5f..8.0f) {
+            "Builder construction site panel interaction width is invalid"
+        }
+        require(constructionSitePanelInteractionHeight.isFinite() && constructionSitePanelInteractionHeight in 0.5f..4.0f) {
+            "Builder construction site panel interaction height is invalid"
+        }
+        require(constructionSitePanelLineWidth in 80..400) {
+            "Builder construction site panel line width is invalid"
+        }
+        require(constructionSiteMaxMaterialLines in 1..32) {
+            "Builder construction site material line limit is invalid"
+        }
+        require(ARGB_COLOR.matches(constructionSitePanelBackgroundColor)) {
+            "Builder construction site panel background color is invalid"
+        }
+        require(constructionSiteViewRange.isFinite() && constructionSiteViewRange in 16.0..128.0) {
+            "Builder construction site view range is invalid"
         }
         require(healthRefreshPeriodTicks in 10L..1_200L) { "Builder-tools health refresh period is invalid" }
         require(playerRecoveryRetryPeriodTicks in 20L..1_200L) { "Builder-tools recovery retry period is invalid" }
@@ -231,6 +289,8 @@ class BuilderToolsConfig(
 
     companion object {
         private val WORLD_NAME = Regex("[A-Za-z0-9_./-]{1,128}")
+        private val RGB_COLOR = Regex("#[0-9A-Fa-f]{6}")
+        private val ARGB_COLOR = Regex("#[0-9A-Fa-f]{8}")
         private val MESSAGE_REQUIREMENTS = LocaleRequirements(
             scalarPaths = setOf(
                 "prefix",
@@ -401,6 +461,13 @@ class BuilderToolsConfig(
                 "construction.completed",
                 "construction.recovery-required",
                 "construction.status",
+                "construction.site.unknown-name",
+                "construction.site.panel",
+                "construction.site.details",
+                "construction.site.material-line",
+                "construction.site.material-more",
+                "construction.site.missing",
+                "construction.site.missing-none",
                 "items.none",
                 "items.summary",
                 "status.selection",

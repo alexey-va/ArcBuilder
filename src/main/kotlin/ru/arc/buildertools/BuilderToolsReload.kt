@@ -27,6 +27,11 @@ internal enum class BuilderToolsReloadBlocker {
     DURABLE_BOOK_FLOW,
 }
 
+internal fun builderConstructionReloadBlocked(writesInFlight: Int, completionsInFlight: Int): Boolean {
+    require(writesInFlight >= 0 && completionsInFlight >= 0)
+    return writesInFlight > 0 || completionsInFlight > 0
+}
+
 internal sealed interface BuilderToolsReloadResult {
     data class Applied(val config: BuilderToolsConfig) : BuilderToolsReloadResult
     data class Busy(val blocker: BuilderToolsReloadBlocker) : BuilderToolsReloadResult
@@ -245,6 +250,20 @@ internal object BuilderToolsReloadPreflight {
         "construction.max-container-probes-per-tick" to YamlValueType.INT,
         "construction.max-cached-containers-per-project" to YamlValueType.INT,
         "construction.max-resolved-containers-per-call" to YamlValueType.INT,
+        "construction.site.enabled" to YamlValueType.BOOLEAN,
+        "construction.site.view-range" to YamlValueType.DOUBLE,
+        "construction.site.outline.enabled" to YamlValueType.BOOLEAN,
+        "construction.site.outline.material" to YamlValueType.STRING,
+        "construction.site.outline.thickness" to YamlValueType.DOUBLE,
+        "construction.site.outline.glow-color" to YamlValueType.STRING,
+        "construction.site.panel.enabled" to YamlValueType.BOOLEAN,
+        "construction.site.panel.height-offset" to YamlValueType.DOUBLE,
+        "construction.site.panel.front-offset" to YamlValueType.DOUBLE,
+        "construction.site.panel.interaction-width" to YamlValueType.DOUBLE,
+        "construction.site.panel.interaction-height" to YamlValueType.DOUBLE,
+        "construction.site.panel.line-width" to YamlValueType.INT,
+        "construction.site.panel.max-material-lines" to YamlValueType.INT,
+        "construction.site.panel.background-color" to YamlValueType.STRING,
         "construction.effects.enabled" to YamlValueType.BOOLEAN,
         "construction.effects.interval-blocks" to YamlValueType.INT,
         "construction.effects.sounds.enabled" to YamlValueType.BOOLEAN,

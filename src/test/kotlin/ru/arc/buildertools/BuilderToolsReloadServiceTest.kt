@@ -7,6 +7,12 @@ import ru.arc.config.Config
 import java.nio.file.Files
 
 class BuilderToolsReloadServiceTest : FunSpec({
+    test("durable construction reload waits only for an in-flight write or completion") {
+        builderConstructionReloadBlocked(writesInFlight = 0, completionsInFlight = 0) shouldBe false
+        builderConstructionReloadBlocked(writesInFlight = 1, completionsInFlight = 0) shouldBe true
+        builderConstructionReloadBlocked(writesInFlight = 0, completionsInFlight = 1) shouldBe true
+    }
+
     fun config(label: String): BuilderToolsConfig = BuilderToolsConfig(
         Config(Files.createTempDirectory("arc-builder-reload-$label-"), "modules/builder-tools.yml"),
     )

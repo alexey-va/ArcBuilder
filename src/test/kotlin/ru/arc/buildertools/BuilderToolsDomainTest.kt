@@ -142,6 +142,17 @@ class BuilderToolsDomainTest : FunSpec({
             setBoolean("construction.effects.particles.enabled", true)
             setInt("construction.effects.particles.count", 2)
             setDouble("construction.effects.particles.spread", 0.35)
+            setString("construction.site.outline.material", "LIME_STAINED_GLASS")
+            setDouble("construction.site.outline.thickness", 0.08)
+            setString("construction.site.outline.glow-color", "#12AB34")
+            setDouble("construction.site.panel.height-offset", 3.5)
+            setDouble("construction.site.panel.front-offset", 0.75)
+            setDouble("construction.site.panel.interaction-width", 4.0)
+            setDouble("construction.site.panel.interaction-height", 2.0)
+            setInt("construction.site.panel.line-width", 220)
+            setInt("construction.site.panel.max-material-lines", 12)
+            setString("construction.site.panel.background-color", "#CC102030")
+            setDouble("construction.site.view-range", 72.0)
             setString("book-contracts.auction-recovery-retry", "45s")
             setInt("book-contracts.player-materials-summary-limit", 6)
             setBoolean("safety.require-lands", true)
@@ -170,6 +181,17 @@ class BuilderToolsDomainTest : FunSpec({
         configured.constructionParticlesEnabled shouldBe true
         configured.constructionParticleCount shouldBe 2
         configured.constructionParticleSpread shouldBe 0.35
+        configured.constructionSiteOutlineMaterial shouldBe Material.LIME_STAINED_GLASS
+        configured.constructionSiteOutlineThickness shouldBe 0.08f
+        configured.constructionSiteGlowColor shouldBe "#12AB34"
+        configured.constructionSitePanelHeightOffset shouldBe 3.5
+        configured.constructionSitePanelFrontOffset shouldBe 0.75
+        configured.constructionSitePanelInteractionWidth shouldBe 4.0f
+        configured.constructionSitePanelInteractionHeight shouldBe 2.0f
+        configured.constructionSitePanelLineWidth shouldBe 220
+        configured.constructionSiteMaxMaterialLines shouldBe 12
+        configured.constructionSitePanelBackgroundColor shouldBe "#CC102030"
+        configured.constructionSiteViewRange shouldBe 72.0
         configured.bookAuctionRecoveryRetry shouldBe java.time.Duration.ofSeconds(45)
         configured.bookPlayerMaterialsSummaryLimit shouldBe 6
         configured.requireLands shouldBe true
