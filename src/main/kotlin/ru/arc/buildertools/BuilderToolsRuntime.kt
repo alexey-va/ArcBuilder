@@ -1,7 +1,6 @@
 package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
-import net.kyori.adventure.text.JoinConfiguration
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.title.Title
 import org.bukkit.Bukkit
@@ -292,6 +291,7 @@ internal class BuilderToolsRuntime(
     private val consumedUndoSources = mutableSetOf<UUID>()
     private val plannedConstructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
+    private val constructionMenus: BuilderConstructionMenuManager
     private val constructionSiteDisplays: BuilderConstructionSiteDisplayManager
     private val constructionWrites = mutableSetOf<UUID>()
     private val constructionCompletions = mutableSetOf<UUID>()
@@ -478,14 +478,24 @@ internal class BuilderToolsRuntime(
         var initializedCrown: BuilderCrownController? = null
         var initializedBooks: BuilderBookLifecycle? = null
         var initializedPlayerRecoveries: BuilderPlayerRecoveryCoordinator? = null
+        var initializedConstructionMenus: BuilderConstructionMenuManager? = null
         var initializedConstructionSiteDisplays: BuilderConstructionSiteDisplayManager? = null
         try {
+            constructionMenus = BuilderConstructionMenuManager(
+                plugin = plugin,
+                settings = config.constructionMenuSettings(),
+                messages = messages,
+                taskScope = taskScope,
+                projectLookup = constructionProjects::get,
+                canControl = ::canControlConstruction,
+                requestPaused = ::requestConstructionPaused,
+            ).also { initializedConstructionMenus = it }
             constructionSiteDisplays = BuilderConstructionSiteDisplayManager(
                 plugin = plugin,
                 settings = config.constructionSiteDisplaySettings(),
                 messages = messages,
                 projectLookup = constructionProjects::get,
-                onInspect = ::showConstructionSiteDetails,
+                onInspect = constructionMenus::open,
             ).also { initializedConstructionSiteDisplays = it }
             BuildingManager.installPreviewBridge(displayRenderer)
             Bukkit.getPluginManager().registerEvents(this, plugin)
@@ -691,6 +701,7 @@ internal class BuilderToolsRuntime(
             initializedCrown?.close()
             initializedPreviews?.close()
             initializedConstructionSiteDisplays?.close()
+            initializedConstructionMenus?.close()
             taskScope.close()
             operationLocks.close()
             closeStorageExecutor()
@@ -1523,6 +1534,7 @@ internal class BuilderToolsRuntime(
                 record.state == BuilderConstructionProjectState.WAITING_MATERIALS ||
                 record.state == BuilderConstructionProjectState.INPUT_PREPARED ||
                 record.state == BuilderConstructionProjectState.WORLD_PREPARED ||
+                record.state == BuilderConstructionProjectState.OUTPUT_PENDING ||
                 record.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
                 record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT ||
                 canRetryAppliedConstructionRecovery(record)
@@ -1584,6 +1596,7 @@ internal class BuilderToolsRuntime(
                     }
                     constructionProjects[durable.projectId] = durable
                     constructionSiteDisplays.upsert(durable)
+                    constructionMenus.refreshProject(durable.projectId)
                     if (
                         durable.state != BuilderConstructionProjectState.RECOVERY_REQUIRED ||
                         durable.pendingResourceMutation == null
@@ -1633,6 +1646,7 @@ internal class BuilderToolsRuntime(
                 }
                 constructionProjects[durable.projectId] = durable
                 constructionSiteDisplays.upsert(durable)
+                constructionMenus.refreshProject(durable.projectId)
                 notifyConstructionTransition(expected, durable)
                 // RECOVERY_REQUIRED deliberately retains the player/container lease. The durable
                 // receipt must remain isolated until an operator resolves the ambiguous value flow.
@@ -2093,83 +2107,50 @@ internal class BuilderToolsRuntime(
         }
     }
 
-    private fun showConstructionSiteDetails(
+    private fun canControlConstruction(
         player: Player,
         construction: BuilderConstructionProjectRecord,
-    ) {
-        val remaining = aggregateConstructionAmounts(
-            construction.steps.drop(construction.cursor).mapNotNull(BuilderConstructionStep::requiredMaterial),
-        )
-        val visibleMaterials = remaining.take(config.constructionSiteMaxMaterialLines).map { amount ->
-            val material = Material.matchMaterial(amount.materialKey) ?: BuilderItemCodec.decodePrototype(amount.itemBase64).type
-            messages.render(
-                "construction.site.material-line",
-                locale(player),
-                mapOf(
-                    "material" to BuilderMaterialPresentation.label(player, material),
-                    "amount" to messages.literal(amount.amount),
-                ),
-            )
-        }.toMutableList()
-        if (remaining.size > visibleMaterials.size) {
-            visibleMaterials += messages.render(
-                "construction.site.material-more",
-                locale(player),
-                mapOf("count" to messages.literal(remaining.size - visibleMaterials.size)),
-            )
+    ): Boolean = player.uniqueId == construction.playerId || player.hasPermission(CONSTRUCTION_ADMIN_PERMISSION)
+
+    private fun requestConstructionPaused(player: Player, projectId: UUID, pause: Boolean): Boolean {
+        val expected = constructionProjects[projectId]?.takeUnless(BuilderConstructionProjectRecord::terminal)
+            ?: return false
+        if (!canControlConstruction(player, expected) || !constructionWrites.add(projectId)) return false
+        val target = runCatching {
+            when {
+                pause && expected.state in PAUSABLE_CONSTRUCTION_STATES -> expected.paused(System.currentTimeMillis())
+                !pause && expected.state == BuilderConstructionProjectState.PAUSED -> expected.resumed(System.currentTimeMillis())
+                else -> null
+            }
+        }.getOrNull()
+        if (target == null) {
+            constructionWrites.remove(projectId)
+            return false
         }
-        val materials = if (visibleMaterials.isEmpty()) {
-            messages.render("items.none", locale(player))
-        } else {
-            Component.join(JoinConfiguration.newlines(), visibleMaterials)
-        }
-        val missing = construction.steps.getOrNull(construction.cursor)?.requiredMaterial
-            ?.takeIf { construction.state == BuilderConstructionProjectState.WAITING_MATERIALS }
-            ?.let { amount ->
-                val material = Material.matchMaterial(amount.materialKey)
-                    ?: BuilderItemCodec.decodePrototype(amount.itemBase64).type
-                messages.render(
-                    "construction.site.missing",
-                    locale(player),
-                    mapOf(
-                        "material" to BuilderMaterialPresentation.label(player, material),
-                        "amount" to messages.literal(amount.amount),
+        writeAsync(
+            action = { constructionStore.transition(expected, target) },
+            callback = { durable, failure ->
+                constructionWrites.remove(projectId)
+                if (failure != null || durable == null) {
+                    error("Builder construction pause transition failed for $projectId", failure)
+                    constructionMenus.refreshProject(projectId)
+                    return@writeAsync
+                }
+                constructionProjects[projectId] = durable
+                constructionSiteDisplays.upsert(durable)
+                constructionMenus.refreshProject(projectId)
+                info(
+                    debugLine.line(
+                        "event" to if (pause) "construction_paused" else "construction_resumed",
+                        "operation" to projectId,
+                        "player" to player.uniqueId,
+                        "cursor" to durable.cursor,
                     ),
                 )
-            }
-            ?: messages.render("construction.site.missing-none", locale(player))
-        val title = construction.projectTitle?.let(messages::literal)
-            ?: construction.plan.bookBuildingId?.let(messages::literal)
-            ?: messages.render("construction.site.unknown-name", locale(player))
-        val first = construction.steps.first().change.position
-        val percent = (construction.cursor.toLong() * 100L / construction.steps.size).toInt()
-        sendPlayerMessage(
-            player,
-            messages.render(
-                "construction.site.details",
-                locale(player),
-                mapOf(
-                    "name" to title,
-                    "owner" to messages.literal(construction.playerName),
-                    "state" to constructionStateLabel(player, construction.state),
-                    "count" to messages.literal(construction.cursor),
-                    "total" to messages.literal(construction.steps.size),
-                    "percent" to messages.literal(percent),
-                    "materials" to materials,
-                    "missing" to missing,
-                    "x" to messages.literal(first.x),
-                    "y" to messages.literal(first.y),
-                    "z" to messages.literal(first.z),
-                ),
-            ),
+            },
         )
+        return true
     }
-
-    private fun aggregateConstructionAmounts(items: List<BuilderItemAmount>): List<BuilderItemAmount> = items
-        .groupBy { it.itemBase64 to it.materialKey }
-        .values
-        .map { grouped -> grouped.first().copy(amount = grouped.sumOf(BuilderItemAmount::amount)).validated() }
-        .sortedBy(BuilderItemAmount::materialKey)
 
     private fun ensureMutable(player: Player, block: Block, placing: Material? = null) {
         ensureInRangeAndLoaded(player, block)
@@ -2664,6 +2645,7 @@ internal class BuilderToolsRuntime(
         playerRecoveries.close()
         books.close()
         constructionSiteDisplays.close()
+        constructionMenus.close()
         taskScope.close()
         closeStorageExecutor()
         shop.close()
@@ -2690,6 +2672,11 @@ internal class BuilderToolsRuntime(
 
     private companion object {
         const val STORAGE_SHUTDOWN_TIMEOUT_SECONDS = 5L
+        const val CONSTRUCTION_ADMIN_PERMISSION = "arcbuild.admin.construction"
+        val PAUSABLE_CONSTRUCTION_STATES = setOf(
+            BuilderConstructionProjectState.ACTIVE,
+            BuilderConstructionProjectState.WAITING_MATERIALS,
+        )
     }
 }
 

@@ -4,6 +4,7 @@ import com.google.gson.GsonBuilder
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Location
+import org.bukkit.GameMode
 import org.bukkit.Material
 import org.bukkit.block.Container
 import org.bukkit.inventory.ItemStack
@@ -255,6 +256,31 @@ class BuilderConstructionResourcesTest : FunSpec({
             resources.storeOutput(player.uniqueId, project, dirt) shouldBe true
             container.amount(Material.DIRT) shouldBe 1
             player.inventory.all(Material.DIRT).values.sumOf(ItemStack::getAmount) shouldBe 0
+        }
+    }
+
+    test("creative owner receives recovered blocks in an empty inventory when no container exists") {
+        withResourcePaper { paper ->
+            val world = paper.addSimpleWorld("construction-creative-output")
+            world.getChunkAt(0, 0).load()
+            val player = paper.server.addPlayer("CreativeOutputOwner").also {
+                it.gameMode = GameMode.CREATIVE
+                it.teleport(Location(world, 0.5, 64.0, 1.5))
+            }
+            val stone = BuilderItemCodec.aggregate(listOf(ItemStack(Material.STONE))).single()
+            val andesite = BuilderItemCodec.aggregate(listOf(ItemStack(Material.ANDESITE))).single()
+            val project = project(player.uniqueId, world.uid, stone, andesite)
+            val resources = BuilderConstructionResources(
+                containerRadius = 4,
+                onlineRange = 48.0,
+                worldProvider = { world },
+                onlinePlayerProvider = { player },
+                canOpenContainer = { _, _ -> true },
+            )
+
+            resources.storeOutput(player.uniqueId, project, andesite) shouldBe true
+
+            player.inventory.all(Material.ANDESITE).values.sumOf(ItemStack::getAmount) shouldBe 1
         }
     }
 

@@ -15,8 +15,10 @@ internal enum class BuilderConstructionProjectState(val terminal: Boolean) {
     WAITING_MATERIALS(false),
     INPUT_PREPARED(false),
     WORLD_PREPARED(false),
+    OUTPUT_PENDING(false),
     WAITING_OUTPUT_SPACE(false),
     DELIVERING_OUTPUT(false),
+    PAUSED(false),
     RECOVERY_REQUIRED(false),
     COMPLETED(true),
     CANCELLED(true),
@@ -216,10 +218,18 @@ internal data class BuilderConstructionProjectRecord(
         ),
     )
 
-    fun waitingForOutput(output: BuilderItemAmount, nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+    fun outputPending(output: BuilderItemAmount, nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+        copy(
+            state = BuilderConstructionProjectState.OUTPUT_PENDING,
+            pendingOutput = output.validated(),
+            pendingResourceMutation = null,
+            updatedAtMillis = nowMillis,
+        ),
+    )
+
+    fun waitingForOutput(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
         copy(
             state = BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
-            pendingOutput = output.validated(),
             pendingResourceMutation = null,
             updatedAtMillis = nowMillis,
         ),
@@ -246,6 +256,24 @@ internal data class BuilderConstructionProjectRecord(
         copy(
             state = BuilderConstructionProjectState.RECOVERY_REQUIRED,
             pendingOutput = null,
+            updatedAtMillis = nowMillis,
+        ),
+    )
+
+    fun paused(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+        copy(
+            state = BuilderConstructionProjectState.PAUSED,
+            pendingOutput = null,
+            pendingResourceMutation = null,
+            updatedAtMillis = nowMillis,
+        ),
+    )
+
+    fun resumed(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
+        copy(
+            state = BuilderConstructionProjectState.ACTIVE,
+            pendingOutput = null,
+            pendingResourceMutation = null,
             updatedAtMillis = nowMillis,
         ),
     )
@@ -307,6 +335,7 @@ internal data class BuilderConstructionProjectRecord(
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1
         private val OUTPUT_STATES = setOf(
+            BuilderConstructionProjectState.OUTPUT_PENDING,
             BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
             BuilderConstructionProjectState.DELIVERING_OUTPUT,
         )
@@ -361,7 +390,8 @@ internal object BuilderConstructionProjectTransitionRules {
                     after.state == BuilderConstructionProjectState.WORLD_PREPARED && sameCursor ||
                     after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
                     after.state == BuilderConstructionProjectState.WAITING_MATERIALS && sameCursor ||
-                    after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
+                    after.state == BuilderConstructionProjectState.OUTPUT_PENDING && sameCursor ||
+                    after.state == BuilderConstructionProjectState.PAUSED && sameCursor ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
@@ -369,7 +399,8 @@ internal object BuilderConstructionProjectTransitionRules {
                 after.state == BuilderConstructionProjectState.INPUT_PREPARED && sameCursor ||
                     after.state == BuilderConstructionProjectState.WORLD_PREPARED && sameCursor ||
                     after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
-                    after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
+                    after.state == BuilderConstructionProjectState.OUTPUT_PENDING && sameCursor ||
+                    after.state == BuilderConstructionProjectState.PAUSED && sameCursor ||
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
@@ -380,8 +411,13 @@ internal object BuilderConstructionProjectTransitionRules {
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.WORLD_PREPARED ->
                 after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
-                    after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
+                    after.state == BuilderConstructionProjectState.OUTPUT_PENDING && sameCursor ||
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
+                    after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
+            BuilderConstructionProjectState.OUTPUT_PENDING ->
+                after.state == BuilderConstructionProjectState.DELIVERING_OUTPUT && sameCursor ||
+                    after.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE && sameCursor ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ->
@@ -397,6 +433,9 @@ internal object BuilderConstructionProjectTransitionRules {
             BuilderConstructionProjectState.RECOVERY_REQUIRED ->
                 after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
                     after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
+                    after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
+            BuilderConstructionProjectState.PAUSED ->
+                after.state == BuilderConstructionProjectState.ACTIVE && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.COMPLETED,
             BuilderConstructionProjectState.CANCELLED,
@@ -598,7 +637,7 @@ internal object BuilderConstructionTransitionFailurePolicy {
             target.state == BuilderConstructionProjectState.WORLD_PREPARED
         BuilderConstructionProjectState.WORLD_PREPARED ->
             target.state == BuilderConstructionProjectState.ACTIVE ||
-                target.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
+                target.state == BuilderConstructionProjectState.OUTPUT_PENDING ||
                 target.state == BuilderConstructionProjectState.COMPLETED
         BuilderConstructionProjectState.DELIVERING_OUTPUT ->
             target.state == BuilderConstructionProjectState.ACTIVE ||
@@ -622,12 +661,15 @@ internal object BuilderConstructionProjectController {
             BuilderConstructionProjectState.RECOVERY_REQUIRED,
             BuilderConstructionProjectState.COMPLETED,
             BuilderConstructionProjectState.CANCELLED,
+            BuilderConstructionProjectState.PAUSED,
             -> null
             BuilderConstructionProjectState.PREPARED -> activate(current, nowMillis, port)
             BuilderConstructionProjectState.WAITING_MATERIALS -> prepareStep(current, nowMillis, port)
             BuilderConstructionProjectState.INPUT_PREPARED -> debitInput(current, nowMillis, port)
             BuilderConstructionProjectState.WORLD_PREPARED -> applyWorld(current, nowMillis, port)
-            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE -> prepareOutput(current, nowMillis, port)
+            BuilderConstructionProjectState.OUTPUT_PENDING,
+            BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
+            -> prepareOutput(current, nowMillis, port)
             BuilderConstructionProjectState.DELIVERING_OUTPUT -> deliverOutput(current, nowMillis, port)
             BuilderConstructionProjectState.ACTIVE -> prepareStep(current, nowMillis, port)
         }
@@ -662,7 +704,7 @@ internal object BuilderConstructionProjectController {
         return when (reconcileResource(record, mutation, port)) {
             BuilderResourceMutationResult.APPLIED -> record.outputDelivered(nowMillis)
             BuilderResourceMutationResult.RETRY -> null
-            BuilderResourceMutationResult.STALE -> record.waitingForOutput(checkNotNull(record.pendingOutput), nowMillis)
+            BuilderResourceMutationResult.STALE -> record.waitingForOutput(nowMillis)
             BuilderResourceMutationResult.CONFLICT -> record.recoveryRequired(nowMillis)
         }
     }
@@ -677,7 +719,11 @@ internal object BuilderConstructionProjectController {
             port.prepareOutput(record.playerId, record, output)
         } catch (_: Throwable) {
             null
-        } ?: return null
+        } ?: return if (record.state == BuilderConstructionProjectState.OUTPUT_PENDING) {
+            record.waitingForOutput(nowMillis)
+        } else {
+            null
+        }
         return record.deliveringOutput(mutation, nowMillis)
     }
 
@@ -785,7 +831,7 @@ internal object BuilderConstructionProjectController {
         nowMillis: Long,
     ): BuilderConstructionProjectRecord {
         val output = step.output ?: return record.advanced(nowMillis)
-        return record.waitingForOutput(output, nowMillis)
+        return record.outputPending(output, nowMillis)
     }
 
     private fun compensateOrRecover(

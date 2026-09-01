@@ -44,7 +44,8 @@ construction:
       glow-color: '#FFB142'
     panel:
       enabled: true
-      # The panel is centred just outside the minimum-Z face of the project cuboid.
+      # Switch between MIN_Z and MAX_Z, then /builder reload; MAX_Z is the player-facing side used by build books.
+      face: MAX_Z
       height-offset: 2.25
       front-offset: 0.4
       interaction-width: 3.0
@@ -53,6 +54,23 @@ construction:
       max-material-lines: 8
       # ARGB: semi-transparent dark builder surface.
       background-color: '#B21C2328'
+    menu:
+      rows: 3
+      refresh-period-ticks: 10
+      background-item: arc:background
+      background-fallback: GRAY_STAINED_GLASS_PANE
+      slots:
+        overview: 10
+        progress: 12
+        resources: 14
+        control: 16
+      materials:
+        overview: BOOK
+        progress: CLOCK
+        resources: CHEST
+        pause: REDSTONE_TORCH
+        resume: LIME_DYE
+        unavailable: GRAY_DYE
   effects:
     # Cosmetic feedback is sampled by completed block number, so large builds stay quiet enough.
     enabled: true
@@ -726,7 +744,8 @@ locales:
       waiting-output: |-
 
         <prefix><#ff9f0f>Стройке некуда сложить снятые блоки.
-        <#8c8c8c>   <#e6fff3>Освободите место в доступном сундуке рядом.
+        <#8c8c8c>   <#e6fff3>Освободите место в инвентаре
+        <#8c8c8c>   <#e6fff3>или доступном сундуке рядом.
         <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total> <#e6fff3>блоков.
       completed: "<prefix><#2bba43>Строительный проект завершён: <#d48763><count> <#e6fff3>блоков."
       recovery-required: |-
@@ -741,7 +760,7 @@ locales:
           <#ffb142><bold>СТРОЙПЛОЩАДКА</bold>
           <#e6fff3><name>
           <#2bba43><count>/<#d48763><total> <#8c8c8c>— <#e6fff3><percent>%
-          <#92bed8>ПКМ — подробности
+          <#92bed8>ПКМ — открыть управление
         details: |-
           <prefix><#ffb142><bold><name></bold>
           <#8c8c8c>   <#e6fff3>Владелец: <#d48763><owner>
@@ -755,14 +774,61 @@ locales:
         material-more: "<#8c8c8c>      — <#969696>и ещё <#d48763><count> <#969696>видов"
         missing: "<#8c8c8c>   <#ff9f0f>Сейчас не хватает: <#d48763><material> ×<amount>"
         missing-none: "<#8c8c8c>   <#969696>Остановка по нехватке материалов: нет"
+        menu:
+          title: "<#1c2328>Стройка · <name>"
+          overview:
+            name: "<#ffb142><bold><name>"
+            lore:
+              - "<#8c8c8c>Владелец: <#e6fff3><owner>"
+              - "<#8c8c8c>Состояние: <#d48763><state>"
+              - "<#8c8c8c>Участок: <#969696><x> <y> <z>"
+          progress:
+            name: "<#2bba43><bold>Ход строительства"
+            lore:
+              - "<#8c8c8c>Готово: <#2bba43><count><#8c8c8c>/<#d48763><total>"
+              - "<#8c8c8c>Прогресс: <#e6fff3><percent>%"
+              - "<#969696>Данные обновляются автоматически."
+          resources:
+            name: "<#d48763><bold>Оставшиеся материалы"
+            lore:
+              - "<#969696>Что ещё потребуется по плану:"
+            line: "<#8c8c8c>— <#e6fff3><material> <#d48763>×<amount>"
+            more: "<#8c8c8c>— <#969696>и ещё <#d48763><count> <#969696>видов"
+            none: "<#2bba43>Дополнительные материалы не нужны."
+            missing: "<#ff9f0f>Сейчас не хватает: <#d48763><material> ×<amount>"
+          control:
+            pause:
+              name: "<#ff9f0f><bold>Поставить на паузу"
+              lore:
+                - "<#e6fff3>Остановить стройку между безопасными шагами."
+                - "<#969696>Уже поставленные блоки останутся на месте."
+                - "<#92bed8>Нажмите, чтобы приостановить."
+            resume:
+              name: "<#2bba43><bold>Продолжить строительство"
+              lore:
+                - "<#e6fff3>Продолжить с сохранённого блока."
+                - "<#969696>Материалы будут проверены заново."
+                - "<#92bed8>Нажмите, чтобы продолжить."
+            unavailable:
+              name: "<#969696><bold>Управление временно недоступно"
+              lore:
+                - "<#e6fff3>Сейчас: <#d48763><state>"
+                - "<#969696>Дождитесь завершения безопасного шага."
+            readonly:
+              name: "<#969696><bold>Только просмотр"
+              lore:
+                - "<#e6fff3>Управлять может владелец проекта или администратор."
+                - "<#969696>Прогресс и материалы доступны для просмотра."
       states:
         prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
         active: "<hover:show_text:'Стройка обрабатывает блоки по одному.'>строится</hover>"
         waiting_materials: "<hover:show_text:'Следующий блок ждёт нужный ресурс в инвентаре или доступном сундуке.'>ждёт материалы</hover>"
         input_prepared: "<hover:show_text:'Шаг записан до безопасного списания материала.'>подтверждает материал</hover>"
         world_prepared: "<hover:show_text:'Списание подтверждено; блок применяется идемпотентно.'>применяет блок</hover>"
+        output_pending: "<hover:show_text:'Снятый блок сохранён и сейчас подбирается свободное место для выдачи.'>готовит выдачу</hover>"
         waiting_output_space: "<hover:show_text:'Некуда положить предмет, полученный со снятого блока.'>ждёт свободное место</hover>"
         delivering_output: "<hover:show_text:'Предмет со снятого блока сохраняется в доступный сундук или инвентарь.'>складывает блоки</hover>"
+        paused: "<hover:show_text:'Владелец или администратор вручную приостановил проект.'>на паузе</hover>"
         recovery_required: "<hover:show_text:'Мир или права изменились; продолжение требует проверки администратора.'>нужна проверка</hover>"
         completed: "<hover:show_text:'Все блоки проекта обработаны.'>завершена</hover>"
         cancelled: "<hover:show_text:'Проект остановлен и больше не выполняется.'>отменена</hover>"
@@ -1341,7 +1407,7 @@ locales:
       waiting-output: |-
 
         <prefix><yellow>No room for recovered blocks.
-        <dark_gray>   <gray>Free space in an accessible nearby container.
+        <dark_gray>   <gray>Free space in your inventory or an accessible nearby container.
         <dark_gray>   <gray>Progress: <white><count>/<total></white> blocks.
       completed: "<prefix><green>Construction completed: <white><count></white> blocks."
       recovery-required: |-
@@ -1356,7 +1422,7 @@ locales:
           <#ffb142><bold>CONSTRUCTION SITE</bold>
           <#e6fff3><name>
           <#2bba43><count>/<#d48763><total> <#8c8c8c>— <#e6fff3><percent>%
-          <#92bed8>Right-click for details
+          <#92bed8>Right-click to open controls
         details: |-
           <prefix><#ffb142><bold><name></bold>
           <dark_gray>   <gray>Owner: <#d48763><owner>
@@ -1370,14 +1436,61 @@ locales:
         material-more: "<dark_gray>      — <gray>and <#d48763><count> <gray>more types"
         missing: "<dark_gray>   <yellow>Currently missing: <#d48763><material> ×<amount>"
         missing-none: "<dark_gray>   <gray>Paused for missing materials: no"
+        menu:
+          title: "<#1c2328>Construction · <name>"
+          overview:
+            name: "<#ffb142><bold><name>"
+            lore:
+              - "<dark_gray>Owner: <#e6fff3><owner>"
+              - "<dark_gray>State: <#d48763><state>"
+              - "<dark_gray>Site: <gray><x> <y> <z>"
+          progress:
+            name: "<#2bba43><bold>Construction progress"
+            lore:
+              - "<dark_gray>Done: <#2bba43><count><dark_gray>/<#d48763><total>"
+              - "<dark_gray>Progress: <#e6fff3><percent>%"
+              - "<gray>This view refreshes automatically."
+          resources:
+            name: "<#d48763><bold>Remaining materials"
+            lore:
+              - "<gray>Still required by the plan:"
+            line: "<dark_gray>— <#e6fff3><material> <#d48763>×<amount>"
+            more: "<dark_gray>— <gray>and <#d48763><count> <gray>more types"
+            none: "<#2bba43>No additional materials are required."
+            missing: "<yellow>Currently missing: <#d48763><material> ×<amount>"
+          control:
+            pause:
+              name: "<yellow><bold>Pause construction"
+              lore:
+                - "<#e6fff3>Stop between durable safe steps."
+                - "<gray>Blocks already placed stay in the world."
+                - "<#92bed8>Click to pause."
+            resume:
+              name: "<green><bold>Resume construction"
+              lore:
+                - "<#e6fff3>Continue from the saved block."
+                - "<gray>Required materials will be checked again."
+                - "<#92bed8>Click to resume."
+            unavailable:
+              name: "<gray><bold>Controls temporarily unavailable"
+              lore:
+                - "<#e6fff3>Current state: <#d48763><state>"
+                - "<gray>Wait for the current durable step to finish."
+            readonly:
+              name: "<gray><bold>Read-only view"
+              lore:
+                - "<#e6fff3>Only the project owner or an administrator can control it."
+                - "<gray>Progress and materials remain visible."
       states:
         prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"
         active: "<hover:show_text:'The project is processing one block at a time.'>building</hover>"
         waiting_materials: "<hover:show_text:'The next block needs a resource from inventory or an accessible container.'>waiting for materials</hover>"
         input_prepared: "<hover:show_text:'The step is durable before its material is debited.'>confirming material</hover>"
         world_prepared: "<hover:show_text:'The debit is confirmed and the block is applied idempotently.'>applying block</hover>"
+        output_pending: "<hover:show_text:'The recovered block is durable and a destination is now being selected.'>preparing recovered item</hover>"
         waiting_output_space: "<hover:show_text:'There is no room for an item recovered from a removed block.'>waiting for space</hover>"
         delivering_output: "<hover:show_text:'An item from a removed block is being stored safely.'>storing recovered blocks</hover>"
+        paused: "<hover:show_text:'The owner or an administrator paused the project manually.'>paused</hover>"
         recovery_required: "<hover:show_text:'The world or permissions changed; an administrator must review the project.'>needs review</hover>"
         completed: "<hover:show_text:'Every project block was processed.'>completed</hover>"
         cancelled: "<hover:show_text:'The project is stopped and will no longer run.'>cancelled</hover>"

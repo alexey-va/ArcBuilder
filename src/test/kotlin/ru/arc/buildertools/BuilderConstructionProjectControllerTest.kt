@@ -137,7 +137,7 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         }
     }
 
-    fun advanceToWaitingOutput(port: FakePort): BuilderConstructionProjectRecord {
+    fun advanceToOutputPending(port: FakePort): BuilderConstructionProjectRecord {
         val inputPrepared = checkNotNull(BuilderConstructionProjectController.tick(active(), createdAt + 2, port))
         inputPrepared.state shouldBe BuilderConstructionProjectState.INPUT_PREPARED
         port.removed shouldBe 0
@@ -149,7 +149,7 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         port.removed shouldBe 1
         port.applied shouldBe 0
         return checkNotNull(BuilderConstructionProjectController.tick(worldPrepared, createdAt + 4, port)).also {
-            it.state shouldBe BuilderConstructionProjectState.WAITING_OUTPUT_SPACE
+            it.state shouldBe BuilderConstructionProjectState.OUTPUT_PENDING
         }
     }
 
@@ -186,10 +186,10 @@ class BuilderConstructionProjectControllerTest : FunSpec({
     test("successful step durably marks delivery before storing replacement and completing") {
         val port = FakePort()
 
-        val waiting = advanceToWaitingOutput(port)
+        val pending = advanceToOutputPending(port)
         port.stored shouldBe 0
 
-        val delivering = BuilderConstructionProjectController.tick(waiting, createdAt + 5, port)!!
+        val delivering = BuilderConstructionProjectController.tick(pending, createdAt + 5, port)!!
         delivering.state shouldBe BuilderConstructionProjectState.DELIVERING_OUTPUT
         port.stored shouldBe 0
 
@@ -204,17 +204,18 @@ class BuilderConstructionProjectControllerTest : FunSpec({
 
     test("full output storage persists the refund before advancing the cursor") {
         val port = FakePort(outputSpace = false)
-        val waiting = advanceToWaitingOutput(port)
+        val pending = advanceToOutputPending(port)
+        val waiting = checkNotNull(BuilderConstructionProjectController.tick(pending, createdAt + 5, port))
 
         waiting.state shouldBe BuilderConstructionProjectState.WAITING_OUTPUT_SPACE
         waiting.cursor shouldBe 0
         waiting.pendingOutput shouldBe dirt
         port.blockData shouldBe "minecraft:stone"
 
-        BuilderConstructionProjectController.tick(waiting, createdAt + 5, port) shouldBe null
+        BuilderConstructionProjectController.tick(waiting, createdAt + 6, port) shouldBe null
         port.outputSpace = true
-        val delivering = BuilderConstructionProjectController.tick(waiting, createdAt + 6, port)!!
-        val completed = BuilderConstructionProjectController.tick(delivering, createdAt + 7, port)
+        val delivering = BuilderConstructionProjectController.tick(waiting, createdAt + 7, port)!!
+        val completed = BuilderConstructionProjectController.tick(delivering, createdAt + 8, port)
         completed?.state shouldBe BuilderConstructionProjectState.COMPLETED
         completed?.cursor shouldBe 1
         port.removed shouldBe 1
@@ -224,8 +225,8 @@ class BuilderConstructionProjectControllerTest : FunSpec({
 
     test("failed or ambiguous output delivery never retries from the delivering state") {
         val port = FakePort()
-        val waiting = advanceToWaitingOutput(port)
-        val delivering = BuilderConstructionProjectController.tick(waiting, createdAt + 5, port)!!
+        val pending = advanceToOutputPending(port)
+        val delivering = BuilderConstructionProjectController.tick(pending, createdAt + 5, port)!!
         port.outputFailure = true
 
         val recovery = BuilderConstructionProjectController.tick(delivering, createdAt + 6, port)
@@ -297,7 +298,7 @@ class BuilderConstructionProjectControllerTest : FunSpec({
 
         val result = BuilderConstructionProjectController.tick(worldPrepared, createdAt + 4, port)
 
-        result?.state shouldBe BuilderConstructionProjectState.WAITING_OUTPUT_SPACE
+        result?.state shouldBe BuilderConstructionProjectState.OUTPUT_PENDING
         port.removed shouldBe 1
         port.applied shouldBe 0
         port.returned shouldBe 0
@@ -340,7 +341,7 @@ class BuilderConstructionProjectControllerTest : FunSpec({
 
         val result = BuilderConstructionProjectController.tick(worldPrepared, createdAt + 4, port)
 
-        result?.state shouldBe BuilderConstructionProjectState.WAITING_OUTPUT_SPACE
+        result?.state shouldBe BuilderConstructionProjectState.OUTPUT_PENDING
         port.applied shouldBe 1
         port.returned shouldBe 0
     }
@@ -400,11 +401,11 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         val worldPrepared = checkNotNull(
             BuilderConstructionProjectController.tick(inputPrepared, createdAt + 3, flowPort),
         )
-        val waitingOutput = checkNotNull(
+        val outputPending = checkNotNull(
             BuilderConstructionProjectController.tick(worldPrepared, createdAt + 4, flowPort),
         )
         val delivering = checkNotNull(
-            BuilderConstructionProjectController.tick(waitingOutput, createdAt + 5, flowPort),
+            BuilderConstructionProjectController.tick(outputPending, createdAt + 5, flowPort),
         )
         val advanced = BuilderConstructionProjectController.tick(delivering, createdAt + 6, flowPort)
 
@@ -413,7 +414,7 @@ class BuilderConstructionProjectControllerTest : FunSpec({
             preparedWithReceipt.activated(createdAt + 1),
         ) shouldBe true
         BuilderConstructionTransitionFailurePolicy.requiresRecovery(inputPrepared, worldPrepared) shouldBe true
-        BuilderConstructionTransitionFailurePolicy.requiresRecovery(worldPrepared, waitingOutput) shouldBe true
+        BuilderConstructionTransitionFailurePolicy.requiresRecovery(worldPrepared, outputPending) shouldBe true
         BuilderConstructionTransitionFailurePolicy.requiresRecovery(delivering, checkNotNull(advanced)) shouldBe true
 
         BuilderConstructionTransitionFailurePolicy.requiresRecovery(
@@ -422,7 +423,7 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         ) shouldBe false
         BuilderConstructionTransitionFailurePolicy.requiresRecovery(
             delivering,
-            delivering.waitingForOutput(dirt, createdAt + 8),
+            delivering.waitingForOutput(createdAt + 8),
         ) shouldBe false
     }
 })

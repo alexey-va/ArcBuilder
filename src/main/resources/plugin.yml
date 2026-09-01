@@ -84,3 +84,6 @@ permissions:
   arcbuild.admin.reload:
     description: Validate and reload ArcBuilder configuration without restarting the server
     default: op
+  arcbuild.admin.construction:
+    description: Control construction projects owned by other players
+    default: op

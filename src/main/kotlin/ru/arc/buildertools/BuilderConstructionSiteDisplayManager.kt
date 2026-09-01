@@ -35,6 +35,7 @@ internal data class BuilderConstructionSiteDisplaySettings(
     val outlineThickness: Float,
     val glowColor: Color,
     val panelEnabled: Boolean,
+    val panelFace: BuilderConstructionSitePanelFace,
     val panelHeightOffset: Double,
     val panelFrontOffset: Double,
     val panelInteractionWidth: Float,
@@ -45,6 +46,11 @@ internal data class BuilderConstructionSiteDisplaySettings(
     val defaultLocale: String,
 )
 
+enum class BuilderConstructionSitePanelFace {
+    MIN_Z,
+    MAX_Z,
+}
+
 internal fun BuilderToolsConfig.constructionSiteDisplaySettings() = BuilderConstructionSiteDisplaySettings(
     enabled = constructionSiteEnabled,
     outlineEnabled = constructionSiteOutlineEnabled,
@@ -52,6 +58,7 @@ internal fun BuilderToolsConfig.constructionSiteDisplaySettings() = BuilderConst
     outlineThickness = constructionSiteOutlineThickness,
     glowColor = Color.fromRGB(constructionSiteGlowColor.removePrefix("#").toInt(16)),
     panelEnabled = constructionSitePanelEnabled,
+    panelFace = constructionSitePanelFace,
     panelHeightOffset = constructionSitePanelHeightOffset,
     panelFrontOffset = constructionSitePanelFrontOffset,
     panelInteractionWidth = constructionSitePanelInteractionWidth,
@@ -83,17 +90,21 @@ internal object BuilderConstructionSiteDisplayLayout {
         val minY = positions.minOf { it.y }.toDouble()
         val minZ = positions.minOf { it.z }.toDouble()
         val maxX = positions.maxOf { it.x } + 1.0
+        val maxZ = positions.maxOf { it.z } + 1.0
         return BuilderConstructionSiteDisplayModel(
             worldId = worldId,
             edges = BuilderDisplayGeometry.bounds(positions, settings.outlineThickness),
             panelX = (minX + maxX) / 2.0,
             panelY = minY + settings.panelHeightOffset,
-            panelZ = minZ - settings.panelFrontOffset,
+            panelZ = when (settings.panelFace) {
+                BuilderConstructionSitePanelFace.MIN_Z -> minZ - settings.panelFrontOffset
+                BuilderConstructionSitePanelFace.MAX_Z -> maxZ + settings.panelFrontOffset
+            },
         )
     }
 }
 
-/** Global, non-persistent construction-site outline and right-click information panel. */
+/** Global, non-persistent construction-site outline and right-click control panel. */
 internal class BuilderConstructionSiteDisplayManager(
     private val plugin: JavaPlugin,
     private val settings: BuilderConstructionSiteDisplaySettings,

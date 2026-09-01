@@ -9,7 +9,7 @@ import org.bukkit.Material
 import java.util.UUID
 
 class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
-    "construction site encloses the full plan and places its panel on the minimum-Z face" {
+    "construction site encloses the full plan and places its panel on the configured opposite max-Z face" {
         val worldId = UUID.fromString("99999999-8888-7777-6666-555555555555")
         val projectId = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         val playerId = UUID.fromString("11111111-2222-3333-4444-555555555555")
@@ -55,6 +55,7 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
             outlineThickness = .08f,
             glowColor = Color.fromRGB(0xFFB142),
             panelEnabled = true,
+            panelFace = BuilderConstructionSitePanelFace.MAX_Z,
             panelHeightOffset = 2.5,
             panelFrontOffset = .75,
             panelInteractionWidth = 3f,
@@ -77,6 +78,11 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         model.edges.filter { it.scaleZ > .08f }.map(BuilderDisplayEdge::scaleZ).distinct() shouldBe listOf(11f)
         model.panelX shouldBe (1.0 plusOrMinus .00001)
         model.panelY shouldBe (46.5 plusOrMinus .00001)
-        model.panelZ shouldBe (-2.75 plusOrMinus .00001)
+        model.panelZ shouldBe (9.75 plusOrMinus .00001)
+
+        BuilderConstructionSiteDisplayLayout.create(
+            project,
+            settings.copy(panelFace = BuilderConstructionSitePanelFace.MIN_Z),
+        ).panelZ shouldBe (-2.75 plusOrMinus .00001)
     }
 })

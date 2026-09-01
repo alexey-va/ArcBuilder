@@ -145,6 +145,7 @@ class BuilderToolsDomainTest : FunSpec({
             setString("construction.site.outline.material", "LIME_STAINED_GLASS")
             setDouble("construction.site.outline.thickness", 0.08)
             setString("construction.site.outline.glow-color", "#12AB34")
+            setString("construction.site.panel.face", "MIN_Z")
             setDouble("construction.site.panel.height-offset", 3.5)
             setDouble("construction.site.panel.front-offset", 0.75)
             setDouble("construction.site.panel.interaction-width", 4.0)
@@ -152,6 +153,10 @@ class BuilderToolsDomainTest : FunSpec({
             setInt("construction.site.panel.line-width", 220)
             setInt("construction.site.panel.max-material-lines", 12)
             setString("construction.site.panel.background-color", "#CC102030")
+            setInt("construction.site.menu.rows", 4)
+            setLong("construction.site.menu.refresh-period-ticks", 20L)
+            setInt("construction.site.menu.slots.control", 25)
+            setString("construction.site.menu.materials.pause", "LEVER")
             setDouble("construction.site.view-range", 72.0)
             setString("book-contracts.auction-recovery-retry", "45s")
             setInt("book-contracts.player-materials-summary-limit", 6)
@@ -184,6 +189,7 @@ class BuilderToolsDomainTest : FunSpec({
         configured.constructionSiteOutlineMaterial shouldBe Material.LIME_STAINED_GLASS
         configured.constructionSiteOutlineThickness shouldBe 0.08f
         configured.constructionSiteGlowColor shouldBe "#12AB34"
+        configured.constructionSitePanelFace shouldBe BuilderConstructionSitePanelFace.MIN_Z
         configured.constructionSitePanelHeightOffset shouldBe 3.5
         configured.constructionSitePanelFrontOffset shouldBe 0.75
         configured.constructionSitePanelInteractionWidth shouldBe 4.0f
@@ -191,6 +197,10 @@ class BuilderToolsDomainTest : FunSpec({
         configured.constructionSitePanelLineWidth shouldBe 220
         configured.constructionSiteMaxMaterialLines shouldBe 12
         configured.constructionSitePanelBackgroundColor shouldBe "#CC102030"
+        configured.constructionSiteMenuRows shouldBe 4
+        configured.constructionSiteMenuRefreshPeriodTicks shouldBe 20L
+        configured.constructionSiteMenuControlSlot shouldBe 25
+        configured.constructionSiteMenuPauseMaterial shouldBe Material.LEVER
         configured.constructionSiteViewRange shouldBe 72.0
         configured.bookAuctionRecoveryRetry shouldBe java.time.Duration.ofSeconds(45)
         configured.bookPlayerMaterialsSummaryLimit shouldBe 6

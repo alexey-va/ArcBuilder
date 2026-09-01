@@ -67,6 +67,10 @@ class BuilderToolsConfig(
         get() = config.double("construction.site.outline.thickness", 0.035).toFloat()
     val constructionSiteGlowColor: String get() = config.string("construction.site.outline.glow-color", "#FFB142")
     val constructionSitePanelEnabled: Boolean get() = config.bool("construction.site.panel.enabled", true)
+    val constructionSitePanelFace: BuilderConstructionSitePanelFace
+        get() = BuilderConstructionSitePanelFace.valueOf(
+            config.string("construction.site.panel.face", "MAX_Z").uppercase(Locale.ROOT),
+        )
     val constructionSitePanelHeightOffset: Double
         get() = config.double("construction.site.panel.height-offset", 2.25)
     val constructionSitePanelFrontOffset: Double
@@ -80,6 +84,25 @@ class BuilderToolsConfig(
         get() = config.integer("construction.site.panel.max-material-lines", 8)
     val constructionSitePanelBackgroundColor: String
         get() = config.string("construction.site.panel.background-color", "#B21C2328")
+    val constructionSiteMenuRows: Int get() = config.integer("construction.site.menu.rows", 3)
+    val constructionSiteMenuRefreshPeriodTicks: Long
+        get() = config.long("construction.site.menu.refresh-period-ticks", 10L)
+    val constructionSiteMenuBackgroundItem: String
+        get() = config.string("construction.site.menu.background-item", "arc:background")
+    val constructionSiteMenuBackgroundFallback: Material
+        get() = Material.matchMaterial(
+            config.string("construction.site.menu.background-fallback", "GRAY_STAINED_GLASS_PANE"),
+        ) ?: Material.AIR
+    val constructionSiteMenuOverviewSlot: Int get() = config.integer("construction.site.menu.slots.overview", 10)
+    val constructionSiteMenuProgressSlot: Int get() = config.integer("construction.site.menu.slots.progress", 12)
+    val constructionSiteMenuResourcesSlot: Int get() = config.integer("construction.site.menu.slots.resources", 14)
+    val constructionSiteMenuControlSlot: Int get() = config.integer("construction.site.menu.slots.control", 16)
+    val constructionSiteMenuOverviewMaterial: Material get() = configuredMenuMaterial("overview", "BOOK")
+    val constructionSiteMenuProgressMaterial: Material get() = configuredMenuMaterial("progress", "CLOCK")
+    val constructionSiteMenuResourcesMaterial: Material get() = configuredMenuMaterial("resources", "CHEST")
+    val constructionSiteMenuPauseMaterial: Material get() = configuredMenuMaterial("pause", "REDSTONE_TORCH")
+    val constructionSiteMenuResumeMaterial: Material get() = configuredMenuMaterial("resume", "LIME_DYE")
+    val constructionSiteMenuUnavailableMaterial: Material get() = configuredMenuMaterial("unavailable", "GRAY_DYE")
     val constructionSiteViewRange: Double get() = config.double("construction.site.view-range", 64.0)
     val healthRefreshPeriodTicks: Long get() = config.long("runtime.health-refresh-period-ticks", 20L)
     val playerRecoveryRetryPeriodTicks: Long get() = config.long("runtime.player-recovery-retry-period-ticks", 100L)
@@ -132,6 +155,9 @@ class BuilderToolsConfig(
 
     fun allowsWorld(worldName: String): Boolean =
         "*" in allowedWorlds || worldName.lowercase(Locale.ROOT) in allowedWorlds
+
+    private fun configuredMenuMaterial(path: String, fallback: String): Material =
+        Material.matchMaterial(config.string("construction.site.menu.materials.$path", fallback)) ?: Material.AIR
 
     fun validated(): BuilderToolsConfig = apply {
         if (enabled) {
@@ -217,6 +243,35 @@ class BuilderToolsConfig(
         require(ARGB_COLOR.matches(constructionSitePanelBackgroundColor)) {
             "Builder construction site panel background color is invalid"
         }
+        require(constructionSiteMenuRows in 1..6) { "Builder construction site menu row count is invalid" }
+        require(constructionSiteMenuRefreshPeriodTicks in 5L..100L) {
+            "Builder construction site menu refresh period is invalid"
+        }
+        require(ITEMS_ADDER_KEY.matches(constructionSiteMenuBackgroundItem)) {
+            "Builder construction site menu background item is invalid"
+        }
+        require(constructionSiteMenuBackgroundFallback.isItem && !constructionSiteMenuBackgroundFallback.isAir) {
+            "Builder construction site menu background fallback is invalid"
+        }
+        val menuSlots = listOf(
+            constructionSiteMenuOverviewSlot,
+            constructionSiteMenuProgressSlot,
+            constructionSiteMenuResourcesSlot,
+            constructionSiteMenuControlSlot,
+        )
+        require(menuSlots.distinct().size == menuSlots.size && menuSlots.all { it in 0 until constructionSiteMenuRows * 9 }) {
+            "Builder construction site menu slots are invalid"
+        }
+        require(
+            listOf(
+                constructionSiteMenuOverviewMaterial,
+                constructionSiteMenuProgressMaterial,
+                constructionSiteMenuResourcesMaterial,
+                constructionSiteMenuPauseMaterial,
+                constructionSiteMenuResumeMaterial,
+                constructionSiteMenuUnavailableMaterial,
+            ).all { it.isItem && !it.isAir },
+        ) { "Builder construction site menu material is invalid" }
         require(constructionSiteViewRange.isFinite() && constructionSiteViewRange in 16.0..128.0) {
             "Builder construction site view range is invalid"
         }
@@ -291,6 +346,7 @@ class BuilderToolsConfig(
         private val WORLD_NAME = Regex("[A-Za-z0-9_./-]{1,128}")
         private val RGB_COLOR = Regex("#[0-9A-Fa-f]{6}")
         private val ARGB_COLOR = Regex("#[0-9A-Fa-f]{8}")
+        private val ITEMS_ADDER_KEY = Regex("[a-z0-9_.-]+:[a-z0-9_./-]+")
         private val MESSAGE_REQUIREMENTS = LocaleRequirements(
             scalarPaths = setOf(
                 "prefix",
@@ -468,6 +524,18 @@ class BuilderToolsConfig(
                 "construction.site.material-more",
                 "construction.site.missing",
                 "construction.site.missing-none",
+                "construction.site.menu.title",
+                "construction.site.menu.overview.name",
+                "construction.site.menu.progress.name",
+                "construction.site.menu.resources.name",
+                "construction.site.menu.resources.line",
+                "construction.site.menu.resources.more",
+                "construction.site.menu.resources.none",
+                "construction.site.menu.resources.missing",
+                "construction.site.menu.control.pause.name",
+                "construction.site.menu.control.resume.name",
+                "construction.site.menu.control.unavailable.name",
+                "construction.site.menu.control.readonly.name",
                 "items.none",
                 "items.summary",
                 "status.selection",
@@ -494,6 +562,13 @@ class BuilderToolsConfig(
                 "crown.status",
                 "plan.market",
                 "shop.purchase-detail",
+                "construction.site.menu.overview.lore",
+                "construction.site.menu.progress.lore",
+                "construction.site.menu.resources.lore",
+                "construction.site.menu.control.pause.lore",
+                "construction.site.menu.control.resume.lore",
+                "construction.site.menu.control.unavailable.lore",
+                "construction.site.menu.control.readonly.lore",
             ),
         )
 

@@ -122,9 +122,22 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         merged.double("preview.block-display-scale") shouldBe 1.0
         merged.integer("construction.effects.interval-blocks") shouldBe 4
         merged.string("construction.site.outline.material") shouldBe "ORANGE_STAINED_GLASS"
+        merged.string("construction.site.panel.face") shouldBe "MAX_Z"
         merged.double("construction.site.panel.interaction-width") shouldBe 3.0
+        merged.integer("construction.site.menu.slots.control") shouldBe 16
         merged.string("operator-owned-note") shouldBe "keep-me"
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe false
+    }
+
+    test("reload preflight rejects overlapping construction menu slots") {
+        val root = configRoot()
+        Config(root, "modules/builder-tools.yml").apply {
+            setInt("construction.site.menu.slots.control", 14)
+            saveStrict()
+        }
+
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+            .message.orEmpty() shouldContain "menu slots"
     }
 
     test("preflight validates a merge-forward candidate without mutating the live YAML") {

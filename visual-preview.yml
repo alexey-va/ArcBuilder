@@ -285,6 +285,70 @@ surfaces:
           material: RECOVERY_COMPASS
           name: autobuild:build-book.editor.preview-protection-denied.name
           lore: autobuild:build-book.editor.preview-protection-denied.lore
+    - id: construction-control-active
+      title: builder:construction.site.menu.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      placeholders:
+        name: Дом у северной гавани
+        owner: AlexeyBuilder
+        state: строится
+        count: '837'
+        total: '1 248'
+        percent: '67'
+        x: '-1266'
+        y: '85'
+        z: '-506'
+      items:
+        - slot: 10
+          material: BOOK
+          name: builder:construction.site.menu.overview.name
+          lore: builder:construction.site.menu.overview.lore
+        - slot: 12
+          material: CLOCK
+          name: builder:construction.site.menu.progress.name
+          lore: builder:construction.site.menu.progress.lore
+        - slot: 14
+          material: CHEST
+          name: builder:construction.site.menu.resources.name
+          lore:
+            - builder:construction.site.menu.resources.lore
+            - ref: builder:construction.site.menu.resources.line
+              placeholders: {material: Дубовые доски, amount: '384'}
+            - ref: builder:construction.site.menu.resources.line
+              placeholders: {material: Камень, amount: '192'}
+            - ref: builder:construction.site.menu.resources.line
+              placeholders: {material: Стекло, amount: '48'}
+        - slot: 16
+          material: REDSTONE_TORCH
+          name: builder:construction.site.menu.control.pause.name
+          lore: builder:construction.site.menu.control.pause.lore
+    - id: construction-control-paused
+      extends: construction-control-active
+      placeholders:
+        state: на паузе
+      items:
+        - slot: 16
+          material: LIME_DYE
+          name: builder:construction.site.menu.control.resume.name
+          lore: builder:construction.site.menu.control.resume.lore
+    - id: construction-control-readonly
+      extends: construction-control-active
+      items:
+        - slot: 16
+          material: GRAY_DYE
+          name: builder:construction.site.menu.control.readonly.name
+          lore: builder:construction.site.menu.control.readonly.lore
+    - id: construction-control-transition
+      extends: construction-control-active
+      placeholders:
+        state: складывает блоки
+      items:
+        - slot: 16
+          material: GRAY_DYE
+          name: builder:construction.site.menu.control.unavailable.name
+          lore: builder:construction.site.menu.control.unavailable.lore
     - id: build-confirmation
       title: autobuild:confirm-gui.title
       rows: 3

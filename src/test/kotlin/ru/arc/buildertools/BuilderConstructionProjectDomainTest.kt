@@ -112,7 +112,8 @@ class BuilderConstructionProjectDomainTest : FunSpec({
     test("missing input and full output storage pause without losing the current step") {
         val active = prepared().activated(createdAt + 1)
         val waitingMaterial = active.waitingForMaterials(createdAt + 2)
-        val waitingOutput = active.waitingForOutput(refund, createdAt + 4)
+        val outputPending = active.outputPending(refund, createdAt + 3)
+        val waitingOutput = outputPending.waitingForOutput(createdAt + 4)
         val delivering = waitingOutput.deliveringOutput(mutation(refund, insert = true), createdAt + 5)
         val delivered = delivering.outputDelivered(createdAt + 6)
 
@@ -165,8 +166,38 @@ class BuilderConstructionProjectDomainTest : FunSpec({
             ).validated()
         }
         shouldThrow<IllegalArgumentException> {
-            active.waitingForOutput(refund, createdAt)
+            active.outputPending(refund, createdAt)
         }
+    }
+
+    test("active and material-waiting projects pause durably and resume from the same cursor") {
+        val active = prepared().activated(createdAt + 1).advanced(createdAt + 2)
+        val pausedActive = active.paused(createdAt + 3)
+        val resumed = pausedActive.resumed(createdAt + 4)
+        val waiting = resumed.waitingForMaterials(createdAt + 5)
+        val pausedWaiting = waiting.paused(createdAt + 6)
+
+        pausedActive.state shouldBe BuilderConstructionProjectState.PAUSED
+        pausedActive.cursor shouldBe 1
+        resumed.state shouldBe BuilderConstructionProjectState.ACTIVE
+        resumed.cursor shouldBe 1
+        pausedWaiting.state shouldBe BuilderConstructionProjectState.PAUSED
+        pausedWaiting.cursor shouldBe 1
+        BuilderConstructionProjectController.tick(pausedWaiting, createdAt + 7, object : BuilderConstructionProjectPort {
+            override fun currentBlockData(position: BuilderBlockPos) = error("paused project must not inspect the world")
+            override fun canModify(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) =
+                error("paused project must not inspect protection")
+            override fun prepareInput(playerId: UUID, project: BuilderConstructionProjectRecord, input: BuilderItemAmount) =
+                error("paused project must not touch resources")
+            override fun prepareOutput(playerId: UUID, project: BuilderConstructionProjectRecord, output: BuilderItemAmount) =
+                error("paused project must not touch resources")
+            override fun reconcileResource(project: BuilderConstructionProjectRecord, mutation: BuilderResourceMutation) =
+                error("paused project must not touch resources")
+            override fun rollbackResource(project: BuilderConstructionProjectRecord, mutation: BuilderResourceMutation) =
+                error("paused project must not touch resources")
+            override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) =
+                error("paused project must not mutate the world")
+        }) shouldBe null
     }
 
     test("world drift enters a recovery hold and cannot resume automatically") {
