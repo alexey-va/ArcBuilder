@@ -5,7 +5,7 @@ Standalone Kotlin/Paper plugin for survival-friendly Builder Tools and construct
 - Read `ARCHITECTURE.md` before changing commands, selections, plans, persistence,
   or runtime ownership.
 
-- Target Purpur/Paper 1.21.11, Java 25, Kotlin 2.3.0, and arc-core 2.2.5.
+- Target Purpur/Paper 1.21.11, Java 25, Kotlin 2.3.0, and arc-core 2.4.2.
 - Builder gameplay and Bukkit adapters live here; shared lifecycle, locale, SQL, one-time-use, player-state, logging, and scheduling use arc-core.
 - Never require WorldGuard. Lands is optional and wilderness/global land is buildable; inside a Land, use Lands' real build permission.
 - Unsafe containers, Bedrock, Slimefun, ItemsAdder custom blocks, and tile entities are skipped and summarized once; ordinary falling blocks are safe.

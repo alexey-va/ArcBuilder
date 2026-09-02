@@ -2,7 +2,7 @@ schema: 1
 plugin: ArcBuilder
 minecraft-version: '1.21.11'
 minecraft-client-sha1: ba2df812c2d12e0219c489c4cd9a5e1f0760f5bd
-minecraft-asset-index-sha1: e9eeaade32639d73d4f7a30a007ace472c61cbd6
+minecraft-asset-index-sha1: 7c7f5df63dfd676251babde8fd2b05af54ca77dd
 gallery-accent: '#d48763'
 
 resource-pack:
