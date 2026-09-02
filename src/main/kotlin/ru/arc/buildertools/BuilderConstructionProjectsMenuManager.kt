@@ -159,7 +159,7 @@ internal class BuilderConstructionProjectsMenuManager(
             val current = projects(player.uniqueId).firstOrNull {
                 it.projectId == project.projectId && it.playerId == player.uniqueId && !it.terminal
             } ?: run {
-                click.session.refresh()
+                click.session.requestRefresh()
                 return@entry
             }
             if (click.event.isRightClick) {
@@ -208,7 +208,7 @@ internal class BuilderConstructionProjectsMenuManager(
             if (session == null || session.menuId != MENU_ID) {
                 viewers -= viewerId
             } else {
-                session.refresh()
+                session.requestRefresh()
             }
         }
     }

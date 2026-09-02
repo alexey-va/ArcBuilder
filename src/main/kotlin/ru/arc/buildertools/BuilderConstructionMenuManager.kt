@@ -234,7 +234,7 @@ internal class BuilderConstructionMenuManager(
             viewers.remove(viewerId)
             return
         }
-        session.refresh()
+        session.requestRefresh()
     }
 
     private fun resourceLore(

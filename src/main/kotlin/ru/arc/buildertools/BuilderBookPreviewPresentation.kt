@@ -127,7 +127,7 @@ internal class BuilderBookPreviewPresentation(
         if (closed) return
         renderer.refresh(site)
         replacePanelSafely(site)
-        menus.session(site.player)?.takeIf { it.menuId == PLACEMENT_MENU }?.refresh()
+        menus.session(site.player)?.takeIf { it.menuId == PLACEMENT_MENU }?.requestRefresh()
     }
 
     override fun close(playerId: UUID) {
@@ -198,7 +198,7 @@ internal class BuilderBookPreviewPresentation(
     private fun start(player: Player) {
         val confirmation = host.currentConfirmation(player) ?: return player.closeInventory()
         if (!confirmation.cooldownRemaining.isZero) {
-            menus.session(player)?.refresh()
+            menus.session(player)?.requestRefresh()
             player.playSound(player.location, Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f)
             return
         }
@@ -206,7 +206,7 @@ internal class BuilderBookPreviewPresentation(
             snapshots.remove(player.uniqueId)
             player.closeInventory()
         } else {
-            menus.session(player)?.refresh()
+            menus.session(player)?.requestRefresh()
         }
     }
 
