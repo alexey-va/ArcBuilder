@@ -17,6 +17,7 @@ import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerInteractEntityEvent
+import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
@@ -27,6 +28,7 @@ import ru.arc.autobuild.BuildBookItems
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.util.UUID
+import kotlin.math.floor
 
 internal data class BuilderConstructionSiteDisplaySettings(
     val enabled: Boolean,
@@ -191,6 +193,7 @@ internal class BuilderConstructionSiteDisplayManager(
 
     private val projectKey = NamespacedKey(plugin, "construction_site_project")
     private val scenes = mutableMapOf<UUID, Scene>()
+    private val reconciling = mutableSetOf<UUID>()
     private var closed = false
 
     init {
@@ -203,11 +206,16 @@ internal class BuilderConstructionSiteDisplayManager(
             remove(project.projectId)
             return
         }
-        runCatching { upsertChecked(project.validated()) }
-            .onFailure { failure ->
-                remove(project.projectId)
-                warn("Builder construction site display failed for {}: {}", project.projectId, failure.message)
-            }
+        if (!reconciling.add(project.projectId)) return
+        try {
+            runCatching { upsertChecked(project.validated()) }
+                .onFailure { failure ->
+                    remove(project.projectId)
+                    warn("Builder construction site display failed for {}: {}", project.projectId, failure.message)
+                }
+        } finally {
+            reconciling.remove(project.projectId)
+        }
     }
 
     fun remove(projectId: UUID) {
@@ -227,6 +235,21 @@ internal class BuilderConstructionSiteDisplayManager(
             return
         }
         onInspect(event.player, project)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onChunkLoad(event: ChunkLoadEvent) {
+        if (closed || !settings.enabled) return
+        val chunk = event.chunk
+        val projects = scenes.entries
+            .asSequence()
+            .filter { (_, scene) ->
+                scene.model.worldId == chunk.world.uid && scene.model.touches(chunk.x, chunk.z)
+            }
+            .mapNotNull { (projectId, _) -> projectLookup(projectId) }
+            .filterNot(BuilderConstructionProjectRecord::terminal)
+            .toList()
+        projects.forEach(::upsert)
     }
 
     private fun upsertChecked(project: BuilderConstructionProjectRecord) {
@@ -320,6 +343,12 @@ internal class BuilderConstructionSiteDisplayManager(
         entity.setGravity(false)
         entity.persistentDataContainer.set(projectKey, PersistentDataType.STRING, projectId.toString())
     }
+
+    private fun BuilderConstructionSiteDisplayModel.touches(chunkX: Int, chunkZ: Int): Boolean =
+        edges.any { edge -> edge.x.chunkCoordinate() == chunkX && edge.z.chunkCoordinate() == chunkZ } ||
+            (panelX.chunkCoordinate() == chunkX && panelZ.chunkCoordinate() == chunkZ)
+
+    private fun Double.chunkCoordinate(): Int = floor(this).toInt() shr 4
 
     private fun removeLoadedOrphans() {
         Bukkit.getWorlds().asSequence()

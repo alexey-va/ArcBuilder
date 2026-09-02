@@ -71,6 +71,23 @@ class BuilderConstructionProjectStoreTest : FunSpec({
         reloaded.loadOrNull(projectId) shouldBe waiting
     }
 
+    test("paused project survives restart and can be resumed from the durable record") {
+        val root = Files.createTempDirectory("arc-builder-construction-project-paused-")
+        val first = BuilderConstructionProjectStore(root, maxChanges = 10_000)
+        val prepared = first.commit(prepared())
+        val active = first.transition(prepared, prepared.activated(createdAt + 1))
+        val paused = first.transition(active, active.paused(createdAt + 2))
+
+        val restarted = BuilderConstructionProjectStore(root, maxChanges = 10_000)
+        val reloaded = checkNotNull(restarted.loadOrNull(projectId))
+        val resumed = restarted.transition(reloaded, reloaded.resumed(createdAt + 3))
+
+        reloaded shouldBe paused
+        resumed.state shouldBe BuilderConstructionProjectState.ACTIVE
+        resumed.cursor shouldBe paused.cursor
+        BuilderConstructionProjectStore(root, maxChanges = 10_000).loadOrNull(projectId) shouldBe resumed
+    }
+
     test("store makes an already durable transition idempotent and rejects stale predecessors") {
         val root = Files.createTempDirectory("arc-builder-construction-project-idempotent-")
         val store = BuilderConstructionProjectStore(root, maxChanges = 10_000)
