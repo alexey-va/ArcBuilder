@@ -45,6 +45,7 @@ class ConstructionSite internal constructor(
         Location(world, anchor.x().toDouble(), anchor.y().toDouble(), anchor.z().toDouble())
     }
     val rotation: Int get() = placement.rotation
+    val mirrored: Boolean get() = placement.mirrored
 
     val fullRotation: Int get() = BuildBookRelativeRotation.resolve(
         rotation,
@@ -56,8 +57,8 @@ class ConstructionSite internal constructor(
         return centerBlock.clone().add(x.toDouble(), y.toDouble(), z.toDouble())
     }
     val corners: Corners get() {
-        val first = building.getCorner1(fullRotation)
-        val second = building.getCorner2(fullRotation)
+        val first = building.getCorner1(fullRotation, mirrored)
+        val second = building.getCorner2(fullRotation, mirrored)
         return Corners(
             BlockVector3.at(minOf(first.x(), second.x()), minOf(first.y(), second.y()), minOf(first.z(), second.z())),
             BlockVector3.at(maxOf(first.x(), second.x()), maxOf(first.y(), second.y()), maxOf(first.z(), second.z())),
@@ -81,6 +82,10 @@ class ConstructionSite internal constructor(
 
     internal fun rotate(delta: Int) {
         placement = placement.rotate(delta)
+    }
+
+    internal fun toggleMirror() {
+        placement = placement.toggleMirror()
     }
 
     internal fun resetPlacement() {
@@ -108,6 +113,8 @@ class ConstructionSite internal constructor(
     fun worldLocation(relative: BlockVector3): Location = adjustedCenter.clone().add(
         relative.x().toDouble(), relative.y().toDouble(), relative.z().toDouble(),
     )
+
+    fun sourceBlock(relative: BlockVector3) = building.getBlock(relative, fullRotation, mirrored)
 
     fun cancelSilently(): Boolean {
         BuildingManager.closePreview(player.uniqueId)

@@ -223,39 +223,48 @@ surfaces:
   inventories:
     - id: book-preview-placement
       title: builder:book.preview-menu.placement.title
-      rows: 3
+      rows: 5
       filler: GRAY_STAINED_GLASS_PANE
       background-item: arc:background
       placeholders: {name: Дом у северной гавани, x: '-1266', y: '85', z: '-506', rotation: '90'}
       items:
-        - {slot: 9, material: COMPASS, name: builder:book.preview-menu.placement.rotate-left.name, lore: builder:book.preview-menu.placement.rotate-left.lore}
-        - {slot: 10, material: ARROW, name: builder:book.preview-menu.placement.left.name, lore: builder:book.preview-menu.placement.left.lore}
-        - {slot: 11, material: LIME_DYE, name: builder:book.preview-menu.placement.up.name, lore: builder:book.preview-menu.placement.up.lore}
-        - {slot: 13, material: RECOVERY_COMPASS, name: builder:book.preview-menu.placement.reset.name, lore: builder:book.preview-menu.placement.reset.lore}
-        - {slot: 15, material: GRAY_DYE, name: builder:book.preview-menu.placement.down.name, lore: builder:book.preview-menu.placement.down.lore}
-        - {slot: 16, material: ARROW, name: builder:book.preview-menu.placement.right.name, lore: builder:book.preview-menu.placement.right.lore}
-        - {slot: 17, material: COMPASS, name: builder:book.preview-menu.placement.rotate-right.name, lore: builder:book.preview-menu.placement.rotate-right.lore}
-        - {slot: 20, material: BARRIER, name: builder:book.preview-menu.placement.cancel.name, lore: builder:book.preview-menu.placement.cancel.lore}
-        - {slot: 24, material: LIME_CONCRETE, name: builder:book.preview-menu.placement.continue.name, lore: builder:book.preview-menu.placement.continue.lore}
+        - {slot: 11, material: ARROW, name: builder:book.preview-menu.placement.up.name, lore: builder:book.preview-menu.placement.up.lore}
+        - {slot: 19, material: ARROW, name: builder:book.preview-menu.placement.left.name, lore: builder:book.preview-menu.placement.left.lore}
+        - {slot: 20, material: COMPASS, name: builder:book.preview-menu.placement.rotate.name, lore: builder:book.preview-menu.placement.rotate.lore}
+        - {slot: 21, material: ARROW, name: builder:book.preview-menu.placement.right.name, lore: builder:book.preview-menu.placement.right.lore}
+        - {slot: 25, material: LIME_CONCRETE, name: builder:book.preview-menu.placement.continue.name, lore: builder:book.preview-menu.placement.continue.lore}
+        - {slot: 29, material: ARROW, name: builder:book.preview-menu.placement.down.name, lore: builder:book.preview-menu.placement.down.lore}
+        - {slot: 34, material: RED_CONCRETE, name: builder:book.preview-menu.placement.cancel.name, lore: builder:book.preview-menu.placement.cancel.lore}
+        - {slot: 37, material: AMETHYST_SHARD, name: builder:book.preview-menu.placement.mirror.name, lore: builder:book.preview-menu.placement.mirror.lore}
+        - {slot: 39, material: RECOVERY_COMPASS, name: builder:book.preview-menu.placement.reset.name, lore: builder:book.preview-menu.placement.reset.lore}
     - id: book-preview-confirmation-ready
       title: builder:book.preview-menu.confirmation.title
-      rows: 3
+      rows: 5
       filler: GRAY_STAINED_GLASS_PANE
       background-item: arc:background
-      placeholders: {name: Дом у северной гавани, count: '1248', items: '96', types: '4', hours: '0', minutes: '0'}
+      placeholders: {name: Дом у северной гавани, count: '1248', hours: '0', minutes: '0'}
       items:
-        - {slot: 10, material: BOOK, name: builder:book.preview-menu.confirmation.overview.name, lore: builder:book.preview-menu.confirmation.overview.lore}
-        - {slot: 13, material: CHEST, name: builder:book.preview-menu.confirmation.materials.name, lore: builder:book.preview-menu.confirmation.materials.lore}
-        - {slot: 16, material: CLOCK, name: builder:book.preview-menu.confirmation.ready.name, lore: builder:book.preview-menu.confirmation.ready.lore}
-        - {slot: 20, material: ARROW, name: builder:book.preview-menu.confirmation.back.name, lore: builder:book.preview-menu.confirmation.back.lore}
-        - {slot: 22, material: LIME_CONCRETE, name: builder:book.preview-menu.confirmation.start.name, lore: builder:book.preview-menu.confirmation.start.lore}
-        - {slot: 24, material: BARRIER, name: builder:book.preview-menu.confirmation.cancel.name, lore: builder:book.preview-menu.confirmation.cancel.lore}
+        - slot: 19
+          material: BOOK
+          name: builder:book.preview-menu.confirmation.overview.name
+          lore:
+            - builder:book.preview-menu.confirmation.overview.lore
+            - builder:book.preview-menu.confirmation.materials-none
+        - {slot: 25, material: LIME_CONCRETE, name: builder:book.preview-menu.confirmation.start.name, lore: builder:book.preview-menu.confirmation.start.lore}
+        - {slot: 29, material: ARROW, name: builder:book.preview-menu.confirmation.back.name, lore: builder:book.preview-menu.confirmation.back.lore}
+        - {slot: 34, material: RED_CONCRETE, name: builder:book.preview-menu.confirmation.cancel.name, lore: builder:book.preview-menu.confirmation.cancel.lore}
     - id: book-preview-confirmation-cooldown
       extends: book-preview-confirmation-ready
-      placeholders: {hours: '7', minutes: '18'}
+      placeholders: {hours: '7', minutes: '18', amount: '32', material: 'Дубовые доски'}
       items:
-        - {slot: 16, material: REDSTONE_TORCH, name: builder:book.preview-menu.confirmation.cooldown.name, lore: builder:book.preview-menu.confirmation.cooldown.lore}
-        - {slot: 22, material: BARRIER, name: builder:book.preview-menu.confirmation.blocked.name, lore: builder:book.preview-menu.confirmation.blocked.lore}
+        - {slot: 19, material: BOOK, name: builder:book.preview-menu.confirmation.overview.name, lore: builder:book.preview-menu.confirmation.overview.lore}
+        - slot: 21
+          material: CHEST
+          name: builder:book.preview-menu.confirmation.materials.name
+          lore:
+            - builder:book.preview-menu.confirmation.materials.lore
+            - builder:book.preview-menu.confirmation.material-line
+        - {slot: 25, material: BARRIER, name: builder:book.preview-menu.confirmation.blocked.name, lore: builder:book.preview-menu.confirmation.blocked.lore}
     - id: book-editor-default
       title: autobuild:build-book.editor.title
       rows: 3

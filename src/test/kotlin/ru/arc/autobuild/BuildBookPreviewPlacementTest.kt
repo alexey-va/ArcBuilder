@@ -22,13 +22,16 @@ class BuildBookPreviewPlacementTest : StringSpec({
             .move(BuildBookPreviewMove.LEFT, playerRotation = 180)
             .move(BuildBookPreviewMove.UP, playerRotation = 180)
             .rotate(90)
+            .toggleMirror()
 
         moved.anchor shouldBe BlockVector3.at(11, 65, 20)
         moved.rotation shouldBe 270
+        moved.mirrored shouldBe true
         moved.bookAdjustedAnchor(book) shouldBe BlockVector3.at(9, 66, 23)
         book.transform shouldBe BuildBookTransform(rotation = 90, offsetX = 2, offsetY = 1, offsetZ = -3)
         original.anchor shouldBe BlockVector3.at(10, 64, 20)
         original.rotation shouldBe 180
+        original.mirrored shouldBe false
     }
 
     "left and right follow the player's view while vertical movement follows world Y" {
@@ -51,9 +54,11 @@ class BuildBookPreviewPlacementTest : StringSpec({
             placement = placement.move(BuildBookPreviewMove.UP, playerRotation = 180)
         }
         placement = placement.rotate(-90)
+        placement = placement.toggleMirror()
 
         placement.anchor shouldBe BlockVector3.at(2, 72, -8)
         placement.rotation shouldBe 0
+        placement.mirrored shouldBe true
         placement.reset() shouldBe BuildBookPreviewPlacement(
             originalAnchor = BlockVector3.at(4, 70, -8),
             baseRotation = 90,

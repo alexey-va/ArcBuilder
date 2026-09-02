@@ -594,42 +594,42 @@ locales:
         bossbar-active: "<#2bba43>Книга «<name>» — проверьте место"
       preview-menu:
         placement:
-          title: "<#ffb142>Размещение: <name>"
-          rotate-left:
-            name: "<#92bed8>Повернуть влево"
-            lore:
-              - "<#8c8c8c>Поворот превью на 90° против часовой стрелки."
-              - "<#969696>Книга и её настройки не изменятся."
+          title: "<#ffb142>Настройка: <name>"
           left:
-            name: "<#92bed8>Сдвинуть влево"
+            name: "<#92bed8>← Влево"
             lore:
               - "<#8c8c8c>На один блок влево от вашего взгляда."
               - "<#969696>Опора: <x>, <y>, <z>."
           up:
-            name: "<#2bba43>Поднять"
+            name: "<#92bed8>↑ Вверх"
             lore:
               - "<#8c8c8c>На один блок вверх по миру."
               - "<#969696>Опора: <x>, <y>, <z>."
-          reset:
-            name: "<#e6fff3>Вернуть исходное место"
+          rotate:
+            name: "<#ffb142>↻ Повернуть"
             lore:
-              - "<#8c8c8c>Сбросить сдвиг и поворот этой сессии."
+              - "<#8c8c8c>На 90° по часовой стрелке."
+              - "<#969696>Книга не изменится."
+          mirror:
+            name: "<#d48763>⇆ Отразить"
+            lore:
+              - "<#8c8c8c>Зеркально поменять левую и правую стороны."
+              - "<#969696>Действует только на это превью."
+          reset:
+            name: "<#e6fff3>Сбросить настройку"
+            lore:
+              - "<#8c8c8c>Вернуть место, поворот и отражение."
               - "<#969696>Сейчас: <x>, <y>, <z>; <rotation>°."
           down:
-            name: "<#969696>Опустить"
+            name: "<#92bed8>↓ Вниз"
             lore:
               - "<#8c8c8c>На один блок вниз по миру."
               - "<#969696>Опора: <x>, <y>, <z>."
           right:
-            name: "<#92bed8>Сдвинуть вправо"
+            name: "<#92bed8>→ Вправо"
             lore:
               - "<#8c8c8c>На один блок вправо от вашего взгляда."
               - "<#969696>Опора: <x>, <y>, <z>."
-          rotate-right:
-            name: "<#92bed8>Повернуть вправо"
-            lore:
-              - "<#8c8c8c>Поворот превью на 90° по часовой стрелке."
-              - "<#969696>Книга и её настройки не изменятся."
           cancel:
             name: "<#c42323>Убрать превью"
             lore:
@@ -640,26 +640,19 @@ locales:
               - "<#e6fff3>Рассчитать блоки и материалы."
               - "<#969696>Мир пока не изменится."
         confirmation:
-          title: "<#2bba43>Подтверждение: <name>"
+          title: "<#2bba43>Запуск: <name>"
           overview:
             name: "<#e6fff3>План строительства"
             lore:
               - "<#8c8c8c>Изменится блоков: <#92bed8><count>"
-              - "<#969696>Проверьте всё перед запуском."
+              - "<#969696>Проверьте место перед запуском."
           materials:
-            name: "<#ffb142>Материалы"
+            name: "<#ffb142>Нужно принести"
             lore:
-              - "<#8c8c8c>Всего предметов: <#e6fff3><items>"
-              - "<#8c8c8c>Типов предметов: <#e6fff3><types>"
-          ready:
-            name: "<#2bba43>Можно строить"
-            lore:
-              - "<#8c8c8c>Кулдаун не мешает запуску."
-          cooldown:
-            name: "<#ff9f0f>Кулдаун активен"
-            lore:
-              - "<#8c8c8c>Осталось: <#e6fff3><hours> ч <minutes> мин."
-              - "<#969696>Место можно менять и проверять."
+              - "<#8c8c8c>Материалы для изменяемых блоков:"
+          material-line: "<#e6fff3><amount>× <material>"
+          material-more: "<#969696>И ещё <count> видов"
+          materials-none: "<#2bba43>Материалы не требуются"
           back:
             name: "<#92bed8>Назад к размещению"
             lore:
@@ -1370,42 +1363,42 @@ locales:
         bossbar-active: "<green>Book “<name>” — verify its position"
       preview-menu:
         placement:
-          title: "<gold>Placement: <name>"
-          rotate-left:
-            name: "<aqua>Rotate left"
-            lore:
-              - "<gray>Rotate this preview 90° counter-clockwise."
-              - "<dark_gray>The book and its settings stay unchanged."
+          title: "<gold>Adjust: <name>"
           left:
-            name: "<aqua>Move left"
+            name: "<aqua>← Left"
             lore:
               - "<gray>One block left relative to your view."
               - "<dark_gray>Anchor: <x>, <y>, <z>."
           up:
-            name: "<green>Move up"
+            name: "<aqua>↑ Up"
             lore:
               - "<gray>One world block upward."
               - "<dark_gray>Anchor: <x>, <y>, <z>."
-          reset:
-            name: "<white>Restore original placement"
+          rotate:
+            name: "<gold>↻ Rotate"
             lore:
-              - "<gray>Reset this session's movement and rotation."
+              - "<gray>90° clockwise."
+              - "<dark_gray>The book stays unchanged."
+          mirror:
+            name: "<#d48763>⇆ Mirror"
+            lore:
+              - "<gray>Swap the left and right sides."
+              - "<dark_gray>This affects only the current preview."
+          reset:
+            name: "<white>Reset placement"
+            lore:
+              - "<gray>Reset movement, rotation, and mirroring."
               - "<dark_gray>Current: <x>, <y>, <z>; <rotation>°."
           down:
-            name: "<gray>Move down"
+            name: "<aqua>↓ Down"
             lore:
               - "<gray>One world block downward."
               - "<dark_gray>Anchor: <x>, <y>, <z>."
           right:
-            name: "<aqua>Move right"
+            name: "<aqua>→ Right"
             lore:
               - "<gray>One block right relative to your view."
               - "<dark_gray>Anchor: <x>, <y>, <z>."
-          rotate-right:
-            name: "<aqua>Rotate right"
-            lore:
-              - "<gray>Rotate this preview 90° clockwise."
-              - "<dark_gray>The book and its settings stay unchanged."
           cancel:
             name: "<red>Remove preview"
             lore:
@@ -1416,26 +1409,19 @@ locales:
               - "<white>Calculate blocks and materials."
               - "<dark_gray>The world is still unchanged."
         confirmation:
-          title: "<green>Confirmation: <name>"
+          title: "<green>Start: <name>"
           overview:
             name: "<white>Construction plan"
             lore:
               - "<gray>Blocks changed: <aqua><count>"
-              - "<dark_gray>Review everything before starting."
+              - "<dark_gray>Check the placement before starting."
           materials:
-            name: "<gold>Materials"
+            name: "<gold>Bring these materials"
             lore:
-              - "<gray>Total items: <white><items>"
-              - "<gray>Item types: <white><types>"
-          ready:
-            name: "<green>Ready to build"
-            lore:
-              - "<gray>The cooldown does not block this start."
-          cooldown:
-            name: "<yellow>Cooldown active"
-            lore:
-              - "<gray>Remaining: <white><hours>h <minutes>m."
-              - "<dark_gray>You may still inspect and move the preview."
+              - "<gray>Materials for changed blocks:"
+          material-line: "<white><amount>× <material>"
+          material-more: "<dark_gray>And <count> more types"
+          materials-none: "<green>No materials required"
           back:
             name: "<aqua>Back to placement"
             lore:

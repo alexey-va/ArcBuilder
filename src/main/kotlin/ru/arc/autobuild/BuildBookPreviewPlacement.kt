@@ -21,6 +21,7 @@ internal data class BuildBookPreviewPlacement(
     private val offsetY: Int = 0,
     private val offsetZ: Int = 0,
     private val rotationDelta: Int = 0,
+    val mirrored: Boolean = false,
 ) {
     init {
         require(baseRotation in BuildBookTransform.CARDINAL_ROTATIONS) { "Preview base rotation must be cardinal" }
@@ -65,7 +66,15 @@ internal data class BuildBookPreviewPlacement(
         return copy(rotationDelta = BuildBookTransform.normalizeRotation(rotationDelta + delta))
     }
 
-    fun reset(): BuildBookPreviewPlacement = copy(offsetX = 0, offsetY = 0, offsetZ = 0, rotationDelta = 0)
+    fun toggleMirror(): BuildBookPreviewPlacement = copy(mirrored = !mirrored)
+
+    fun reset(): BuildBookPreviewPlacement = copy(
+        offsetX = 0,
+        offsetY = 0,
+        offsetZ = 0,
+        rotationDelta = 0,
+        mirrored = false,
+    )
 
     fun bookAdjustedAnchor(bookData: BuildBookData): BlockVector3 {
         val fullRotation = BuildBookRelativeRotation.resolve(rotation, bookData.sourceRotation, bookData.transform.rotation)

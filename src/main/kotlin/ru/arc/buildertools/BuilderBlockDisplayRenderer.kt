@@ -303,7 +303,7 @@ internal class BuilderBlockDisplayRenderer(
         val blocks = site.relativePositionsBottomUp().mapNotNull { relative ->
             val data = runCatching {
                 rotateBlockData(
-                    Bukkit.createBlockData(BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)).asString),
+                    Bukkit.createBlockData(BukkitAdapter.adapt(site.sourceBlock(relative)).asString),
                     site.fullRotation,
                 )
             }.getOrNull()?.takeUnless { it.material.isAir } ?: return@mapNotNull null

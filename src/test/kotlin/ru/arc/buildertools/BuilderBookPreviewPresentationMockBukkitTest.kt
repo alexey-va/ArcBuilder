@@ -50,7 +50,16 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 every { site.rotation } returns 180
                 every { site.snapshot() } returns snapshot
                 val plan = plan(player.uniqueId, world.uid)
-                val host = PreviewHost(site, BuilderBookPreviewConfirmation(plan, "Дом", Duration.ofHours(7)))
+                val requiredMaterial = item(Material.OAK_PLANKS, 32)
+                val host = PreviewHost(
+                    site,
+                    BuilderBookPreviewConfirmation(
+                        plan = plan,
+                        title = "Дом",
+                        cooldownRemaining = Duration.ofHours(7),
+                        requiredMaterials = listOf(requiredMaterial),
+                    ),
+                )
                 val renderer = mockk<BuilderDisplayRenderer>(relaxed = true)
 
                 BuilderBookPreviewPresentation(
@@ -72,19 +81,38 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     presentation.openPlacementForTest(player, site)
                     val placement = player.openInventory.topInventory
 
-                    placement.size shouldBe 27
-                    placement.getItem(10)?.type shouldBe Material.ARROW
-                    plain(placement.getItem(10)!!.itemMeta.displayName()!!) shouldContain "влево"
-                    click(paper, player, 10).isCancelled.shouldBeTrue()
+                    placement.size shouldBe 45
+                    placement.getItem(19)?.type shouldBe Material.ARROW
+                    plain(placement.getItem(19)!!.itemMeta.displayName()!!) shouldContain "Влево"
+                    click(paper, player, 19).isCancelled.shouldBeTrue()
                     host.adjustments shouldBe listOf(BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.LEFT))
 
-                    click(paper, player, 24).isCancelled.shouldBeTrue()
+                    placement.getItem(20)?.type shouldBe Material.COMPASS
+                    click(paper, player, 20).isCancelled.shouldBeTrue()
+                    host.adjustments.last() shouldBe BuildBookPreviewAdjustment.Rotate(90)
+
+                    click(paper, player, 37).isCancelled.shouldBeTrue()
+                    host.adjustments.last() shouldBe BuildBookPreviewAdjustment.ToggleMirror
+
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
                     val confirmation = player.openInventory.topInventory
-                    confirmation.getItem(16)?.type shouldBe Material.REDSTONE_TORCH
-                    plain(confirmation.getItem(16)!!.itemMeta.displayName()!!) shouldContain "Кулдаун"
-                    confirmation.getItem(22)?.type shouldBe Material.BARRIER
-                    plain(confirmation.getItem(22)!!.itemMeta.displayName()!!) shouldContain "недоступно"
+                    confirmation.size shouldBe 45
+                    confirmation.getItem(21)?.type shouldBe Material.CHEST
+                    plainLore(confirmation.getItem(21)!!) shouldContain "32× Oak Planks"
+                    confirmation.getItem(25)?.type shouldBe Material.BARRIER
+                    plain(confirmation.getItem(25)!!.itemMeta.displayName()!!) shouldContain "недоступно"
                     host.confirmCalls shouldBe 0
+
+                    click(paper, player, 29).isCancelled.shouldBeTrue()
+                    host.confirmation = host.confirmation.copy(
+                        cooldownRemaining = Duration.ZERO,
+                        requiredMaterials = emptyList(),
+                    )
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+                    val noMaterials = player.openInventory.topInventory
+                    noMaterials.getItem(21)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
+                    plainLore(noMaterials.getItem(19)!!) shouldContain "Материалы не требуются"
+                    noMaterials.getItem(25)?.type shouldBe Material.LIME_CONCRETE
                 }
             } finally {
                 ConfigManager.clear()
@@ -93,9 +121,15 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
     }
 })
 
+private fun item(material: Material, amount: Int): BuilderItemAmount = BuilderItemAmount(
+    BuilderItemCodec.encodePrototype(ItemStack(material)),
+    material.key.toString(),
+    amount,
+)
+
 private class PreviewHost(
     private val site: ConstructionSite,
-    private val confirmation: BuilderBookPreviewConfirmation,
+    var confirmation: BuilderBookPreviewConfirmation,
 ) : BuilderBookPreviewPresentationHost {
     val adjustments = mutableListOf<BuildBookPreviewAdjustment>()
     var confirmCalls = 0
@@ -159,3 +193,5 @@ private fun click(
 
 private fun plain(component: net.kyori.adventure.text.Component): String =
     PlainTextComponentSerializer.plainText().serialize(component)
+
+private fun plainLore(item: ItemStack): String = item.itemMeta.lore().orEmpty().joinToString("\n", transform = ::plain)

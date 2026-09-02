@@ -16,6 +16,7 @@ internal interface BuildBookPreviewBridge {
 internal sealed interface BuildBookPreviewAdjustment {
     data class Move(val direction: BuildBookPreviewMove) : BuildBookPreviewAdjustment
     data class Rotate(val delta: Int) : BuildBookPreviewAdjustment
+    data object ToggleMirror : BuildBookPreviewAdjustment
     data object Reset : BuildBookPreviewAdjustment
 }
 
@@ -106,6 +107,7 @@ object BuildingManager {
         when (adjustment) {
             is BuildBookPreviewAdjustment.Move -> site.move(adjustment.direction, rotationFromYaw(player.yaw))
             is BuildBookPreviewAdjustment.Rotate -> site.rotate(adjustment.delta)
+            BuildBookPreviewAdjustment.ToggleMirror -> site.toggleMirror()
             BuildBookPreviewAdjustment.Reset -> site.resetPlacement()
         }
         previewBridge?.refresh(site)

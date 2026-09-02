@@ -41,6 +41,7 @@ internal data class BuilderBookPreviewConfirmation(
     val plan: BuilderPlan,
     val title: String,
     val cooldownRemaining: Duration,
+    val requiredMaterials: List<BuilderItemAmount>,
 )
 
 internal interface BuilderBookPreviewPresentationHost {
@@ -68,6 +69,7 @@ internal class BuilderBookPreviewPresentation(
     private val viewRange: Double,
     private val backgroundItem: String,
     private val backgroundFallback: Material,
+    private val materialLineLimit: Int = 6,
 ) : BuildBookPreviewBridge, Listener, AutoCloseable {
     private enum class Stage { PLACEMENT, CONFIRMATION }
 
@@ -164,13 +166,13 @@ internal class BuilderBookPreviewPresentation(
 
     private fun handlePlacementClick(player: Player, slot: Int) {
         val adjustment = when (slot) {
-            SLOT_ROTATE_LEFT -> BuildBookPreviewAdjustment.Rotate(-90)
             SLOT_LEFT -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.LEFT)
             SLOT_UP -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.UP)
+            SLOT_ROTATE -> BuildBookPreviewAdjustment.Rotate(90)
+            SLOT_MIRROR -> BuildBookPreviewAdjustment.ToggleMirror
             SLOT_RESET -> BuildBookPreviewAdjustment.Reset
             SLOT_DOWN -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.DOWN)
             SLOT_RIGHT -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.RIGHT)
-            SLOT_ROTATE_RIGHT -> BuildBookPreviewAdjustment.Rotate(90)
             else -> null
         }
         if (adjustment != null) {
@@ -274,14 +276,14 @@ internal class BuilderBookPreviewPresentation(
             "rotation" to messages.literal(site.rotation),
         )
         val locale = locale(player)
-        setAction(inventory, SLOT_ROTATE_LEFT, Material.COMPASS, "rotate-left", values, locale)
         setAction(inventory, SLOT_LEFT, Material.ARROW, "left", values, locale)
-        setAction(inventory, SLOT_UP, Material.LIME_DYE, "up", values, locale)
+        setAction(inventory, SLOT_UP, Material.ARROW, "up", values, locale)
+        setAction(inventory, SLOT_ROTATE, Material.COMPASS, "rotate", values, locale)
+        setAction(inventory, SLOT_MIRROR, Material.AMETHYST_SHARD, "mirror", values, locale)
         setAction(inventory, SLOT_RESET, Material.RECOVERY_COMPASS, "reset", values, locale)
-        setAction(inventory, SLOT_DOWN, Material.GRAY_DYE, "down", values, locale)
+        setAction(inventory, SLOT_DOWN, Material.ARROW, "down", values, locale)
         setAction(inventory, SLOT_RIGHT, Material.ARROW, "right", values, locale)
-        setAction(inventory, SLOT_ROTATE_RIGHT, Material.COMPASS, "rotate-right", values, locale)
-        setAction(inventory, SLOT_CANCEL, Material.BARRIER, "cancel", values, locale)
+        setAction(inventory, SLOT_CANCEL, Material.RED_CONCRETE, "cancel", values, locale)
         setAction(inventory, SLOT_CONTINUE, Material.LIME_CONCRETE, "continue", values, locale)
     }
 
@@ -295,22 +297,59 @@ internal class BuilderBookPreviewPresentation(
         val totalMinutes = (remaining.seconds + 59L) / 60L
         val values = mapOf(
             "count" to messages.literal(confirmation.plan.changes.size),
-            "items" to messages.literal(confirmation.plan.costs.sumOf { it.amount.toLong() }),
-            "types" to messages.literal(confirmation.plan.costs.size),
             "hours" to messages.literal(totalMinutes / 60L),
             "minutes" to messages.literal(totalMinutes % 60L),
         )
         val locale = locale(player)
-        setConfirmationItem(inventory, SLOT_CONFIRM_OVERVIEW, Material.BOOK, "overview", values, locale)
-        setConfirmationItem(inventory, SLOT_CONFIRM_MATERIALS, Material.CHEST, "materials", values, locale)
+        val noMaterialsLore = if (confirmation.requiredMaterials.isEmpty()) {
+            listOf(messages.render("book.preview-menu.confirmation.materials-none", locale))
+        } else {
+            emptyList()
+        }
         setConfirmationItem(
             inventory,
-            SLOT_CONFIRM_COOLDOWN,
-            if (remaining.isZero) Material.CLOCK else Material.REDSTONE_TORCH,
-            if (remaining.isZero) "ready" else "cooldown",
+            SLOT_CONFIRM_OVERVIEW,
+            Material.BOOK,
+            "overview",
             values,
             locale,
+            noMaterialsLore,
         )
+        if (confirmation.requiredMaterials.isNotEmpty()) {
+            val materialLore = buildList {
+                addAll(messages.renderLines("book.preview-menu.confirmation.materials.lore", locale, values))
+                confirmation.requiredMaterials.take(materialLineLimit).forEach { amount ->
+                    add(
+                        messages.render(
+                            "book.preview-menu.confirmation.material-line",
+                            locale,
+                            mapOf(
+                                "amount" to messages.literal(amount.amount),
+                                "material" to requiredMaterialLabel(amount),
+                            ),
+                        ),
+                    )
+                }
+                val hidden = confirmation.requiredMaterials.size - materialLineLimit
+                if (hidden > 0) {
+                    add(
+                        messages.render(
+                            "book.preview-menu.confirmation.material-more",
+                            locale,
+                            mapOf("count" to messages.literal(hidden)),
+                        ),
+                    )
+                }
+            }
+            inventory.setItem(
+                SLOT_CONFIRM_MATERIALS,
+                item(
+                    Material.CHEST,
+                    messages.render("book.preview-menu.confirmation.materials.name", locale, values),
+                    materialLore,
+                ),
+            )
+        }
         setConfirmationItem(inventory, SLOT_BACK, Material.ARROW, "back", values, locale)
         setConfirmationItem(
             inventory,
@@ -320,7 +359,7 @@ internal class BuilderBookPreviewPresentation(
             values,
             locale,
         )
-        setConfirmationItem(inventory, SLOT_CANCEL_CONFIRMATION, Material.BARRIER, "cancel", values, locale)
+        setConfirmationItem(inventory, SLOT_CANCEL_CONFIRMATION, Material.RED_CONCRETE, "cancel", values, locale)
     }
 
     private fun setAction(
@@ -348,15 +387,26 @@ internal class BuilderBookPreviewPresentation(
         key: String,
         values: Map<String, Component>,
         locale: String,
+        extraLore: List<Component> = emptyList(),
     ) {
         inventory.setItem(
             slot,
             item(
                 material,
                 messages.render("book.preview-menu.confirmation.$key.name", locale, values),
-                messages.renderLines("book.preview-menu.confirmation.$key.lore", locale, values),
+                messages.renderLines("book.preview-menu.confirmation.$key.lore", locale, values) + extraLore,
             ),
         )
+    }
+
+    private fun requiredMaterialLabel(amount: BuilderItemAmount): Component {
+        val prototype = BuilderItemCodec.decodePrototype(amount.itemBase64)
+        val meta = prototype.itemMeta
+        return if (meta.hasDisplayName()) {
+            checkNotNull(meta.displayName())
+        } else {
+            Component.translatable(prototype.type.translationKey())
+        }
     }
 
     private fun replacePanel(site: ConstructionSite) {
@@ -475,21 +525,20 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private companion object {
-        const val MENU_SIZE = 27
-        const val SLOT_ROTATE_LEFT = 9
-        const val SLOT_LEFT = 10
+        const val MENU_SIZE = 45
         const val SLOT_UP = 11
-        const val SLOT_RESET = 13
-        const val SLOT_DOWN = 15
-        const val SLOT_RIGHT = 16
-        const val SLOT_ROTATE_RIGHT = 17
-        const val SLOT_CANCEL = 20
-        const val SLOT_CONTINUE = 24
-        const val SLOT_CONFIRM_OVERVIEW = 10
-        const val SLOT_CONFIRM_MATERIALS = 13
-        const val SLOT_CONFIRM_COOLDOWN = 16
-        const val SLOT_BACK = 20
-        const val SLOT_START = 22
-        const val SLOT_CANCEL_CONFIRMATION = 24
+        const val SLOT_LEFT = 19
+        const val SLOT_ROTATE = 20
+        const val SLOT_RIGHT = 21
+        const val SLOT_CONTINUE = 25
+        const val SLOT_DOWN = 29
+        const val SLOT_CANCEL = 34
+        const val SLOT_MIRROR = 37
+        const val SLOT_RESET = 39
+        const val SLOT_CONFIRM_OVERVIEW = 19
+        const val SLOT_CONFIRM_MATERIALS = 21
+        const val SLOT_BACK = 29
+        const val SLOT_START = 25
+        const val SLOT_CANCEL_CONFIRMATION = 34
     }
 }

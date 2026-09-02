@@ -537,6 +537,7 @@ internal class BuilderToolsRuntime(
                 viewRange = config.constructionSiteViewRange,
                 backgroundItem = config.constructionSiteMenuBackgroundItem,
                 backgroundFallback = config.constructionSiteMenuBackgroundFallback,
+                materialLineLimit = config.bookPlayerMaterialsSummaryLimit,
             ).also { initializedBookPreviewPresentation = it }
             BuildingManager.installPreviewBridge(bookPreviewPresentation)
             Bukkit.getPluginManager().registerEvents(this, plugin)
@@ -1026,7 +1027,7 @@ internal class BuilderToolsRuntime(
         val lootTableKey = systemDefinition?.containerLootTableKey?.also { requiredLootTable(it) }
         val cells = site.relativePositionsBottomUp().map { relative ->
             val after = rotateBlockData(
-                BukkitAdapter.adapt(site.building.getBlock(relative, site.fullRotation)),
+                BukkitAdapter.adapt(site.sourceBlock(relative)),
                 site.fullRotation,
             )
             val target = site.worldLocation(relative).block
@@ -1345,6 +1346,14 @@ internal class BuilderToolsRuntime(
             plan = plan,
             title = project.projectTitle ?: project.plan.bookBuildingId ?: "Постройка",
             cooldownRemaining = bookApplicationCooldownRemaining(player),
+            requiredMaterials = project.steps
+                .mapNotNull(BuilderConstructionStep::requiredMaterial)
+                .groupBy { it.itemBase64 to it.materialKey }
+                .values
+                .map { grouped ->
+                    grouped.first().copy(amount = grouped.sumOf(BuilderItemAmount::amount)).validated()
+                }
+                .sortedBy(BuilderItemAmount::materialKey),
         )
     }
 
