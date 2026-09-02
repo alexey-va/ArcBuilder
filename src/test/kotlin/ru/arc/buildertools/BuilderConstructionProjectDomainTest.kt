@@ -200,6 +200,27 @@ class BuilderConstructionProjectDomainTest : FunSpec({
         }) shouldBe null
     }
 
+    test("pause request made during a durable step waits for the next safe boundary") {
+        val active = prepared().activated(createdAt + 1)
+        val inputPrepared = active.inputPrepared(mutation(stone, insert = false), createdAt + 2)
+        val pauseRequests = BuilderConstructionPauseRequests()
+
+        pauseRequests.request(inputPrepared, playerId) shouldBe true
+        pauseRequests.pauseTarget(inputPrepared, createdAt + 3) shouldBe null
+
+        val worldPrepared = inputPrepared.worldPrepared(createdAt + 3)
+        pauseRequests.pauseTarget(worldPrepared, createdAt + 4) shouldBe null
+
+        val nextSafeBoundary = worldPrepared.advanced(createdAt + 4)
+        val paused = checkNotNull(pauseRequests.pauseTarget(nextSafeBoundary, createdAt + 5))
+        paused.state shouldBe BuilderConstructionProjectState.PAUSED
+        paused.cursor shouldBe 1
+        pauseRequests.requester(projectId) shouldBe playerId
+
+        pauseRequests.complete(projectId)
+        pauseRequests.pauseTarget(nextSafeBoundary, createdAt + 6) shouldBe null
+    }
+
     test("world drift enters a recovery hold and cannot resume automatically") {
         val active = prepared().activated(createdAt + 1)
         val recovery = active.recoveryRequired(createdAt + 2)

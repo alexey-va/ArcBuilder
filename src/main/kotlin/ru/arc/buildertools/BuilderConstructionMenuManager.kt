@@ -131,9 +131,9 @@ internal class BuilderConstructionMenuManager(
             render(player, event.view.topInventory, project)
             return
         }
-        val pause = when (project.state) {
-            in PAUSE_CONTROL_STATES -> true
-            BuilderConstructionProjectState.PAUSED -> false
+        val pause = when {
+            BuilderConstructionPausePolicy.canRequestPause(project.state) -> true
+            project.state == BuilderConstructionProjectState.PAUSED -> false
             else -> return
         }
         if (requestPaused(player, project.projectId, pause)) {
@@ -235,7 +235,7 @@ internal class BuilderConstructionMenuManager(
                 path = "resume"
                 material = settings.resumeMaterial
             }
-            project.state in PAUSE_CONTROL_STATES -> {
+            BuilderConstructionPausePolicy.canRequestPause(project.state) -> {
                 path = "pause"
                 material = settings.pauseMaterial
             }
@@ -307,7 +307,7 @@ internal class BuilderConstructionMenuManager(
             "name" to projectName(project, locale(player)),
             "owner" to messages.literal(project.playerName),
             "state" to messages.render(
-                "construction.states.${playerFacingState(project.state).name.lowercase(Locale.ROOT)}",
+                "construction.states.${BuilderConstructionPausePolicy.playerFacingState(project.state).name.lowercase(Locale.ROOT)}",
                 locale(player),
             ),
             "count" to messages.literal(project.cursor),
@@ -346,9 +346,6 @@ internal class BuilderConstructionMenuManager(
 
     private fun locale(player: Player): String = player.locale().toLanguageTag()
 
-    private fun playerFacingState(state: BuilderConstructionProjectState): BuilderConstructionProjectState =
-        if (state in INTERNAL_STEP_STATES) BuilderConstructionProjectState.ACTIVE else state
-
     override fun close() {
         if (closed) return
         closed = true
@@ -358,18 +355,5 @@ internal class BuilderConstructionMenuManager(
             if (holder?.manager === this) player.closeInventory()
         }
         viewers.clear()
-    }
-
-    private companion object {
-        val INTERNAL_STEP_STATES = setOf(
-            BuilderConstructionProjectState.INPUT_PREPARED,
-            BuilderConstructionProjectState.WORLD_PREPARED,
-            BuilderConstructionProjectState.OUTPUT_PENDING,
-            BuilderConstructionProjectState.DELIVERING_OUTPUT,
-        )
-        val PAUSE_CONTROL_STATES = INTERNAL_STEP_STATES + setOf(
-            BuilderConstructionProjectState.ACTIVE,
-            BuilderConstructionProjectState.WAITING_MATERIALS,
-        )
     }
 }
