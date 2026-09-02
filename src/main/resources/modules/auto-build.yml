@@ -50,6 +50,32 @@ build-book:
     active-custom-model-data: 0
     default-name: 'Моя постройка'
   editor:
+    menu:
+      layouts:
+        build-book-editor:
+          schema-version: 1
+          rows: 3
+          background: { template: background }
+          elements:
+            overview: { position: { row: 0, column: 4 }, kind: decoration, template: overview }
+            axis-x: { position: { row: 1, column: 2 }, template: axis-x }
+            axis-y: { position: { row: 1, column: 4 }, template: axis-y }
+            axis-z: { position: { row: 1, column: 6 }, template: axis-z }
+            rotation: { position: { row: 2, column: 3 }, template: rotation }
+            reset: { position: { row: 2, column: 5 }, template: reset }
+            copy: { position: { row: 2, column: 7 }, template: copy }
+      templates:
+        background:
+          external-item: itemsadder:arc/background
+          fallback-material: GRAY_STAINED_GLASS_PANE
+          hide-tooltip: true
+        overview: { material: BOOK }
+        axis-x: { material: REDSTONE_TORCH }
+        axis-y: { material: SCAFFOLDING }
+        axis-z: { material: RECOVERY_COMPASS }
+        rotation: { material: CLOCK }
+        reset: { material: REPEATER }
+        copy: { material: WRITABLE_BOOK }
     title: '<dark_gray>Настройка книги'
     invalid: '<white>🛠</white> <#c42323>Книга повреждена или её чертёж недоступен.'
     no-permission: '<white>🛠</white> <#c42323>У вас нет доступа к настройке этой книги.'

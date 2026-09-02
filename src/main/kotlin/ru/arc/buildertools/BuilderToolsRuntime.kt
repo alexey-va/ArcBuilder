@@ -536,8 +536,6 @@ internal class BuilderToolsRuntime(
                 ),
                 panelGlowColor = Color.fromRGB(config.constructionSiteGlowColor.removePrefix("#").toInt(16)),
                 viewRange = config.constructionSiteViewRange,
-                backgroundItem = config.constructionSiteMenuBackgroundItem,
-                backgroundFallback = config.constructionSiteMenuBackgroundFallback,
                 materialLineLimit = config.bookPlayerMaterialsSummaryLimit,
             ).also { initializedBookPreviewPresentation = it }
             BuildingManager.installPreviewBridge(bookPreviewPresentation)

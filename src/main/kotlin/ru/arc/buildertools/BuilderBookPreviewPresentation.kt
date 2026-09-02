@@ -16,14 +16,9 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
-import org.bukkit.event.inventory.InventoryClickEvent
-import org.bukkit.event.inventory.InventoryDragEvent
 import org.bukkit.event.player.PlayerInteractEntityEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
-import org.bukkit.inventory.Inventory
-import org.bukkit.inventory.InventoryHolder
-import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.BuildBookPreviewAdjustment
@@ -31,7 +26,20 @@ import ru.arc.autobuild.BuildBookPreviewBridge
 import ru.arc.autobuild.BuildBookPreviewMove
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.ConstructionSiteSnapshot
-import ru.arc.autobuild.gui.BuildBookEditorPresentation
+import ru.arc.config.ConfigManager
+import ru.arc.core.BukkitTaskScheduler
+import ru.arc.menu.MenuContract
+import ru.arc.menu.MenuElementId
+import ru.arc.menu.MenuId
+import ru.arc.paper.menu.PaperMenuConfiguration
+import ru.arc.paper.menu.PaperMenuConfigurationParser
+import ru.arc.paper.menu.PaperMenuClickContext
+import ru.arc.paper.menu.PaperMenuContent
+import ru.arc.paper.menu.PaperMenuEntry
+import ru.arc.paper.menu.PaperMenuExternalItemResolver
+import ru.arc.paper.menu.PaperMenuExternalItemResult
+import ru.arc.paper.menu.PaperMenuItemFactory
+import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.time.Duration
@@ -67,21 +75,8 @@ internal class BuilderBookPreviewPresentation(
     private val panelBackgroundColor: Color,
     private val panelGlowColor: Color,
     private val viewRange: Double,
-    private val backgroundItem: String,
-    private val backgroundFallback: Material,
     private val materialLineLimit: Int = 6,
 ) : BuildBookPreviewBridge, Listener, AutoCloseable {
-    private enum class Stage { PLACEMENT, CONFIRMATION }
-
-    private class MenuHolder(
-        val owner: BuilderBookPreviewPresentation,
-        val playerId: UUID,
-        val stage: Stage,
-    ) : InventoryHolder {
-        lateinit var backing: Inventory
-        override fun getInventory(): Inventory = backing
-    }
-
     private data class PanelScene(
         val site: ConstructionSite,
         val entities: List<Entity>,
@@ -92,6 +87,19 @@ internal class BuilderBookPreviewPresentation(
     private val interactionOwners = mutableMapOf<UUID, UUID>()
     private val snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
     private val placementSites = mutableMapOf<UUID, ConstructionSite>()
+    private val menuConfiguration = loadMenuConfiguration()
+    private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
+    private val menuItems = PaperMenuItemFactory(
+        externalItems = PaperMenuExternalItemResolver { id ->
+            if (id.namespace != "itemsadder" || !Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
+                PaperMenuExternalItemResult.Missing
+            } else {
+                CustomStack.getInstance(id.key.replaceFirst('/', ':'))?.itemStack
+                    ?.let(PaperMenuExternalItemResult::Resolved)
+                    ?: PaperMenuExternalItemResult.Missing
+            }
+        },
+    )
     private var closed = false
 
     init {
@@ -108,8 +116,7 @@ internal class BuilderBookPreviewPresentation(
         if (closed) return
         renderer.refresh(site)
         replacePanelSafely(site)
-        val holder = currentMenu(site.player)
-        if (holder?.owner === this && holder.stage == Stage.PLACEMENT) renderPlacement(site.player, holder.backing, site)
+        menus.session(site.player)?.takeIf { it.menuId == PLACEMENT_MENU }?.refresh()
     }
 
     override fun close(playerId: UUID) {
@@ -117,8 +124,7 @@ internal class BuilderBookPreviewPresentation(
         removePanel(playerId)
         placementSites.remove(playerId)
         val player = Bukkit.getPlayer(playerId)
-        val holder = player?.let(::currentMenu)
-        if (holder?.owner === this && holder.stage == Stage.PLACEMENT) player.closeInventory()
+        player?.let(menus::session)?.takeIf { it.menuId == PLACEMENT_MENU }?.close()
     }
 
     fun clearPlayer(playerId: UUID) {
@@ -126,8 +132,7 @@ internal class BuilderBookPreviewPresentation(
         snapshots.remove(playerId)
         placementSites.remove(playerId)
         val player = Bukkit.getPlayer(playerId)
-        val holder = player?.let(::currentMenu)
-        if (holder?.owner === this) player.closeInventory()
+        player?.let(menus::session)?.close()
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -140,134 +145,72 @@ internal class BuilderBookPreviewPresentation(
         openPlacement(event.player, site)
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    fun onMenuClick(event: InventoryClickEvent) {
-        val holder = event.view.topInventory.holder as? MenuHolder ?: return
-        if (holder.owner !== this) return
-        event.isCancelled = true
-        val player = event.whoClicked as? Player ?: return
-        if (player.uniqueId != holder.playerId || event.rawSlot !in 0 until event.view.topInventory.size) return
-        when (holder.stage) {
-            Stage.PLACEMENT -> handlePlacementClick(player, event.rawSlot)
-            Stage.CONFIRMATION -> handleConfirmationClick(player, event.rawSlot)
-        }
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    fun onMenuDrag(event: InventoryDragEvent) {
-        val holder = event.view.topInventory.holder as? MenuHolder ?: return
-        if (holder.owner === this) event.isCancelled = true
-    }
-
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         clearPlayer(event.player.uniqueId)
     }
 
-    private fun handlePlacementClick(player: Player, slot: Int) {
-        val adjustment = when (slot) {
-            SLOT_LEFT -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.LEFT)
-            SLOT_UP -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.UP)
-            SLOT_ROTATE -> BuildBookPreviewAdjustment.Rotate(90)
-            SLOT_MIRROR -> BuildBookPreviewAdjustment.ToggleMirror
-            SLOT_RESET -> BuildBookPreviewAdjustment.Reset
-            SLOT_DOWN -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.DOWN)
-            SLOT_RIGHT -> BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.RIGHT)
-            else -> null
-        }
-        if (adjustment != null) {
-            if (host.adjust(player, adjustment) == null) player.closeInventory()
-            else player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.65f, 1.15f)
-            return
-        }
-        when (slot) {
-            SLOT_CANCEL -> {
-                snapshots.remove(player.uniqueId)
-                host.cancel(player)
-                player.closeInventory()
-            }
-            SLOT_CONTINUE -> {
-                val site = placementSites[player.uniqueId] ?: panels[player.uniqueId]?.site ?: return player.closeInventory()
-                snapshots[player.uniqueId] = site.snapshot()
-                val confirmation = host.prepare(player, site)
-                if (confirmation == null) {
-                    snapshots.remove(player.uniqueId)
-                    player.closeInventory()
-                } else {
-                    openConfirmation(player, confirmation)
-                }
-            }
+    private fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment) {
+        if (host.adjust(player, adjustment) == null) player.closeInventory()
+        else player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.65f, 1.15f)
+    }
+
+    private fun cancel(player: Player) {
+        snapshots.remove(player.uniqueId)
+        host.cancel(player)
+        player.closeInventory()
+    }
+
+    private fun continueToConfirmation(player: Player) {
+        val site = placementSites[player.uniqueId] ?: panels[player.uniqueId]?.site ?: return player.closeInventory()
+        snapshots[player.uniqueId] = site.snapshot()
+        val confirmation = host.prepare(player, site)
+        if (confirmation == null) {
+            snapshots.remove(player.uniqueId)
+            player.closeInventory()
+        } else {
+            openConfirmation(player, confirmation)
         }
     }
 
-    private fun handleConfirmationClick(player: Player, slot: Int) {
-        when (slot) {
-            SLOT_CANCEL_CONFIRMATION -> {
-                snapshots.remove(player.uniqueId)
-                host.cancel(player)
-                player.closeInventory()
-            }
-            SLOT_BACK -> {
-                val snapshot = snapshots.remove(player.uniqueId) ?: return player.closeInventory()
-                val site = host.restore(player, snapshot) ?: return player.closeInventory()
-                openPlacement(player, site)
-            }
-            SLOT_START -> {
-                val confirmation = host.currentConfirmation(player) ?: return player.closeInventory()
-                if (!confirmation.cooldownRemaining.isZero) {
-                    renderConfirmation(player, player.openInventory.topInventory, confirmation)
-                    player.playSound(player.location, Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f)
-                    return
-                }
-                if (host.confirm(player)) {
-                    snapshots.remove(player.uniqueId)
-                    player.closeInventory()
-                } else {
-                    host.currentConfirmation(player)?.let {
-                        renderConfirmation(player, player.openInventory.topInventory, it)
-                    }
-                }
-            }
+    private fun backToPlacement(player: Player) {
+        val snapshot = snapshots.remove(player.uniqueId) ?: return player.closeInventory()
+        val site = host.restore(player, snapshot) ?: return player.closeInventory()
+        openPlacement(player, site)
+    }
+
+    private fun start(player: Player) {
+        val confirmation = host.currentConfirmation(player) ?: return player.closeInventory()
+        if (!confirmation.cooldownRemaining.isZero) {
+            menus.session(player)?.refresh()
+            player.playSound(player.location, Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f)
+            return
+        }
+        if (host.confirm(player)) {
+            snapshots.remove(player.uniqueId)
+            player.closeInventory()
+        } else {
+            menus.session(player)?.refresh()
         }
     }
 
     private fun openPlacement(player: Player, site: ConstructionSite) {
         placementSites[player.uniqueId] = site
-        val holder = MenuHolder(this, player.uniqueId, Stage.PLACEMENT)
-        val inventory = Bukkit.createInventory(
-            holder,
-            MENU_SIZE,
-            messages.render(
-                "book.preview-menu.placement.title",
-                locale(player),
-                mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 20))),
-            ),
-        )
-        holder.backing = inventory
-        renderPlacement(player, inventory, site)
-        player.openInventory(inventory)
+        menus.open(player, PLACEMENT_MENU) { placementContent(player) }
     }
 
     internal fun openPlacementForTest(player: Player, site: ConstructionSite) = openPlacement(player, site)
 
     private fun openConfirmation(player: Player, confirmation: BuilderBookPreviewConfirmation) {
-        val holder = MenuHolder(this, player.uniqueId, Stage.CONFIRMATION)
-        val inventory = Bukkit.createInventory(
-            holder,
-            MENU_SIZE,
-            messages.render(
-                "book.preview-menu.confirmation.title",
-                locale(player),
-                mapOf("name" to messages.literal(BuildBookItems.compactTitle(confirmation.title, 20))),
-            ),
-        )
-        holder.backing = inventory
-        renderConfirmation(player, inventory, confirmation)
-        player.openInventory(inventory)
+        menus.open(player, CONFIRMATION_MENU) {
+            confirmationContent(player, host.currentConfirmation(player) ?: confirmation)
+        }
     }
 
-    private fun renderPlacement(player: Player, inventory: Inventory, site: ConstructionSite) {
-        fillBackground(inventory)
+    private fun placementContent(player: Player): PaperMenuContent {
+        val site = requireNotNull(placementSites[player.uniqueId] ?: panels[player.uniqueId]?.site) {
+            "Build-book placement preview is no longer active"
+        }
         val anchor = site.centerBlock.block
         val values = mapOf(
             "x" to messages.literal(anchor.x),
@@ -276,23 +219,47 @@ internal class BuilderBookPreviewPresentation(
             "rotation" to messages.literal(site.rotation),
         )
         val locale = locale(player)
-        setAction(inventory, SLOT_LEFT, Material.ARROW, "left", values, locale)
-        setAction(inventory, SLOT_UP, Material.ARROW, "up", values, locale)
-        setAction(inventory, SLOT_ROTATE, Material.COMPASS, "rotate", values, locale)
-        setAction(inventory, SLOT_MIRROR, Material.AMETHYST_SHARD, "mirror", values, locale)
-        setAction(inventory, SLOT_RESET, Material.RECOVERY_COMPASS, "reset", values, locale)
-        setAction(inventory, SLOT_DOWN, Material.ARROW, "down", values, locale)
-        setAction(inventory, SLOT_RIGHT, Material.ARROW, "right", values, locale)
-        setAction(inventory, SLOT_CANCEL, Material.RED_CONCRETE, "cancel", values, locale)
-        setAction(inventory, SLOT_CONTINUE, Material.LIME_CONCRETE, "continue", values, locale)
+        return PaperMenuContent(
+            title = messages.render(
+                "book.preview-menu.placement.title",
+                locale,
+                mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 20))),
+            ),
+            background = background(PLACEMENT_MENU),
+            elements = mapOf(
+                LEFT to action(PLACEMENT_MENU, LEFT, "left", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.LEFT))
+                },
+                UP to action(PLACEMENT_MENU, UP, "up", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.UP))
+                },
+                ROTATE to action(PLACEMENT_MENU, ROTATE, "rotate", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Rotate(90))
+                },
+                MIRROR to action(PLACEMENT_MENU, MIRROR, "mirror", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.ToggleMirror)
+                },
+                RESET to action(PLACEMENT_MENU, RESET, "reset", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Reset)
+                },
+                DOWN to action(PLACEMENT_MENU, DOWN, "down", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.DOWN))
+                },
+                RIGHT to action(PLACEMENT_MENU, RIGHT, "right", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.RIGHT))
+                },
+                CANCEL to action(PLACEMENT_MENU, CANCEL, "cancel", values, locale) { cancel(it.player) },
+                CONTINUE to action(PLACEMENT_MENU, CONTINUE, "continue", values, locale) {
+                    continueToConfirmation(it.player)
+                },
+            ),
+        )
     }
 
-    private fun renderConfirmation(
+    private fun confirmationContent(
         player: Player,
-        inventory: Inventory,
         confirmation: BuilderBookPreviewConfirmation,
-    ) {
-        fillBackground(inventory)
+    ): PaperMenuContent {
         val remaining = confirmation.cooldownRemaining
         val totalMinutes = (remaining.seconds + 59L) / 60L
         val values = mapOf(
@@ -306,98 +273,118 @@ internal class BuilderBookPreviewPresentation(
         } else {
             emptyList()
         }
-        setConfirmationItem(
-            inventory,
-            SLOT_CONFIRM_OVERVIEW,
-            Material.BOOK,
-            "overview",
-            values,
-            locale,
-            noMaterialsLore,
-        )
-        if (confirmation.requiredMaterials.isNotEmpty()) {
-            val materialLore = buildList {
-                addAll(messages.renderLines("book.preview-menu.confirmation.materials.lore", locale, values))
-                confirmation.requiredMaterials.take(materialLineLimit).forEach { amount ->
-                    add(
-                        messages.render(
-                            "book.preview-menu.confirmation.material-line",
-                            locale,
-                            mapOf(
-                                "amount" to messages.literal(amount.amount),
-                                "material" to requiredMaterialLabel(amount),
+        val elements = buildMap {
+            put(OVERVIEW, confirmationItem(OVERVIEW, "overview", values, locale, noMaterialsLore, enabled = false))
+            if (confirmation.requiredMaterials.isNotEmpty()) {
+                val materialLore = buildList {
+                    addAll(messages.renderLines("book.preview-menu.confirmation.materials.lore", locale, values))
+                    confirmation.requiredMaterials.take(materialLineLimit).forEach { amount ->
+                        add(
+                            messages.render(
+                                "book.preview-menu.confirmation.material-line",
+                                locale,
+                                mapOf(
+                                    "amount" to messages.literal(amount.amount),
+                                    "material" to requiredMaterialLabel(amount),
+                                ),
                             ),
-                        ),
-                    )
+                        )
+                    }
+                    val hidden = confirmation.requiredMaterials.size - materialLineLimit
+                    if (hidden > 0) {
+                        add(
+                            messages.render(
+                                "book.preview-menu.confirmation.material-more",
+                                locale,
+                                mapOf("count" to messages.literal(hidden)),
+                            ),
+                        )
+                    }
                 }
-                val hidden = confirmation.requiredMaterials.size - materialLineLimit
-                if (hidden > 0) {
-                    add(
-                        messages.render(
-                            "book.preview-menu.confirmation.material-more",
-                            locale,
-                            mapOf("count" to messages.literal(hidden)),
+                put(
+                    MATERIALS,
+                    PaperMenuEntry(
+                        menuItems.create(
+                            menuConfiguration.template(CONFIRMATION_MENU, MATERIALS),
+                            messages.render("book.preview-menu.confirmation.materials.name", locale, values),
+                            materialLore,
                         ),
-                    )
-                }
+                        enabled = false,
+                    ),
+                )
             }
-            inventory.setItem(
-                SLOT_CONFIRM_MATERIALS,
-                item(
-                    Material.CHEST,
-                    messages.render("book.preview-menu.confirmation.materials.name", locale, values),
-                    materialLore,
+            put(BACK, confirmationItem(BACK, "back", values, locale) { backToPlacement(it.player) })
+            put(
+                START,
+                PaperMenuEntry(
+                    menuItems.create(
+                        menuConfiguration.templates.getValue(if (remaining.isZero) "start" else "blocked"),
+                        messages.render(
+                            "book.preview-menu.confirmation.${if (remaining.isZero) "start" else "blocked"}.name",
+                            locale,
+                            values,
+                        ),
+                        messages.renderLines(
+                            "book.preview-menu.confirmation.${if (remaining.isZero) "start" else "blocked"}.lore",
+                            locale,
+                            values,
+                        ),
+                    ),
+                    onClick = { start(it.player) },
                 ),
             )
+            put(CANCEL, confirmationItem(CANCEL, "cancel", values, locale) { cancel(it.player) })
         }
-        setConfirmationItem(inventory, SLOT_BACK, Material.ARROW, "back", values, locale)
-        setConfirmationItem(
-            inventory,
-            SLOT_START,
-            if (remaining.isZero) Material.LIME_CONCRETE else Material.BARRIER,
-            if (remaining.isZero) "start" else "blocked",
-            values,
-            locale,
+        return PaperMenuContent(
+            title = messages.render(
+                "book.preview-menu.confirmation.title",
+                locale,
+                mapOf("name" to messages.literal(BuildBookItems.compactTitle(confirmation.title, 20))),
+            ),
+            background = background(CONFIRMATION_MENU),
+            elements = elements,
         )
-        setConfirmationItem(inventory, SLOT_CANCEL_CONFIRMATION, Material.RED_CONCRETE, "cancel", values, locale)
     }
 
-    private fun setAction(
-        inventory: Inventory,
-        slot: Int,
-        material: Material,
+    private fun action(
+        menu: MenuId,
+        element: MenuElementId,
         key: String,
         values: Map<String, Component>,
         locale: String,
-    ) {
-        inventory.setItem(
-            slot,
-            item(
-                material,
-                messages.render("book.preview-menu.placement.$key.name", locale, values),
-                messages.renderLines("book.preview-menu.placement.$key.lore", locale, values),
-            ),
-        )
-    }
+        click: (PaperMenuClickContext) -> Unit,
+    ): PaperMenuEntry = PaperMenuEntry(
+        menuItems.create(
+            menuConfiguration.template(menu, element),
+            messages.render("book.preview-menu.placement.$key.name", locale, values),
+            messages.renderLines("book.preview-menu.placement.$key.lore", locale, values),
+        ),
+        onClick = click,
+    )
 
-    private fun setConfirmationItem(
-        inventory: Inventory,
-        slot: Int,
-        material: Material,
+    private fun confirmationItem(
+        element: MenuElementId,
         key: String,
         values: Map<String, Component>,
         locale: String,
         extraLore: List<Component> = emptyList(),
-    ) {
-        inventory.setItem(
-            slot,
-            item(
-                material,
-                messages.render("book.preview-menu.confirmation.$key.name", locale, values),
-                messages.renderLines("book.preview-menu.confirmation.$key.lore", locale, values) + extraLore,
-            ),
-        )
-    }
+        enabled: Boolean = true,
+        click: (PaperMenuClickContext) -> Unit = {},
+    ): PaperMenuEntry = PaperMenuEntry(
+        menuItems.create(
+            menuConfiguration.template(CONFIRMATION_MENU, element),
+            messages.render("book.preview-menu.confirmation.$key.name", locale, values),
+            messages.renderLines("book.preview-menu.confirmation.$key.lore", locale, values) + extraLore,
+        ),
+        enabled = enabled,
+        onClick = click,
+    )
+
+    private fun background(menu: MenuId) = menuItems.create(
+        menuConfiguration.template(requireNotNull(menuConfiguration.catalog.require(menu).backgroundTemplate)),
+        Component.empty(),
+        emptyList(),
+    )
 
     private fun requiredMaterialLabel(amount: BuilderItemAmount): Component {
         val prototype = BuilderItemCodec.decodePrototype(amount.itemBase64)
@@ -492,24 +479,18 @@ internal class BuilderBookPreviewPresentation(
         scene.entities.forEach(Entity::remove)
     }
 
-    private fun fillBackground(inventory: Inventory) {
-        val background = if (Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
-            runCatching { CustomStack.getInstance(backgroundItem)?.itemStack?.clone() }.getOrNull()
-        } else {
-            null
-        } ?: ItemStack(backgroundFallback)
-        BuildBookEditorPresentation.state(Component.empty(), emptyList()).applyTo(background)
-        repeat(inventory.size) { slot -> inventory.setItem(slot, background.clone()) }
-    }
-
-    private fun item(material: Material, name: Component, lore: List<Component>): ItemStack =
-        BuildBookEditorPresentation.item(material, name, lore)
-
     private fun locale(player: Player): String = player.locale().toLanguageTag()
 
-    private fun currentMenu(player: Player): MenuHolder? = runCatching {
-        player.openInventory.topInventory
-    }.getOrNull()?.holder as? MenuHolder
+    private fun loadMenuConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
+        ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),
+        "paper-menus.preview.layouts",
+        "paper-menus.preview.templates",
+        mapOf(
+            PLACEMENT_MENU to PLACEMENT_CONTRACT,
+            CONFIRMATION_MENU to CONFIRMATION_CONTRACT,
+        ),
+        requiredTemplates = setOf("blocked"),
+    )
 
     override fun close() {
         if (closed) return
@@ -518,27 +499,31 @@ internal class BuilderBookPreviewPresentation(
         panels.keys.toList().forEach(::removePanel)
         snapshots.clear()
         placementSites.clear()
-        Bukkit.getOnlinePlayers().forEach { player ->
-            val holder = currentMenu(player)
-            if (holder?.owner === this) player.closeInventory()
-        }
+        menus.close()
     }
 
     private companion object {
-        const val MENU_SIZE = 45
-        const val SLOT_UP = 11
-        const val SLOT_LEFT = 19
-        const val SLOT_ROTATE = 20
-        const val SLOT_RIGHT = 21
-        const val SLOT_CONTINUE = 25
-        const val SLOT_DOWN = 29
-        const val SLOT_CANCEL = 34
-        const val SLOT_MIRROR = 37
-        const val SLOT_RESET = 39
-        const val SLOT_CONFIRM_OVERVIEW = 19
-        const val SLOT_CONFIRM_MATERIALS = 21
-        const val SLOT_BACK = 29
-        const val SLOT_START = 25
-        const val SLOT_CANCEL_CONFIRMATION = 34
+        val PLACEMENT_MENU = MenuId.of("book-preview-placement")
+        val CONFIRMATION_MENU = MenuId.of("book-preview-confirmation")
+        val UP = MenuElementId.of("up")
+        val LEFT = MenuElementId.of("left")
+        val ROTATE = MenuElementId.of("rotate")
+        val RIGHT = MenuElementId.of("right")
+        val CONTINUE = MenuElementId.of("continue")
+        val DOWN = MenuElementId.of("down")
+        val CANCEL = MenuElementId.of("cancel")
+        val MIRROR = MenuElementId.of("mirror")
+        val RESET = MenuElementId.of("reset")
+        val OVERVIEW = MenuElementId.of("overview")
+        val MATERIALS = MenuElementId.of("materials")
+        val BACK = MenuElementId.of("back")
+        val START = MenuElementId.of("start")
+        val PLACEMENT_CONTRACT = MenuContract(
+            requiredElements = setOf(UP, LEFT, ROTATE, RIGHT, CONTINUE, DOWN, CANCEL, MIRROR, RESET),
+        )
+        val CONFIRMATION_CONTRACT = MenuContract(
+            requiredElements = setOf(OVERVIEW, START, BACK, CANCEL),
+            optionalElements = setOf(MATERIALS),
+        )
     }
 }

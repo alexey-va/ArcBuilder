@@ -7,20 +7,25 @@ import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
-import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
-import org.bukkit.event.inventory.InventoryClickEvent
-import org.bukkit.event.inventory.InventoryCloseEvent
-import org.bukkit.event.inventory.InventoryDragEvent
 import org.bukkit.event.player.PlayerQuitEvent
-import org.bukkit.inventory.Inventory
-import org.bukkit.inventory.InventoryHolder
-import org.bukkit.inventory.ItemStack
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.autobuild.BuildBookItems
-import ru.arc.autobuild.gui.BuildBookEditorPresentation
+import ru.arc.config.ConfigManager
+import ru.arc.core.BukkitTaskScheduler
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.menu.MenuContract
+import ru.arc.menu.MenuElementId
+import ru.arc.menu.MenuId
+import ru.arc.paper.menu.PaperMenuConfiguration
+import ru.arc.paper.menu.PaperMenuConfigurationParser
+import ru.arc.paper.menu.PaperMenuContent
+import ru.arc.paper.menu.PaperMenuEntry
+import ru.arc.paper.menu.PaperMenuExternalItemResolver
+import ru.arc.paper.menu.PaperMenuExternalItemResult
+import ru.arc.paper.menu.PaperMenuItemFactory
+import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.text.LocalizedMiniMessage
 import java.util.Locale
 import java.util.UUID
@@ -61,7 +66,7 @@ internal fun BuilderToolsConfig.constructionMenuSettings() = BuilderConstruction
     maxResourceLines = constructionSiteMaxMaterialLines,
 )
 
-/** Owns live construction-menu sessions, rendering, click isolation and periodic refresh. */
+/** Owns live construction-menu sessions, semantic actions and periodic refresh. */
 internal class BuilderConstructionMenuManager(
     private val plugin: JavaPlugin,
     private val settings: BuilderConstructionMenuSettings,
@@ -71,15 +76,19 @@ internal class BuilderConstructionMenuManager(
     private val canControl: (Player, BuilderConstructionProjectRecord) -> Boolean,
     private val requestPaused: (Player, UUID, Boolean) -> Boolean,
 ) : Listener, AutoCloseable {
-    private class MenuHolder(
-        val manager: BuilderConstructionMenuManager,
-        val viewerId: UUID,
-        val projectId: UUID,
-    ) : InventoryHolder {
-        lateinit var backingInventory: Inventory
-        override fun getInventory(): Inventory = backingInventory
-    }
-
+    private val configuration = loadConfiguration()
+    private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), configuration)
+    private val items = PaperMenuItemFactory(
+        externalItems = PaperMenuExternalItemResolver { id ->
+            if (id.namespace != "itemsadder" || !Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
+                PaperMenuExternalItemResult.Missing
+            } else {
+                CustomStack.getInstance(id.key.replaceFirst('/', ':'))?.itemStack
+                    ?.let(PaperMenuExternalItemResult::Resolved)
+                    ?: PaperMenuExternalItemResult.Missing
+            }
+        },
+    )
     private val viewers = mutableMapOf<UUID, UUID>()
     private var closed = false
 
@@ -93,21 +102,7 @@ internal class BuilderConstructionMenuManager(
     fun open(player: Player, project: BuilderConstructionProjectRecord) {
         if (closed || project.terminal) return
         val current = projectLookup(project.projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal) ?: return
-        val holder = MenuHolder(this, player.uniqueId, current.projectId)
-        val inventory = Bukkit.createInventory(
-            holder,
-            settings.rows * 9,
-            messages.render(
-                "construction.site.menu.title",
-                locale(player),
-                mapOf("name" to projectName(current, locale(player))),
-            ),
-        )
-        holder.backingInventory = inventory
-        render(player, inventory, current)
-        player.openInventory(inventory)
-        // Opening a new inventory closes the previous one synchronously. Register the
-        // new session afterwards so that its close event cannot remove this mapping.
+        menus.open(player, MENU_ID) { content(player, current.projectId) }
         viewers[player.uniqueId] = current.projectId
     }
 
@@ -115,20 +110,95 @@ internal class BuilderConstructionMenuManager(
         viewers.filterValues { it == projectId }.keys.toList().forEach(::refreshViewer)
     }
 
-    @EventHandler(priority = EventPriority.LOWEST)
-    fun onClick(event: InventoryClickEvent) {
-        val holder = event.view.topInventory.holder as? MenuHolder ?: return
-        if (holder.manager !== this) return
-        event.isCancelled = true
-        if (event.whoClicked.uniqueId != holder.viewerId || event.rawSlot != settings.controlSlot) return
-        val player = event.whoClicked as? Player ?: return
-        val project = projectLookup(holder.projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)
+    @EventHandler
+    fun onQuit(event: PlayerQuitEvent) {
+        viewers.remove(event.player.uniqueId)
+    }
+
+    private fun content(player: Player, projectId: UUID): PaperMenuContent {
+        val project = requireNotNull(projectLookup(projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)) {
+            "Construction project '$projectId' is no longer available"
+        }
+        val values = values(player, project)
+        val layout = configuration.catalog.require(MENU_ID)
+        return PaperMenuContent(
+            title = messages.render(
+                "construction.site.menu.title",
+                locale(player),
+                mapOf("name" to projectName(project, locale(player))),
+            ),
+            background = items.create(
+                configuration.template(requireNotNull(layout.backgroundTemplate)),
+                Component.empty(),
+                emptyList(),
+            ),
+            elements = mapOf(
+                OVERVIEW to entry(
+                    OVERVIEW,
+                    "overview",
+                    messages.render("construction.site.menu.overview.name", locale(player), values),
+                    messages.renderLines("construction.site.menu.overview.lore", locale(player), values),
+                    enabled = false,
+                ),
+                PROGRESS to entry(
+                    PROGRESS,
+                    "progress",
+                    messages.render("construction.site.menu.progress.name", locale(player), values),
+                    messages.renderLines("construction.site.menu.progress.lore", locale(player), values),
+                    enabled = false,
+                ),
+                RESOURCES to entry(
+                    RESOURCES,
+                    "resources",
+                    messages.render("construction.site.menu.resources.name", locale(player), values),
+                    resourceLore(player, project, values),
+                    enabled = false,
+                ),
+                CONTROL to controlEntry(player, project, values),
+            ),
+        )
+    }
+
+    private fun controlEntry(
+        player: Player,
+        project: BuilderConstructionProjectRecord,
+        values: Map<String, Component>,
+    ): PaperMenuEntry {
+        val (path, template) = when {
+            !canControl(player, project) -> "readonly" to "unavailable"
+            project.state == BuilderConstructionProjectState.PAUSED -> "resume" to "resume"
+            BuilderConstructionPausePolicy.canRequestPause(project.state) -> "pause" to "pause"
+            else -> "unavailable" to "unavailable"
+        }
+        return entry(
+            CONTROL,
+            template,
+            messages.render("construction.site.menu.control.$path.name", locale(player), values),
+            messages.renderLines("construction.site.menu.control.$path.lore", locale(player), values),
+        ) { click -> toggle(click.player, project.projectId) }
+    }
+
+    private fun entry(
+        element: MenuElementId,
+        template: String,
+        name: Component,
+        lore: List<Component>,
+        enabled: Boolean = true,
+        click: (ru.arc.paper.menu.PaperMenuClickContext) -> Unit = {},
+    ): PaperMenuEntry = PaperMenuEntry(
+        item = items.create(configuration.templates.getValue(template), name, lore),
+        enabled = enabled,
+        onClick = click,
+    )
+
+    private fun toggle(player: Player, projectId: UUID) {
+        val project = projectLookup(projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)
         if (project == null) {
             player.closeInventory()
             return
         }
         if (!canControl(player, project)) {
-            render(player, event.view.topInventory, project)
+            refreshViewer(player.uniqueId)
             return
         }
         val pause = when {
@@ -139,29 +209,11 @@ internal class BuilderConstructionMenuManager(
         if (requestPaused(player, project.projectId, pause)) {
             player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.7f, if (pause) 0.85f else 1.2f)
         }
-        refreshViewer(holder.viewerId)
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST)
-    fun onDrag(event: InventoryDragEvent) {
-        val holder = event.view.topInventory.holder as? MenuHolder ?: return
-        if (holder.manager === this) event.isCancelled = true
-    }
-
-    @EventHandler
-    fun onClose(event: InventoryCloseEvent) {
-        val holder = event.inventory.holder as? MenuHolder ?: return
-        if (holder.manager === this) viewers.remove(holder.viewerId, holder.projectId)
-    }
-
-    @EventHandler
-    fun onQuit(event: PlayerQuitEvent) {
-        viewers.remove(event.player.uniqueId)
+        refreshViewer(player.uniqueId)
     }
 
     private fun refreshViewers() {
-        if (closed) return
-        viewers.keys.toList().forEach(::refreshViewer)
+        if (!closed) viewers.keys.toList().forEach(::refreshViewer)
     }
 
     private fun refreshViewer(viewerId: UUID) {
@@ -171,84 +223,18 @@ internal class BuilderConstructionMenuManager(
             viewers.remove(viewerId)
             return
         }
-        val holder = player.openInventory.topInventory.holder as? MenuHolder
-        if (holder == null || holder.manager !== this || holder.projectId != projectId) {
+        val session = menus.session(player)
+        if (session == null || session.menuId != MENU_ID) {
             viewers.remove(viewerId)
             return
         }
         val project = projectLookup(projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)
         if (project == null) {
-            player.closeInventory()
+            session.close()
+            viewers.remove(viewerId)
             return
         }
-        render(player, holder.backingInventory, project)
-    }
-
-    private fun render(
-        player: Player,
-        inventory: Inventory,
-        project: BuilderConstructionProjectRecord,
-    ) {
-        val background = background()
-        repeat(inventory.size) { slot -> inventory.setItem(slot, background.clone()) }
-        val values = values(player, project)
-        inventory.setItem(
-            settings.overviewSlot,
-            item(
-                settings.overviewMaterial,
-                messages.render("construction.site.menu.overview.name", locale(player), values),
-                messages.renderLines("construction.site.menu.overview.lore", locale(player), values),
-            ),
-        )
-        inventory.setItem(
-            settings.progressSlot,
-            item(
-                settings.progressMaterial,
-                messages.render("construction.site.menu.progress.name", locale(player), values),
-                messages.renderLines("construction.site.menu.progress.lore", locale(player), values),
-            ),
-        )
-        inventory.setItem(
-            settings.resourcesSlot,
-            item(
-                settings.resourcesMaterial,
-                messages.render("construction.site.menu.resources.name", locale(player), values),
-                resourceLore(player, project, values),
-            ),
-        )
-        inventory.setItem(settings.controlSlot, controlItem(player, project, values))
-    }
-
-    private fun controlItem(
-        player: Player,
-        project: BuilderConstructionProjectRecord,
-        values: Map<String, Component>,
-    ): ItemStack {
-        val path: String
-        val material: Material
-        when {
-            !canControl(player, project) -> {
-                path = "readonly"
-                material = settings.unavailableMaterial
-            }
-            project.state == BuilderConstructionProjectState.PAUSED -> {
-                path = "resume"
-                material = settings.resumeMaterial
-            }
-            BuilderConstructionPausePolicy.canRequestPause(project.state) -> {
-                path = "pause"
-                material = settings.pauseMaterial
-            }
-            else -> {
-                path = "unavailable"
-                material = settings.unavailableMaterial
-            }
-        }
-        return item(
-            material,
-            messages.render("construction.site.menu.control.$path.name", locale(player), values),
-            messages.renderLines("construction.site.menu.control.$path.lore", locale(player), values),
-        )
+        session.refresh()
     }
 
     private fun resourceLore(
@@ -325,19 +311,6 @@ internal class BuilderConstructionMenuManager(
             ?: messages.render("construction.site.unknown-name", locale)
     }
 
-    private fun background(): ItemStack {
-        val item = if (Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
-            runCatching { CustomStack.getInstance(settings.backgroundItem)?.itemStack?.clone() }.getOrNull()
-        } else {
-            null
-        } ?: ItemStack(settings.backgroundFallback)
-        BuildBookEditorPresentation.state(Component.empty(), emptyList()).applyTo(item)
-        return item
-    }
-
-    private fun item(material: Material, name: Component, lore: List<Component>): ItemStack =
-        BuildBookEditorPresentation.item(material, name, lore)
-
     private fun aggregateConstructionAmounts(items: List<BuilderItemAmount>): List<BuilderItemAmount> = items
         .groupBy { it.itemBase64 to it.materialKey }
         .values
@@ -346,14 +319,28 @@ internal class BuilderConstructionMenuManager(
 
     private fun locale(player: Player): String = player.locale().toLanguageTag()
 
+    private fun loadConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
+        ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),
+        "construction.site.menu.layouts",
+        "construction.site.menu.templates",
+        mapOf(MENU_ID to CONTRACT),
+        requiredTemplates = setOf("resume", "unavailable"),
+    )
+
     override fun close() {
         if (closed) return
         closed = true
         HandlerList.unregisterAll(this)
-        viewers.keys.mapNotNull(Bukkit::getPlayer).forEach { player ->
-            val holder = player.openInventory.topInventory.holder as? MenuHolder
-            if (holder?.manager === this) player.closeInventory()
-        }
+        menus.close()
         viewers.clear()
+    }
+
+    private companion object {
+        val MENU_ID = MenuId.of("construction-site")
+        val OVERVIEW = MenuElementId.of("overview")
+        val PROGRESS = MenuElementId.of("progress")
+        val RESOURCES = MenuElementId.of("resources")
+        val CONTROL = MenuElementId.of("control")
+        val CONTRACT = MenuContract(requiredElements = setOf(OVERVIEW, PROGRESS, RESOURCES, CONTROL))
     }
 }

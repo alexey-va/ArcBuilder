@@ -73,6 +73,27 @@ construction:
         pause: REDSTONE_TORCH
         resume: LIME_DYE
         unavailable: GRAY_DYE
+      layouts:
+        construction-site:
+          schema-version: 1
+          rows: 3
+          background: { template: background }
+          elements:
+            overview: { slot: 10, kind: decoration, template: overview }
+            progress: { slot: 12, kind: decoration, template: progress }
+            resources: { slot: 14, kind: decoration, template: resources }
+            control: { slot: 16, template: pause }
+      templates:
+        background:
+          external-item: itemsadder:arc/background
+          fallback-material: GRAY_STAINED_GLASS_PANE
+          hide-tooltip: true
+        overview: { material: BOOK }
+        progress: { material: CLOCK }
+        resources: { material: CHEST }
+        pause: { material: REDSTONE_TORCH }
+        resume: { material: LIME_DYE }
+        unavailable: { material: GRAY_DYE }
   effects:
     # Cosmetic feedback is sampled by completed block number, so large builds stay quiet enough.
     enabled: true
@@ -85,6 +106,49 @@ construction:
       enabled: true
       count: 3
       spread: 0.2
+
+paper-menus:
+  preview:
+    layouts:
+      book-preview-placement:
+        schema-version: 1
+        rows: 5
+        background: { template: background }
+        elements:
+          up: { slot: 11, template: arrow }
+          left: { slot: 19, template: arrow }
+          rotate: { slot: 20, template: rotate }
+          right: { slot: 21, template: arrow }
+          continue: { slot: 25, template: continue }
+          down: { slot: 29, template: arrow }
+          cancel: { slot: 34, template: cancel }
+          mirror: { slot: 37, template: mirror }
+          reset: { slot: 39, template: reset }
+      book-preview-confirmation:
+        schema-version: 1
+        rows: 5
+        background: { template: background }
+        elements:
+          overview: { slot: 19, kind: decoration, template: overview }
+          materials: { slot: 21, kind: decoration, template: materials }
+          start: { slot: 25, template: start }
+          back: { slot: 29, template: arrow }
+          cancel: { slot: 34, template: cancel }
+    templates:
+      background:
+        external-item: itemsadder:arc/background
+        fallback-material: GRAY_STAINED_GLASS_PANE
+        hide-tooltip: true
+      arrow: { material: ARROW }
+      rotate: { material: COMPASS }
+      mirror: { material: AMETHYST_SHARD }
+      reset: { material: RECOVERY_COMPASS }
+      cancel: { material: RED_CONCRETE }
+      continue: { material: LIME_CONCRETE }
+      overview: { material: BOOK }
+      materials: { material: CHEST }
+      start: { material: LIME_CONCRETE }
+      blocked: { material: BARRIER }
 
 runtime:
   # Refreshes the in-memory builder contribution; lifecycle health logging remains platform-owned.

@@ -57,12 +57,12 @@ class BuilderConstructionMenuMockBukkitTest : FunSpec({
 
                 fixture.click(owner, 16).isCancelled.shouldBeTrue()
                 requests shouldContain true
-                inventory.getItem(16)?.type shouldBe Material.LIME_DYE
-                plain(inventory.getItem(16)!!.itemMeta.displayName()!!) shouldContain "Продолжить"
+                owner.openInventory.topInventory.getItem(16)?.type shouldBe Material.LIME_DYE
+                plain(owner.openInventory.topInventory.getItem(16)!!.itemMeta.displayName()!!) shouldContain "Продолжить"
 
                 fixture.click(owner, 16).isCancelled.shouldBeTrue()
                 requests shouldBe listOf(true, false)
-                inventory.getItem(16)?.type shouldBe Material.REDSTONE_TORCH
+                owner.openInventory.topInventory.getItem(16)?.type shouldBe Material.REDSTONE_TORCH
             }
         }
     }
@@ -146,7 +146,7 @@ class BuilderConstructionMenuMockBukkitTest : FunSpec({
                 project = checkNotNull(project).paused(checkNotNull(project).updatedAtMillis + 1)
                 fixture.paper.performTicks(10)
 
-                owner.openInventory.topInventory shouldBe original
+                owner.openInventory.topInventory.size shouldBe original.size
                 owner.openInventory.topInventory.getItem(16)?.type shouldBe Material.LIME_DYE
                 checkNotNull(project).state shouldBe PAUSED
 

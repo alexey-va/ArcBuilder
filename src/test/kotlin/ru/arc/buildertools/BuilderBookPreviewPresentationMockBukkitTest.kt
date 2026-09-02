@@ -35,7 +35,12 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             BuilderToolsModule.shutdown()
             try {
-                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val moduleConfig = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")
+                val config = BuilderToolsConfig(moduleConfig).validated()
+                moduleConfig.setInt(
+                    "paper-menus.preview.layouts.book-preview-placement.elements.left.slot",
+                    18,
+                )
                 val world = paper.addSimpleWorld("book-preview-menu")
                 val player = paper.addPlayer("PreviewOwner").also {
                     it.gameMode = GameMode.CREATIVE
@@ -75,16 +80,15 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     panelBackgroundColor = Color.fromARGB(0xB2, 0x1C, 0x23, 0x28),
                     panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
                     viewRange = 64.0,
-                    backgroundItem = "arc:background",
-                    backgroundFallback = Material.GRAY_STAINED_GLASS_PANE,
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     val placement = player.openInventory.topInventory
 
                     placement.size shouldBe 45
-                    placement.getItem(19)?.type shouldBe Material.ARROW
-                    plain(placement.getItem(19)!!.itemMeta.displayName()!!) shouldContain "Влево"
-                    click(paper, player, 19).isCancelled.shouldBeTrue()
+                    placement.getItem(18)?.type shouldBe Material.ARROW
+                    placement.getItem(19)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
+                    plain(placement.getItem(18)!!.itemMeta.displayName()!!) shouldContain "Влево"
+                    click(paper, player, 18).isCancelled.shouldBeTrue()
                     host.adjustments shouldBe listOf(BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.LEFT))
 
                     placement.getItem(20)?.type shouldBe Material.COMPASS

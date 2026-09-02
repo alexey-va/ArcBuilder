@@ -9,6 +9,7 @@ import org.bukkit.inventory.ItemStack
 import ru.arc.ARC
 import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.BuildBookSettings
+import ru.arc.autobuild.gui.BuildBookEditorGui
 import ru.arc.config.ConfigManager
 import ru.arc.core.PluginModule
 import ru.arc.observability.RuntimeHealthContribution
@@ -57,6 +58,7 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
     }
 
     override fun shutdown() {
+        BuildBookEditorGui.close()
         reloadService?.close() ?: runtime?.close()
         BuildingManager.clearPreviews()
         reloadService = null
