@@ -40,6 +40,7 @@ internal enum class BuilderRootCommand(
     CANCEL("cancel", safeDuringOperation = true),
     UNDO("undo"),
     STATUS("status", safeDuringOperation = true),
+    PROJECTS("projects", safeDuringOperation = true),
     ;
 
     companion object {

@@ -29,6 +29,7 @@ class BuilderToolsExperienceTest : FunSpec({
             "cancel",
             "undo",
             "status",
+            "projects",
         )
         BuilderRootCommand.parse("WAND") shouldBe BuilderRootCommand.WAND
         BuilderRootCommand.parse("pos1") shouldBe null
@@ -37,11 +38,21 @@ class BuilderToolsExperienceTest : FunSpec({
         BuilderRootCommand.parse(null) shouldBe null
     }
 
-    test("only status and canonical cancel remain available during an operation") {
+    test("status projects and canonical cancel remain available during an operation") {
         BuilderRootCommand.entries.filter(BuilderRootCommand::safeDuringOperation) shouldBe listOf(
             BuilderRootCommand.CANCEL,
             BuilderRootCommand.STATUS,
+            BuilderRootCommand.PROJECTS,
         )
+    }
+
+    test("busy feedback points players to their unfinished construction projects") {
+        val config = Config(Files.createTempDirectory("arc-builder-busy-projects-"), "modules/builder-tools.yml")
+
+        listOf("ru", "en").forEach { locale ->
+            config.string("locales.$locale.errors.busy") shouldContain
+                "<click:run_command:'/builder projects'>"
+        }
     }
 
     test("operation progress is shown immediately, periodically, and on completion") {

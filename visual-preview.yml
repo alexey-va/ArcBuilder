@@ -19,6 +19,9 @@ custom-items:
   arc:builder_book_active:
     material: BOOK
     model: assets/arc/models/builder/book_active.json
+  arc:builder_book_ready_01:
+    material: BOOK
+    model: assets/arc/models/item/ia_auto/builder_book_ready_01.json
 
 sources:
   builder:
@@ -98,6 +101,8 @@ placeholders:
   value: '-5'
   volume: '1 728'
   weight: '40%'
+  world: survival
+  teleport: '<#92bed8>ЛКМ — телепортироваться рядом'
   x: '-1266'
   y: '85'
   z: '-506'
@@ -166,7 +171,7 @@ surfaces:
         price: после расчёта
     - id: active-build-book
       material: BOOK
-      itemsadder: arc:builder_book_active
+      itemsadder: arc:builder_book_ready_01
       name: autobuild:build-book.display-name
       lore:
         - autobuild:build-book.lore
@@ -407,6 +412,40 @@ surfaces:
           material: GRAY_DYE
           name: builder:construction.site.menu.control.unavailable.name
           lore: builder:construction.site.menu.control.unavailable.lore
+    - id: construction-projects
+      title: builder:construction.projects.menu.title
+      rows: 6
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      items:
+        - slot: 10
+          material: BOOK
+          name: builder:construction.projects.menu.card.name
+          lore: builder:construction.projects.menu.card.lore
+          placeholders:
+            name: Дом у северной гавани
+            state: ждёт материалы
+            count: '837'
+            total: '1 248'
+            percent: '67'
+            world: survival
+            x: '-1266'
+            y: '85'
+            z: '-506'
+            reason: не хватает материалов
+            teleport: '<#92bed8>ЛКМ — телепортироваться рядом'
+        - slot: 45
+          material: ARROW
+          name: builder:construction.projects.menu.previous.name
+          lore: builder:construction.projects.menu.previous.lore
+        - slot: 49
+          material: RED_CONCRETE
+          name: builder:construction.projects.menu.close.name
+          lore: builder:construction.projects.menu.close.lore
+        - slot: 53
+          material: ARROW
+          name: builder:construction.projects.menu.next.name
+          lore: builder:construction.projects.menu.next.lore
     - id: build-confirmation
       title: autobuild:confirm-gui.title
       rows: 3

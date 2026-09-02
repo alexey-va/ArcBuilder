@@ -155,6 +155,39 @@ class BuildBookTest : TestBase() {
     }
 
     @Test
+    fun `active book texture is stable per instance and distributed across configured variants`() {
+        val variants = (12160..12179).toList()
+        val base = BuildBookData(
+            buildingId = "player-book.schem",
+            title = "Дом",
+            playerCreated = true,
+            creatorId = UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            creatorName = "Builder",
+            blueprintId = UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            instanceId = UUID.fromString("00000000-0000-0000-0000-000000000003"),
+            instanceGeneration = 1,
+            issuePriceMinor = 0,
+            contentSha256 = "a".repeat(64),
+            schematicSha256 = "b".repeat(64),
+        ).validated()
+
+        val selected = BuildBookVariantModels.select(base, variants)
+        assertEquals(selected, BuildBookVariantModels.select(base, variants))
+        assertTrue(selected in variants)
+        assertTrue(
+            (1L..40L)
+                .map { suffix ->
+                    BuildBookVariantModels.select(
+                        base.copy(instanceId = UUID(0L, suffix)).validated(),
+                        variants,
+                    )
+                }
+                .toSet()
+                .size >= 16,
+        )
+    }
+
+    @Test
     fun `player material requirements use a canonical bounded PDC representation`() {
         val encoded = BuildBookMaterialRequirements.encode(
             listOf(

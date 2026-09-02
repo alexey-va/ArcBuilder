@@ -40,6 +40,7 @@ import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.SystemBuildBookCatalog
 import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.whenCompleteSync
 import ru.arc.hooks.HookRegistry
 import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
@@ -56,6 +57,7 @@ import java.time.Duration
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
@@ -295,6 +297,7 @@ internal class BuilderToolsRuntime(
     private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionPauseRequests = BuilderConstructionPauseRequests()
     private val constructionMenus: BuilderConstructionMenuManager
+    private val constructionProjectsMenu: BuilderConstructionProjectsMenuManager
     private val constructionSiteDisplays: BuilderConstructionSiteDisplayManager
     private val bookPreviewPresentation: BuilderBookPreviewPresentation
     private val constructionWrites = mutableSetOf<UUID>()
@@ -483,6 +486,7 @@ internal class BuilderToolsRuntime(
         var initializedBooks: BuilderBookLifecycle? = null
         var initializedPlayerRecoveries: BuilderPlayerRecoveryCoordinator? = null
         var initializedConstructionMenus: BuilderConstructionMenuManager? = null
+        var initializedConstructionProjectsMenu: BuilderConstructionProjectsMenuManager? = null
         var initializedConstructionSiteDisplays: BuilderConstructionSiteDisplayManager? = null
         var initializedBookPreviewPresentation: BuilderBookPreviewPresentation? = null
         try {
@@ -495,6 +499,14 @@ internal class BuilderToolsRuntime(
                 canControl = ::canControlConstruction,
                 requestPaused = ::requestConstructionPaused,
             ).also { initializedConstructionMenus = it }
+            constructionProjectsMenu = BuilderConstructionProjectsMenuManager(
+                plugin = plugin,
+                messages = messages,
+                taskScope = taskScope,
+                projects = { playerId -> constructionProjects.values.filter { it.playerId == playerId } },
+                onTeleport = ::teleportToConstruction,
+                onInspect = constructionMenus::open,
+            ).also { initializedConstructionProjectsMenu = it }
             constructionSiteDisplays = BuilderConstructionSiteDisplayManager(
                 plugin = plugin,
                 settings = config.constructionSiteDisplaySettings(),
@@ -757,6 +769,7 @@ internal class BuilderToolsRuntime(
             initializedPreviews?.close()
             initializedConstructionSiteDisplays?.close()
             initializedBookPreviewPresentation?.close()
+            initializedConstructionProjectsMenu?.close()
             initializedConstructionMenus?.close()
             taskScope.close()
             operationLocks.close()
@@ -831,8 +844,14 @@ internal class BuilderToolsRuntime(
     }
 
     private fun handleBuilder(player: Player, args: Array<out String>) {
+        val root = BuilderRootCommand.parse(args.firstOrNull()) ?: BuilderRootCommand.HELP
+        if (root == BuilderRootCommand.PROJECTS) {
+            if (!hasUsePermission(player)) throw BuilderUserFailure("errors.no-permission")
+            constructionProjectsMenu.open(player)
+            return
+        }
         ensureAvailable(player)
-        when (BuilderRootCommand.parse(args.firstOrNull()) ?: BuilderRootCommand.HELP) {
+        when (root) {
             BuilderRootCommand.HELP -> messages.renderLines("help", locale(player)).forEach { sendPlayerMessage(player, it) }
             BuilderRootCommand.WAND -> giveWand(player)
             BuilderRootCommand.CLEAR -> clearSelection(player)
@@ -882,6 +901,7 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.CANCEL -> cancelPlan(player)
             BuilderRootCommand.UNDO -> prepareUndo(player)
             BuilderRootCommand.STATUS -> showStatus(player)
+            BuilderRootCommand.PROJECTS -> error("Projects command is handled before operational context checks")
         }
     }
 
@@ -2357,6 +2377,56 @@ internal class BuilderToolsRuntime(
         return true
     }
 
+    private fun teleportToConstruction(player: Player, requested: BuilderConstructionProjectRecord) {
+        val project = constructionProjects[requested.projectId]
+            ?.takeIf { it.playerId == player.uniqueId && !it.terminal }
+            ?: run {
+                send(player, "construction.projects.teleport.missing")
+                return
+            }
+        val world = Bukkit.getWorld(BuilderConstructionTeleport.worldId(project)) ?: run {
+            send(player, "construction.projects.teleport.world-unavailable")
+            return
+        }
+        val chunkLoads = BuilderConstructionTeleport.candidateColumns(project)
+            .map { column -> (column.x shr 4) to (column.z shr 4) }
+            .distinct()
+            .map { (x, z) -> world.getChunkAtAsync(x, z, true) }
+        CompletableFuture.allOf(*chunkLoads.toTypedArray()).whenCompleteSync(taskScope) { _, loadFailure ->
+            if (!player.isOnline) return@whenCompleteSync
+            val current = constructionProjects[project.projectId]
+                ?.takeIf { it.playerId == player.uniqueId && !it.terminal }
+            if (loadFailure != null || current == null) {
+                send(
+                    player,
+                    if (current == null) "construction.projects.teleport.missing" else "construction.projects.teleport.failed",
+                )
+                return@whenCompleteSync
+            }
+            val destination = BuilderConstructionTeleport.findSafeDestination(world, current)
+            if (destination == null) {
+                send(player, "construction.projects.teleport.unsafe")
+                return@whenCompleteSync
+            }
+            player.teleportAsync(destination).whenCompleteSync(taskScope) { success, teleportFailure ->
+                if (!player.isOnline) return@whenCompleteSync
+                if (teleportFailure != null || success != true) {
+                    send(player, "construction.projects.teleport.failed")
+                } else {
+                    send(
+                        player,
+                        "construction.projects.teleport.success",
+                        mapOf(
+                            "x" to messages.literal(destination.blockX),
+                            "y" to messages.literal(destination.blockY),
+                            "z" to messages.literal(destination.blockZ),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
     private fun ensureMutable(player: Player, block: Block, placing: Material? = null) {
         ensureInRangeAndLoaded(player, block)
         ensureProtected(player, block, placing)
@@ -2887,6 +2957,7 @@ internal class BuilderToolsRuntime(
         playerRecoveries.close()
         books.close()
         constructionSiteDisplays.close()
+        constructionProjectsMenu.close()
         constructionMenus.close()
         constructionPauseRequests.clear()
         bookPreviewPresentation.close()

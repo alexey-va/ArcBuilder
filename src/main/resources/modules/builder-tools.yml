@@ -94,6 +94,32 @@ construction:
         pause: { material: REDSTONE_TORCH }
         resume: { material: LIME_DYE }
         unavailable: { material: GRAY_DYE }
+  projects-menu:
+    layouts:
+      construction-projects:
+        schema-version: 1
+        rows: 6
+        background: { template: background }
+        elements:
+          previous: { slot: 45, template: previous }
+          close: { slot: 49, template: close }
+          next: { slot: 53, template: next }
+        regions:
+          projects: { slots: ['10-16', '19-25', '28-34'] }
+        pagination:
+          region: projects
+          previous: previous
+          next: next
+    templates:
+      background:
+        external-item: itemsadder:arc/background
+        fallback-material: GRAY_STAINED_GLASS_PANE
+        hide-tooltip: true
+      project: { material: BOOK }
+      empty: { material: BARRIER }
+      previous: { material: ARROW }
+      close: { material: RED_CONCRETE }
+      next: { material: ARROW }
   effects:
     # Cosmetic feedback is sampled by completed block number, so large builds stay quiet enough.
     enabled: true
@@ -256,6 +282,7 @@ locales:
       - "<#8c8c8c>   <#d48763>/builder confirm <#e6fff3>— применить показанный <hover:show_text:'Точный список изменений, ожидающий вашего подтверждения.'>план</hover>"
       - "<#8c8c8c>   <#d48763>/builder confirm buy <#e6fff3>— докупить недостающее"
       - "<#8c8c8c>   <#d48763>/builder undo <#e6fff3>— подготовить отмену"
+      - "<#8c8c8c>   <click:run_command:'/builder projects'><#d48763>/builder projects</click> <#e6fff3>— мои текущие стройки"
     errors:
       disabled: "<prefix><#ff9f0f>Строительные инструменты — только на survival."
       player-only: "<prefix><#c42323>Команда доступна только игрокам."
@@ -298,7 +325,10 @@ locales:
 
         <prefix><#ff9f0f>Здесь нечего изменять.
         <#8c8c8c>   <#e6fff3>Проверьте выделение, материал и текущие блоки.
-      busy: "<prefix><#ff9f0f>Другая операция здесь ещё не завершена."
+      busy: |-
+
+        <prefix><#ff9f0f>Другая операция здесь ещё не завершена.
+        <#8c8c8c>   <click:run_command:'/builder projects'><hover:show_text:'Открыть ваши незавершённые стройки.'><#92bed8>[Мои стройки]</hover></click>
       expired: |-
 
         <prefix><#ff9f0f>Предпросмотр устарел.
@@ -929,6 +959,53 @@ locales:
         <#8c8c8c>   <#e6fff3>Нужна безопасная проверка администратора.
         <#8c8c8c>   <#e6fff3>Проект не продолжает работу вслепую.
       status: "<prefix><#e6fff3>Стройка: <#d48763><state> <#8c8c8c>— <hover:show_text:'Уже обработанные блоки и полный размер проекта.'><#e6fff3><count>/<total> блоков</hover>."
+      projects:
+        menu:
+          title: "<#1c2328>Мои стройки"
+          world-unavailable: "мир недоступен"
+          card:
+            name: "<#ffb142><bold><name>"
+            lore:
+              - "<#8c8c8c>Состояние: <#e6fff3><state>"
+              - "<#8c8c8c>Прогресс: <#2bba43><count><#8c8c8c>/<#d48763><total> <#969696>(<percent>%)"
+              - "<#8c8c8c>Место: <#969696><world> · <x> <y> <z>"
+              - "<#8c8c8c>Причина остановки: <#e6fff3><reason>"
+              - "<dark_gray>"
+              - "<teleport>"
+              - "<#92bed8>ПКМ — открыть управление"
+            teleport: "<#92bed8>ЛКМ — телепортироваться рядом"
+            teleport-unavailable: "<#969696>ЛКМ — телепорт недоступен: мир не загружен"
+          reasons:
+            waiting-materials: "не хватает материалов"
+            waiting-output: "нет места для снятых блоков"
+            paused: "поставлена на паузу"
+            recovery: "нужна проверка администратора"
+            working: "стройка выполняется"
+          empty:
+            name: "<#969696><bold>Нет незавершённых строек"
+            lore:
+              - "<#8c8c8c>Здесь появятся запущенные проекты по книгам."
+          previous:
+            name: "<#92bed8>← Предыдущая страница"
+            lore:
+              - "<#8c8c8c>Показать более новые проекты."
+          close:
+            name: "<#c42323>Закрыть"
+            lore:
+              - "<#8c8c8c>Вернуться в игру."
+          next:
+            name: "<#92bed8>Следующая страница →"
+            lore:
+              - "<#8c8c8c>Показать более старые проекты."
+        teleport:
+          success: "<prefix><#2bba43>Вы рядом со стройкой: <#e6fff3><x> <y> <z>"
+          missing: "<prefix><#ff9f0f>Эта стройка уже завершена или недоступна."
+          world-unavailable: "<prefix><#ff9f0f>Мир этой стройки сейчас недоступен."
+          unsafe: |-
+
+            <prefix><#ff9f0f>Рядом со стройкой нет безопасного места.
+            <#8c8c8c>   <#e6fff3>Подойдите сами и освободите место для телепорта.
+          failed: "<prefix><#c42323>Не удалось телепортироваться к стройке."
       site:
         unknown-name: "Строительный проект"
         panel: |-
@@ -1055,6 +1132,7 @@ locales:
       - "<dark_gray>   <white>/builder confirm <gray>— apply the shown <hover:show_text:'The exact list of changes waiting for your confirmation.'>plan</hover>"
       - "<dark_gray>   <white>/builder confirm buy <gray>— buy and build"
       - "<dark_gray>   <white>/builder undo <gray>— revert the latest operation"
+      - "<dark_gray>   <click:run_command:'/builder projects'><white>/builder projects</click> <gray>— my current builds"
     errors:
       disabled: "<prefix><yellow>Builder tools are available only on survival servers."
       player-only: "<prefix><red>This command is available only to players."
@@ -1100,7 +1178,7 @@ locales:
       busy: |-
 
         <prefix><yellow>An operation is already in progress.
-        <dark_gray>   <gray>Wait for it to finish.
+        <dark_gray>   <click:run_command:'/builder projects'><hover:show_text:'Open your unfinished construction projects.'><#92bed8>[My builds]</hover></click>
       expired: "<prefix><yellow>The plan or clipboard expired. Create it again."
       inventory: |-
 
@@ -1695,6 +1773,53 @@ locales:
         <dark_gray>   <gray>An administrator must review it.
         <dark_gray>   <gray>The project will not continue blindly.
       status: "<prefix><gray>Construction: <white><state></white> — <hover:show_text:'Processed blocks and the full project size.'><white><count>/<total></white> blocks</hover>."
+      projects:
+        menu:
+          title: "<#1c2328>My builds"
+          world-unavailable: "world unavailable"
+          card:
+            name: "<#ffb142><bold><name>"
+            lore:
+              - "<dark_gray>State: <white><state>"
+              - "<dark_gray>Progress: <green><count><dark_gray>/<#d48763><total> <gray>(<percent>%)"
+              - "<dark_gray>Location: <gray><world> · <x> <y> <z>"
+              - "<dark_gray>Stop reason: <white><reason>"
+              - "<dark_gray>"
+              - "<teleport>"
+              - "<#92bed8>Right-click — open controls"
+            teleport: "<#92bed8>Left-click — teleport nearby"
+            teleport-unavailable: "<gray>Left-click — unavailable: world is not loaded"
+          reasons:
+            waiting-materials: "missing materials"
+            waiting-output: "no room for recovered blocks"
+            paused: "paused manually"
+            recovery: "administrator review required"
+            working: "construction is running"
+          empty:
+            name: "<gray><bold>No unfinished builds"
+            lore:
+              - "<dark_gray>Build-book projects will appear here."
+          previous:
+            name: "<#92bed8>← Previous page"
+            lore:
+              - "<dark_gray>Show newer projects."
+          close:
+            name: "<red>Close"
+            lore:
+              - "<dark_gray>Return to the game."
+          next:
+            name: "<#92bed8>Next page →"
+            lore:
+              - "<dark_gray>Show older projects."
+        teleport:
+          success: "<prefix><green>You are near the construction site: <white><x> <y> <z>"
+          missing: "<prefix><yellow>This construction project is already finished or unavailable."
+          world-unavailable: "<prefix><yellow>This construction project's world is unavailable."
+          unsafe: |-
+
+            <prefix><yellow>There is no safe destination beside this construction site.
+            <dark_gray>   <gray>Travel there normally and clear a landing spot.
+          failed: "<prefix><red>Could not teleport to the construction site."
       site:
         unknown-name: "Construction project"
         panel: |-

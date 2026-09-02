@@ -341,6 +341,7 @@ internal object BuilderToolsReloadPreflight {
         "build-book.player-copy.custom-model-data" to YamlValueType.INT,
         "build-book.player-copy.draft-custom-model-data" to YamlValueType.INT,
         "build-book.player-copy.active-custom-model-data" to YamlValueType.INT,
+        "build-book.player-copy.active-custom-model-data-pool" to YamlValueType.STRING_LIST,
         "build-book.lore" to YamlValueType.STRING_LIST,
         "build-book.footer" to YamlValueType.STRING_LIST,
         "build-book.editor.overview.lore" to YamlValueType.STRING_LIST,

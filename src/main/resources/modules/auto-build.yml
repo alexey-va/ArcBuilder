@@ -48,6 +48,28 @@ build-book:
     custom-model-data: 0
     draft-custom-model-data: 0
     active-custom-model-data: 0
+    # Stable per-book variants backed by arc:builder_book_ready_01..20 in ItemsAdder.
+    active-custom-model-data-pool:
+      - 12160
+      - 12161
+      - 12162
+      - 12163
+      - 12164
+      - 12165
+      - 12166
+      - 12167
+      - 12168
+      - 12169
+      - 12170
+      - 12171
+      - 12172
+      - 12173
+      - 12174
+      - 12175
+      - 12176
+      - 12177
+      - 12178
+      - 12179
     default-name: 'Моя постройка'
   editor:
     menu:

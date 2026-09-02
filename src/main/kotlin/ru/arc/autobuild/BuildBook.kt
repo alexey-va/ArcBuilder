@@ -205,14 +205,20 @@ object BuildBookSettings {
         get() = config.integer("build-book.player-copy.draft-custom-model-data", customModelData)
     val activeCustomModelData: Int
         get() = config.integer("build-book.player-copy.active-custom-model-data", customModelData)
+    val activeCustomModelDataPool: List<Int>
+        get() = config.stringList("build-book.player-copy.active-custom-model-data-pool")
+            .map(String::toInt)
     val defaultTitle: String get() = config.string("build-book.player-copy.default-name", "Моя постройка")
     val tooltipStyle: NamespacedKey
         get() = checkNotNull(NamespacedKey.fromString(config.string("build-book.tooltip-style", "lzblocks:tooltip/rare"))) {
             "Build-book tooltip style is invalid"
         }
 
-    fun customModelData(data: BuildBookData): Int =
-        if (data.draft) draftCustomModelData else activeCustomModelData
+    fun customModelData(data: BuildBookData): Int = when {
+        data.draft -> draftCustomModelData
+        activeCustomModelDataPool.isNotEmpty() -> BuildBookVariantModels.select(data, activeCustomModelDataPool)
+        else -> activeCustomModelData
+    }
 
     fun validate() = validate(config, mergeForward = true)
 
@@ -227,12 +233,20 @@ object BuildBookSettings {
         val customModelData = source.integer("build-book.player-copy.custom-model-data", 0)
         val draftCustomModelData = source.integer("build-book.player-copy.draft-custom-model-data", customModelData)
         val activeCustomModelData = source.integer("build-book.player-copy.active-custom-model-data", customModelData)
+        val activeCustomModelDataPool = source.stringList("build-book.player-copy.active-custom-model-data-pool")
+            .map { value -> value.toIntOrNull() ?: error("Build-book active model pool contains a non-integer") }
         val defaultTitle = source.string("build-book.player-copy.default-name", "Моя постройка")
         require(maxOffset in 0..64) { "Build-book max-offset must be between 0 and 64" }
         require(maxBooksPerPlayer in 1..100) { "Build-book max-per-player must be between 1 and 100" }
         require(customModelData >= 0) { "Build-book custom-model-data cannot be negative" }
         require(draftCustomModelData >= 0) { "Build-book draft custom-model-data cannot be negative" }
         require(activeCustomModelData >= 0) { "Build-book active custom-model-data cannot be negative" }
+        require(activeCustomModelDataPool.size <= 100 && activeCustomModelDataPool.distinct().size == activeCustomModelDataPool.size) {
+            "Build-book active custom-model-data pool must contain at most 100 unique entries"
+        }
+        require(activeCustomModelDataPool.all { it > 0 }) {
+            "Build-book active custom-model-data pool entries must be positive"
+        }
         require(defaultTitle.isNotBlank() && defaultTitle.length <= 48 && defaultTitle.none(Char::isISOControl)) {
             "Build-book default name is invalid"
         }
@@ -287,6 +301,19 @@ object BuildBookSettings {
         "build-book.editor.preview-book-mismatch.lore",
         "build-book.editor.preview-protection-denied.lore",
     )
+}
+
+/** Picks one durable visual variant without storing cosmetic state in the authoritative book contract. */
+internal object BuildBookVariantModels {
+    fun select(data: BuildBookData, variants: List<Int>): Int {
+        require(variants.isNotEmpty()) { "Build-book model variant pool cannot be empty" }
+        require(variants.all { it > 0 }) { "Build-book model variants must be positive" }
+        val identity = data.instanceId?.toString()
+            ?: data.blueprintId?.toString()
+            ?: data.schematicSha256
+            ?: data.buildingId
+        return variants[Math.floorMod(identity.hashCode(), variants.size)]
+    }
 }
 
 object BuildBookCodec {
