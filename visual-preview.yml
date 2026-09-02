@@ -265,6 +265,18 @@ surfaces:
             - builder:book.preview-menu.confirmation.materials.lore
             - builder:book.preview-menu.confirmation.material-line
         - {slot: 25, material: BARRIER, name: builder:book.preview-menu.confirmation.blocked.name, lore: builder:book.preview-menu.confirmation.blocked.lore}
+    - id: book-preview-draft-activation
+      title: builder:book.preview-menu.confirmation.activation-title
+      rows: 5
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      placeholders: {name: Дом у северной гавани, count: '1248', materials: '1 680.00 <white>💰</white>', labor: '240.00 <white>💰</white>', price: '1 920.00 <white>💰</white>'}
+      items:
+        - {slot: 19, material: BOOK, name: builder:book.preview-menu.confirmation.activation-overview.name, lore: builder:book.preview-menu.confirmation.activation-overview.lore}
+        - {slot: 21, material: SUNFLOWER, name: builder:book.preview-menu.confirmation.activation-price.name, lore: builder:book.preview-menu.confirmation.activation-price.lore}
+        - {slot: 25, material: LIME_CONCRETE, name: builder:book.preview-menu.confirmation.activation-start.name, lore: builder:book.preview-menu.confirmation.activation-start.lore}
+        - {slot: 29, material: ARROW, name: builder:book.preview-menu.confirmation.back.name, lore: builder:book.preview-menu.confirmation.back.lore}
+        - {slot: 34, material: RED_CONCRETE, name: builder:book.preview-menu.confirmation.cancel.name, lore: builder:book.preview-menu.confirmation.cancel.lore}
     - id: book-editor-default
       title: autobuild:build-book.editor.title
       rows: 3

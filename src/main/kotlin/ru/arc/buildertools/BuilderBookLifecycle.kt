@@ -255,6 +255,42 @@ internal class BuilderBookLifecycle(
         if (!schematicVerifier.matches(data)) fail("book.invalid")
     }
 
+    fun preparePreviewActivation(
+        player: Player,
+        source: BuilderLocatedBook,
+        complete: (BuilderBookBlueprint?) -> Unit,
+    ) {
+        prepareActivation(player, source, announce = false, complete)
+    }
+
+    fun currentPreviewActivation(player: Player, expected: BuildBookData): BuilderBookBlueprint? {
+        val now = System.currentTimeMillis()
+        val pending = pendingMints[player.uniqueId]?.takeIf {
+            it.kind == BuilderBookMintKind.CREATE && it.expiresAtMillis > now
+        } ?: return null
+        if (!matchesPendingSource(expected, pending)) return null
+        if (matchingInventorySources(player, pending).size != 1) return null
+        return pending.blueprint
+    }
+
+    fun confirmPreviewActivation(player: Player, expected: BuildBookData): Boolean = try {
+        val pending = pendingMints[player.uniqueId] ?: fail("book.quote-expired")
+        if (!matchesPendingSource(expected, pending)) fail("book.source-changed")
+        confirmMint(player)
+        true
+    } catch (failure: BuilderUserFailure) {
+        send(player, failure.path, failure.values)
+        false
+    } catch (failure: Throwable) {
+        error("Builder-book preview activation failed for ${player.name}", failure)
+        send(player, "book.failed")
+        false
+    }
+
+    fun cancelPreviewActivation(playerId: UUID) {
+        if (pendingMints[playerId]?.kind == BuilderBookMintKind.CREATE) pendingMints.remove(playerId)
+    }
+
     fun reserveForBuild(player: Player, plan: BuilderPlan, plannedMode: GameMode) {
         val activeRegistry = requireRegistry()
         val serverName = ARC.serverName ?: run {
@@ -482,11 +518,26 @@ internal class BuilderBookLifecycle(
     }
 
     private fun prepareActivation(player: Player) {
-        if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
-        val activeRegistry = requireRegistry()
         val held = player.inventory.itemInMainHand
         val data = BuildBookCodec.read(held)?.takeIf { it.draft } ?: fail("book.draft-required")
-        if (held.amount != 1) fail("book.duplicate")
+        prepareActivation(
+            player = player,
+            source = BuilderLocatedBook(player.inventory.heldItemSlot, held, data),
+            announce = true,
+            complete = {},
+        )
+    }
+
+    private fun prepareActivation(
+        player: Player,
+        source: BuilderLocatedBook,
+        announce: Boolean,
+        complete: (BuilderBookBlueprint?) -> Unit,
+    ) {
+        if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
+        val activeRegistry = requireRegistry()
+        val data = source.data.takeIf { it.draft } ?: fail("book.draft-required")
+        if (source.item.amount != 1) fail("book.duplicate")
         if (data.creatorId != player.uniqueId) fail("book.creator-only")
         requireExactDraftPreview(player, data)
         verifySchematic(data)
@@ -497,10 +548,14 @@ internal class BuilderBookLifecycle(
                 if (failure != null) {
                     warn("Builder-book blueprint lookup failed for {}: type={}", player.name, BuilderToolsFailureType.of(failure))
                     send(player, "book.registry-unavailable")
+                    complete(null)
                     return@runSync
                 }
                 try {
                     requireExactDraftPreview(player, data)
+                    if (inventoryBooks(player).count { (_, item, candidate) -> item.amount == 1 && candidate == data } != 1) {
+                        fail("book.source-changed")
+                    }
                     val blueprint = if (existing != null) {
                         if (!matchesBlueprint(data, existing)) fail("book.invalid")
                         existing
@@ -538,12 +593,15 @@ internal class BuilderBookLifecycle(
                         outputInstanceId = UUID.randomUUID(),
                         expiresAtMillis = System.currentTimeMillis() + config.planTtl.toMillis(),
                     )
-                    sendMintQuote(player, blueprint, "activation")
+                    if (announce) sendMintQuote(player, blueprint, "activation")
+                    complete(blueprint)
                 } catch (userFailure: BuilderUserFailure) {
                     send(player, userFailure.path, userFailure.values)
+                    complete(null)
                 } catch (unexpected: Throwable) {
                     error("Builder-book activation quote failed for ${player.name}", unexpected)
                     send(player, "book.failed")
+                    complete(null)
                 }
             }
         }
@@ -628,8 +686,9 @@ internal class BuilderBookLifecycle(
             pendingMints.remove(player.uniqueId)
             fail("book.quote-expired")
         }
-        val held = player.inventory.itemInMainHand
-        val data = BuildBookCodec.read(held) ?: fail("book.source-changed")
+        val sources = matchingInventorySources(player, pending)
+        if (sources.size != 1) fail("book.source-changed")
+        val (_, held, data) = sources.single()
         if (
             pending.kind == BuilderBookMintKind.COPY &&
             !BuilderBookCopyPolicy.canConfirm(player.uniqueId, data.creatorId, pending.blueprint.creatorId)
@@ -721,13 +780,15 @@ internal class BuilderBookLifecycle(
             return
         }
         if (existing.isEmpty()) {
-            val held = player.inventory.itemInMainHand
-            val heldData = BuildBookCodec.read(held)
-            if (
-                mint.kind == BuilderBookMintKind.CREATE && heldData?.draft == true &&
-                heldData.blueprintId == mint.blueprint.blueprintId
-            ) {
-                replaceOneHeldBook(player, held, BuildBookItems.create(data))
+            val draft = if (mint.kind == BuilderBookMintKind.CREATE) {
+                inventoryBooks(player).singleOrNull { (_, item, candidate) ->
+                    item.amount == 1 && candidate.draft && candidate.blueprintId == mint.blueprint.blueprintId
+                }
+            } else {
+                null
+            }
+            if (draft != null) {
+                replaceOneBook(player, draft.first, draft.second, BuildBookItems.create(data))
             } else {
                 if (player.inventory.firstEmpty() == -1) {
                     waitForDeliverySpace(player)
@@ -884,6 +945,20 @@ internal class BuilderBookLifecycle(
             ((pending.kind == BuilderBookMintKind.CREATE && data.draft) ||
                 (pending.kind == BuilderBookMintKind.COPY && data.available)) &&
             matchesBlueprint(data, pending.blueprint)
+
+    private fun matchingInventorySources(
+        player: Player,
+        pending: PendingMint,
+    ): List<Triple<Int, ItemStack, BuildBookData>> = inventoryBooks(player).filter { (_, item, data) ->
+        item.amount == 1 && matchesPendingSource(data, pending)
+    }
+
+    private fun inventoryBooks(player: Player): List<Triple<Int, ItemStack, BuildBookData>> =
+        (0 until player.inventory.size).mapNotNull { slot ->
+            val item = player.inventory.getItem(slot) ?: return@mapNotNull null
+            val data = BuildBookCodec.read(item) ?: return@mapNotNull null
+            Triple(slot, item, data)
+        }
 
     private fun requireExactDraftPreview(player: Player, data: BuildBookData) {
         if (!BuildingManager.hasExactOpenPreview(player, data)) fail("book.preview-required")
@@ -1085,18 +1160,20 @@ internal class BuilderBookLifecycle(
                 }
                 if (existing.isEmpty()) {
                     val output = BuildBookItems.create(expectedData)
-                    val held = player.inventory.itemInMainHand
-                    val heldData = BuildBookCodec.read(held)
-                    if (
-                        delivery.sourceInstanceId == null && heldData?.draft == true &&
-                        heldData.blueprintId == delivery.blueprint.blueprintId
-                    ) {
-                        if (held.amount > 1 && player.inventory.firstEmpty() == -1) {
+                    val draft = if (delivery.sourceInstanceId == null) {
+                        inventoryBooks(player).singleOrNull { (_, item, candidate) ->
+                            item.amount == 1 && candidate.draft && candidate.blueprintId == delivery.blueprint.blueprintId
+                        }
+                    } else {
+                        null
+                    }
+                    if (draft != null) {
+                        if (draft.second.amount > 1 && player.inventory.firstEmpty() == -1) {
                             waitForDeliverySpace(player)
                             deliveryRecoveries -= player.uniqueId
                             return@deliveryLookup
                         }
-                        replaceOneHeldBook(player, held, output)
+                        replaceOneBook(player, draft.first, draft.second, output)
                     } else {
                         if (player.inventory.firstEmpty() == -1) {
                             waitForDeliverySpace(player)
@@ -1327,13 +1404,13 @@ internal class BuilderBookLifecycle(
     private fun moneyLabel(formatted: String): Component =
         BuilderCurrencyPresentation.amountWithCoin(messages.literal(formatted))
 
-    private fun replaceOneHeldBook(player: Player, held: ItemStack, replacement: ItemStack) {
-        if (held.amount == 1) {
-            player.inventory.setItemInMainHand(replacement)
+    private fun replaceOneBook(player: Player, slot: Int, source: ItemStack, replacement: ItemStack) {
+        if (source.amount == 1) {
+            player.inventory.setItem(slot, replacement)
             return
         }
         if (player.inventory.firstEmpty() == -1) fail("book.inventory-full")
-        player.inventory.setItemInMainHand(held.clone().also { it.amount = held.amount - 1 })
+        player.inventory.setItem(slot, source.clone().also { it.amount = source.amount - 1 })
         check(player.inventory.addItem(replacement).isEmpty()) { "Owned build book did not fit after preflight" }
     }
 

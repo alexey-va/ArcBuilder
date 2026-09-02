@@ -52,6 +52,7 @@ import ru.arc.util.Logging.info
 import ru.arc.util.Logging.warn
 import ru.arc.util.BlockUtils.rotateBlockData
 import com.sk89q.worldedit.bukkit.BukkitAdapter
+import java.time.Duration
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
@@ -509,8 +510,11 @@ internal class BuilderToolsRuntime(
                     override fun adjust(player: Player, adjustment: ru.arc.autobuild.BuildBookPreviewAdjustment): ConstructionSite? =
                         adjustBookPreview(player, adjustment)
 
-                    override fun prepare(player: Player, site: ConstructionSite): BuilderBookPreviewConfirmation? =
-                        prepareBookPreviewConfirmation(player, site)
+                    override fun prepare(
+                        player: Player,
+                        site: ConstructionSite,
+                        complete: (BuilderBookPreviewConfirmation?) -> Unit,
+                    ) = prepareBookPreviewConfirmation(player, site, complete)
 
                     override fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation? =
                         currentBookPreviewConfirmation(player)
@@ -523,6 +527,7 @@ internal class BuilderToolsRuntime(
                     ): ConstructionSite? = restoreBookPreview(player, snapshot)
 
                     override fun cancel(player: Player) {
+                        books.cancelPreviewActivation(player.uniqueId)
                         runBookPreviewAction(player) { cancelPlan(player) }
                     }
                 },
@@ -1195,7 +1200,7 @@ internal class BuilderToolsRuntime(
         ).validated(config.maxChanges)
     }
 
-    private fun preparePlan(player: Player, plan: BuilderPlan) {
+    private fun preparePlan(player: Player, plan: BuilderPlan, announce: Boolean = true) {
         preflightPlan(player, plan)
         crown.clearAnchor(player.uniqueId)
         previews.open(
@@ -1203,7 +1208,7 @@ internal class BuilderToolsRuntime(
             plan = BuilderPendingPlan(plan, player.gameMode),
             expireAfterTicks = config.planTtl.toTicks(),
         )
-        showPlanSummary(player, plan, includeShop = true)
+        if (announce) showPlanSummary(player, plan, includeShop = true)
     }
 
     private fun showPlanSummary(player: Player, plan: BuilderPlan, includeShop: Boolean) {
@@ -1289,13 +1294,18 @@ internal class BuilderToolsRuntime(
         }
     }
 
-    private fun startPlayerBuildBook(player: Player, site: ConstructionSite, book: ItemStack): Boolean = try {
+    private fun startPlayerBuildBook(
+        player: Player,
+        site: ConstructionSite,
+        book: ItemStack,
+        announce: Boolean = true,
+    ): Boolean = try {
         ensureBuildBookAvailable(player)
         val planned = planBuildBook(player, site, book)
         site.cancelSilently()
         plannedConstructionProjects[planned.plan.id] = planned.project
         try {
-            preparePlan(player, planned.plan)
+            preparePlan(player, planned.plan, announce)
         } catch (failure: Throwable) {
             plannedConstructionProjects.remove(planned.plan.id)
             throw failure
@@ -1327,39 +1337,75 @@ internal class BuilderToolsRuntime(
     private fun prepareBookPreviewConfirmation(
         player: Player,
         site: ConstructionSite,
-    ): BuilderBookPreviewConfirmation? = runBookPreviewAction(player) {
-        val book = player.inventory.itemInMainHand
-        val data = requireMatchingPreviewBook(player, site)
+        complete: (BuilderBookPreviewConfirmation?) -> Unit,
+    ) {
+        val located = runBookPreviewAction(player) { requireMatchingPreviewBook(player, site) }
+            ?: return complete(null)
+        val data = located.data
         if (data.draft) {
-            books.handleCommand(player, listOf("activate"))
-            return@runBookPreviewAction null
+            try {
+                books.preparePreviewActivation(player, located) { blueprint ->
+                    complete(blueprint?.toPreviewConfirmation())
+                }
+            } catch (failure: BuilderUserFailure) {
+                send(player, failure.path, failure.values)
+                complete(null)
+            } catch (failure: Throwable) {
+                error("Builder-book preview activation quote failed for ${player.name}", failure)
+                send(player, "book.failed")
+                complete(null)
+            }
+            return
         }
-        if (!startPlayerBuildBook(player, site, book)) return@runBookPreviewAction null
-        currentBookPreviewConfirmation(player)
+        if (!startPlayerBuildBook(player, site, located.item, announce = false)) return complete(null)
+        complete(currentBookPreviewConfirmation(player))
     }
 
     private fun currentBookPreviewConfirmation(player: Player): BuilderBookPreviewConfirmation? {
-        val plan = previews.plan(player.uniqueId)?.takeIf { it.kind == BuilderPlanKind.BUILD_BOOK } ?: return null
-        val project = plannedConstructionProjects[plan.id] ?: return null
-        return BuilderBookPreviewConfirmation(
-            plan = plan,
-            title = project.projectTitle ?: project.plan.bookBuildingId ?: "Постройка",
-            cooldownRemaining = bookApplicationCooldownRemaining(player),
-            requiredMaterials = project.steps
-                .mapNotNull(BuilderConstructionStep::requiredMaterial)
-                .groupBy { it.itemBase64 to it.materialKey }
-                .values
-                .map { grouped ->
-                    grouped.first().copy(amount = grouped.sumOf(BuilderItemAmount::amount)).validated()
-                }
-                .sortedBy(BuilderItemAmount::materialKey),
-        )
+        val plan = previews.plan(player.uniqueId)?.takeIf { it.kind == BuilderPlanKind.BUILD_BOOK }
+        if (plan != null) {
+            val project = plannedConstructionProjects[plan.id] ?: return null
+            return BuilderBookPreviewConfirmation(
+                kind = BuilderBookPreviewConfirmationKind.CONSTRUCTION,
+                blockCount = plan.changes.size,
+                title = project.projectTitle ?: project.plan.bookBuildingId ?: "Постройка",
+                cooldownRemaining = bookApplicationCooldownRemaining(player),
+                requiredMaterials = project.steps
+                    .mapNotNull(BuilderConstructionStep::requiredMaterial)
+                    .groupBy { it.itemBase64 to it.materialKey }
+                    .values
+                    .map { grouped ->
+                        grouped.first().copy(amount = grouped.sumOf(BuilderItemAmount::amount)).validated()
+                    }
+                    .sortedBy(BuilderItemAmount::materialKey),
+            )
+        }
+        val site = BuildingManager.pending(player.uniqueId) ?: return null
+        return books.currentPreviewActivation(player, site.bookData)?.toPreviewConfirmation()
     }
 
-    private fun confirmBookPreview(player: Player): Boolean = runBookPreviewAction(player) {
-        confirm(player, buildBook = true)
-        previews.plan(player.uniqueId)?.kind != BuilderPlanKind.BUILD_BOOK
-    } ?: false
+    private fun confirmBookPreview(player: Player): Boolean {
+        val confirmation = currentBookPreviewConfirmation(player) ?: return false
+        if (confirmation.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION) {
+            val site = BuildingManager.pending(player.uniqueId) ?: return false
+            return books.confirmPreviewActivation(player, site.bookData)
+        }
+        return runBookPreviewAction(player) {
+            confirm(player, buildBook = true)
+            previews.plan(player.uniqueId)?.kind != BuilderPlanKind.BUILD_BOOK
+        } ?: false
+    }
+
+    private fun BuilderBookBlueprint.toPreviewConfirmation() = BuilderBookPreviewConfirmation(
+        kind = BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION,
+        blockCount = blockCount,
+        title = title,
+        cooldownRemaining = Duration.ZERO,
+        requiredMaterials = emptyList(),
+        materialCostMinor = materialCostMinor,
+        constructionFeeMinor = constructionFeeMinor,
+        issuePriceMinor = issuePriceMinor,
+    )
 
     private fun restoreBookPreview(
         player: Player,
@@ -1371,16 +1417,13 @@ internal class BuilderToolsRuntime(
             ?: throw BuilderUserFailure("errors.expired")
     }
 
-    private fun requireMatchingPreviewBook(player: Player, site: ConstructionSite): BuildBookData =
+    private fun requireMatchingPreviewBook(player: Player, site: ConstructionSite): BuilderLocatedBook =
         requireMatchingPreviewBook(player, site.bookData)
 
-    private fun requireMatchingPreviewBook(player: Player, expected: BuildBookData): BuildBookData {
-        val item = player.inventory.itemInMainHand
-        val raw = BuildBookCodec.read(item) ?: throw BuilderUserFailure("book.missing")
-        val canonical = canonicalBook(player, item, raw).second
-        if (canonical != expected) throw BuilderUserFailure("book.missing")
-        return canonical
-    }
+    private fun requireMatchingPreviewBook(player: Player, expected: BuildBookData): BuilderLocatedBook =
+        BuilderBookInventoryLocator.find(player, expected) { slot, item, raw ->
+            canonicalBook(player, slot, item, raw)
+        } ?: throw BuilderUserFailure("book.missing")
 
     private fun <T> runBookPreviewAction(player: Player, action: () -> T): T? = try {
         action()
@@ -2686,6 +2729,15 @@ internal class BuilderToolsRuntime(
     }
 
     private fun canonicalBook(player: Player, item: ItemStack, data: BuildBookData): Pair<ItemStack, BuildBookData> {
+        return canonicalBook(player, player.inventory.heldItemSlot, item, data)
+    }
+
+    private fun canonicalBook(
+        player: Player,
+        slot: Int,
+        item: ItemStack,
+        data: BuildBookData,
+    ): Pair<ItemStack, BuildBookData> {
         val canonical = if (data.playerCreated) {
             if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
             books.verifySchematic(data)
@@ -2699,7 +2751,7 @@ internal class BuilderToolsRuntime(
         }
         if (canonical == data) return item to data
         val updated = BuildBookCodec.update(item, canonical)
-        player.inventory.setItemInMainHand(updated)
+        player.inventory.setItem(slot, updated)
         return updated to canonical
     }
 

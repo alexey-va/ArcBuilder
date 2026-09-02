@@ -525,6 +525,15 @@ class BuilderToolsDomainTest : FunSpec({
         }
     }
 
+    test("builder help does not teach the obsolete book block and air click shortcut") {
+        val bundled = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
+            .bufferedReader()
+            .use { it.readText() }
+
+        bundled.contains("Книгой: ПКМ по блоку") shouldBe false
+        bundled.contains("Book: click block for") shouldBe false
+    }
+
     test("permission policy accepts canonical feature and build-book entry nodes") {
         fun permissions(vararg nodes: String): (String) -> Boolean = nodes.toSet()::contains
 

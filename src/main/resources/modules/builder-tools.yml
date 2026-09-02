@@ -147,6 +147,7 @@ paper-menus:
       continue: { material: LIME_CONCRETE }
       overview: { material: BOOK }
       materials: { material: CHEST }
+      price: { material: SUNFLOWER }
       start: { material: LIME_CONCRETE }
       blocked: { material: BARRIER }
 
@@ -246,7 +247,6 @@ locales:
       - "<#8c8c8c>   <#d48763>/builder disconnect [confirm] <#e6fff3>— без превью"
       - "<#8c8c8c>   <#d48763>/builder copy <#e6fff3>и <#d48763>/builder paste <#e6fff3>— <hover:show_text:'Временная копия выделенных блоков, которую можно вставлять в другом месте.'>чертёж</hover>"
       - "<#8c8c8c>   <#d48763>/builder book draft [имя] <#e6fff3>— <hover:show_text:'Бесплатная книга только для выбора места и расчёта цены; строить она ещё не может.'>бесплатный черновик</hover>"
-      - "<#8c8c8c>   <#e6fff3>Книгой: ПКМ по блоку — <hover:show_text:'Личный контур будущих блоков; мир пока не меняется.'>превью</hover>; в воздух — дальше"
       - "<#8c8c8c>   <#d48763>/builder book copy <#e6fff3>— платная копия"
       - "<#8c8c8c>   <#d48763>/builder book sell [цена] <#e6fff3>— продать книгу"
       - "<#8c8c8c>   <#d48763>/builder book <#e6fff3>— инструкция и этап"
@@ -705,11 +705,23 @@ locales:
               - "<#969696>Мир пока не изменится."
         confirmation:
           title: "<#2bba43>Запуск: <name>"
+          activation-title: "<#2bba43>Активация: <name>"
           overview:
             name: "<#e6fff3>План строительства"
             lore:
               - "<#8c8c8c>Изменится блоков: <#92bed8><count>"
               - "<#969696>Проверьте место перед запуском."
+          activation-overview:
+            name: "<#e6fff3>Активация черновика"
+            lore:
+              - "<#8c8c8c>Блоков в постройке: <#92bed8><count>"
+              - "<#969696>После оплаты черновик станет строительной книгой."
+          activation-price:
+            name: "<#ffb142>Стоимость: <price>"
+            lore:
+              - "<#8c8c8c>Материалы: <#e6fff3><materials>"
+              - "<#8c8c8c>Работа: <#e6fff3><labor>"
+              - "<#969696>Сумма спишется только после нажатия кнопки."
           materials:
             name: "<#ffb142>Нужно принести"
             lore:
@@ -726,6 +738,11 @@ locales:
             lore:
               - "<#e6fff3>Книга будет применена один раз."
               - "<#969696>Кулдаун начнётся после надёжной записи проекта."
+          activation-start:
+            name: "<#2bba43>Активировать книгу"
+            lore:
+              - "<#e6fff3>Списать <price> и выпустить строительную книгу."
+              - "<#969696>Подтверждение в чате не потребуется."
           blocked:
             name: "<#ff9f0f>Пока недоступно"
             lore:
@@ -1029,7 +1046,6 @@ locales:
       - "<dark_gray>   <white>/builder disconnect [confirm] <gray>— no preview"
       - "<dark_gray>   <white>/builder copy <gray>and <white>/builder paste <gray>— <hover:show_text:'A temporary copy of selected blocks that can be placed elsewhere.'>blueprint</hover>"
       - "<dark_gray>   <white>/builder book draft [name] <gray>— <hover:show_text:'A free positioning and price-check book that cannot build yet.'>free draft</hover>"
-      - "<dark_gray>   <gray>Book: click block for <hover:show_text:'A player-only outline of future blocks; the world is unchanged.'>preview</hover>; air to continue"
       - "<dark_gray>   <white>/builder book sell [price] <gray>— list an active book"
       - "<dark_gray>   <white>/builder book copy <gray>— quote a paid registered copy"
       - "<dark_gray>   <white>/builder book <gray>— guided workflow and current step"
@@ -1474,11 +1490,23 @@ locales:
               - "<dark_gray>The world is still unchanged."
         confirmation:
           title: "<green>Start: <name>"
+          activation-title: "<green>Activate: <name>"
           overview:
             name: "<white>Construction plan"
             lore:
               - "<gray>Blocks changed: <aqua><count>"
               - "<dark_gray>Check the placement before starting."
+          activation-overview:
+            name: "<white>Activate the draft"
+            lore:
+              - "<gray>Blocks in the build: <aqua><count>"
+              - "<dark_gray>After payment, the draft becomes a build book."
+          activation-price:
+            name: "<gold>Price: <price>"
+            lore:
+              - "<gray>Materials: <white><materials>"
+              - "<gray>Labor: <white><labor>"
+              - "<dark_gray>The total is charged only after you click confirm."
           materials:
             name: "<gold>Bring these materials"
             lore:
@@ -1495,6 +1523,11 @@ locales:
             lore:
               - "<white>The book will be applied once."
               - "<dark_gray>Cooldown starts after the project is durable."
+          activation-start:
+            name: "<green>Activate book"
+            lore:
+              - "<white>Pay <price> and issue the build book."
+              - "<dark_gray>No chat confirmation is required."
           blocked:
             name: "<yellow>Not ready yet"
             lore:

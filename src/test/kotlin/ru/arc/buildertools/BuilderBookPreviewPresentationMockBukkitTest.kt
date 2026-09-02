@@ -59,7 +59,8 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 val host = PreviewHost(
                     site,
                     BuilderBookPreviewConfirmation(
-                        plan = plan,
+                        kind = BuilderBookPreviewConfirmationKind.CONSTRUCTION,
+                        blockCount = plan.changes.size,
                         title = "Дом",
                         cooldownRemaining = Duration.ofHours(7),
                         requiredMaterials = listOf(requiredMaterial),
@@ -123,6 +124,82 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
             }
         }
     }
+
+    test("draft activation stays in the preview gui and presents the full price before minting") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val world = paper.addSimpleWorld("draft-preview-menu")
+                val player = paper.addPlayer("DraftOwner").also {
+                    it.gameMode = GameMode.CREATIVE
+                    it.setLocale(Locale.forLanguageTag("ru-RU"))
+                }
+                val book = BuildBookData(
+                    buildingId = "house.schem",
+                    title = "Дом",
+                    playerCreated = true,
+                    creatorId = player.uniqueId,
+                    creatorName = player.name,
+                    blueprintId = UUID.randomUUID(),
+                    contentSha256 = "a".repeat(64),
+                    schematicSha256 = "b".repeat(64),
+                    blockCount = 401,
+                ).validated()
+                val site = mockk<ConstructionSite>()
+                val snapshot = mockk<ConstructionSiteSnapshot>()
+                every { site.player } returns player
+                every { site.bookData } returns book
+                every { site.centerBlock } returns world.getBlockAt(10, 64, 20).location
+                every { site.rotation } returns 0
+                every { site.snapshot() } returns snapshot
+                val host = PreviewHost(
+                    site,
+                    BuilderBookPreviewConfirmation(
+                        kind = BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION,
+                        blockCount = 401,
+                        title = "Дом",
+                        cooldownRemaining = Duration.ZERO,
+                        requiredMaterials = emptyList(),
+                        materialCostMinor = 12_345,
+                        constructionFeeMinor = 2_500,
+                        issuePriceMinor = 14_845,
+                    ),
+                )
+
+                BuilderBookPreviewPresentation(
+                    plugin = plugin,
+                    renderer = mockk(relaxed = true),
+                    messages = config.messages(),
+                    host = host,
+                    panelHeightOffset = 2.25,
+                    panelFrontOffset = 0.4,
+                    panelInteractionWidth = 3f,
+                    panelInteractionHeight = 1.5f,
+                    panelLineWidth = 180,
+                    panelBackgroundColor = Color.fromARGB(0xB2, 0x1C, 0x23, 0x28),
+                    panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
+                    viewRange = 64.0,
+                ).use { presentation ->
+                    presentation.openPlacementForTest(player, site)
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+
+                    val confirmation = player.openInventory.topInventory
+                    plain(confirmation.getItem(19)!!.itemMeta.displayName()!!) shouldContain "Активация"
+                    confirmation.getItem(21)?.type shouldBe Material.SUNFLOWER
+                    plain(confirmation.getItem(21)!!.itemMeta.displayName()!!) shouldContain "148.45"
+                    plain(confirmation.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Активировать"
+
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+                    host.confirmCalls shouldBe 1
+                }
+            } finally {
+                ConfigManager.clear()
+            }
+        }
+    }
 })
 
 private fun item(material: Material, amount: Int): BuilderItemAmount = BuilderItemAmount(
@@ -143,7 +220,11 @@ private class PreviewHost(
         return site
     }
 
-    override fun prepare(player: org.bukkit.entity.Player, site: ConstructionSite): BuilderBookPreviewConfirmation = confirmation
+    override fun prepare(
+        player: org.bukkit.entity.Player,
+        site: ConstructionSite,
+        complete: (BuilderBookPreviewConfirmation?) -> Unit,
+    ) = complete(confirmation)
 
     override fun currentConfirmation(player: org.bukkit.entity.Player): BuilderBookPreviewConfirmation = confirmation
 

@@ -43,18 +43,28 @@ import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.time.Duration
+import java.util.Locale
 import java.util.UUID
 
+internal enum class BuilderBookPreviewConfirmationKind {
+    CONSTRUCTION,
+    DRAFT_ACTIVATION,
+}
+
 internal data class BuilderBookPreviewConfirmation(
-    val plan: BuilderPlan,
+    val kind: BuilderBookPreviewConfirmationKind,
+    val blockCount: Int,
     val title: String,
     val cooldownRemaining: Duration,
     val requiredMaterials: List<BuilderItemAmount>,
+    val materialCostMinor: Long = 0L,
+    val constructionFeeMinor: Long = 0L,
+    val issuePriceMinor: Long = 0L,
 )
 
 internal interface BuilderBookPreviewPresentationHost {
     fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment): ConstructionSite?
-    fun prepare(player: Player, site: ConstructionSite): BuilderBookPreviewConfirmation?
+    fun prepare(player: Player, site: ConstructionSite, complete: (BuilderBookPreviewConfirmation?) -> Unit)
     fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation?
     fun confirm(player: Player): Boolean
     fun restore(player: Player, snapshot: ConstructionSiteSnapshot): ConstructionSite?
@@ -87,6 +97,7 @@ internal class BuilderBookPreviewPresentation(
     private val interactionOwners = mutableMapOf<UUID, UUID>()
     private val snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
     private val placementSites = mutableMapOf<UUID, ConstructionSite>()
+    private val preparing = mutableSetOf<UUID>()
     private val menuConfiguration = loadMenuConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
     private val menuItems = PaperMenuItemFactory(
@@ -163,13 +174,18 @@ internal class BuilderBookPreviewPresentation(
 
     private fun continueToConfirmation(player: Player) {
         val site = placementSites[player.uniqueId] ?: panels[player.uniqueId]?.site ?: return player.closeInventory()
+        if (!preparing.add(player.uniqueId)) return
         snapshots[player.uniqueId] = site.snapshot()
-        val confirmation = host.prepare(player, site)
-        if (confirmation == null) {
-            snapshots.remove(player.uniqueId)
-            player.closeInventory()
-        } else {
-            openConfirmation(player, confirmation)
+        host.prepare(player, site) { confirmation ->
+            preparing.remove(player.uniqueId)
+            if (closed || !player.isOnline) return@prepare
+            if (player.uniqueId !in snapshots) return@prepare
+            if (confirmation == null) {
+                snapshots.remove(player.uniqueId)
+                player.closeInventory()
+            } else {
+                openConfirmation(player, confirmation)
+            }
         }
     }
 
@@ -263,19 +279,46 @@ internal class BuilderBookPreviewPresentation(
         val remaining = confirmation.cooldownRemaining
         val totalMinutes = (remaining.seconds + 59L) / 60L
         val values = mapOf(
-            "count" to messages.literal(confirmation.plan.changes.size),
+            "count" to messages.literal(confirmation.blockCount),
             "hours" to messages.literal(totalMinutes / 60L),
             "minutes" to messages.literal(totalMinutes % 60L),
+            "materials" to moneyLabel(confirmation.materialCostMinor),
+            "labor" to moneyLabel(confirmation.constructionFeeMinor),
+            "price" to moneyLabel(confirmation.issuePriceMinor),
         )
         val locale = locale(player)
+        val activation = confirmation.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION
+        val overviewKey = if (activation) "activation-overview" else "overview"
         val noMaterialsLore = if (confirmation.requiredMaterials.isEmpty()) {
             listOf(messages.render("book.preview-menu.confirmation.materials-none", locale))
         } else {
             emptyList()
         }
         val elements = buildMap {
-            put(OVERVIEW, confirmationItem(OVERVIEW, "overview", values, locale, noMaterialsLore, enabled = false))
-            if (confirmation.requiredMaterials.isNotEmpty()) {
+            put(
+                OVERVIEW,
+                confirmationItem(
+                    OVERVIEW,
+                    overviewKey,
+                    values,
+                    locale,
+                    if (activation) emptyList() else noMaterialsLore,
+                    enabled = false,
+                ),
+            )
+            if (activation) {
+                put(
+                    MATERIALS,
+                    PaperMenuEntry(
+                        menuItems.create(
+                            menuConfiguration.templates.getValue("price"),
+                            messages.render("book.preview-menu.confirmation.activation-price.name", locale, values),
+                            messages.renderLines("book.preview-menu.confirmation.activation-price.lore", locale, values),
+                        ),
+                        enabled = false,
+                    ),
+                )
+            } else if (confirmation.requiredMaterials.isNotEmpty()) {
                 val materialLore = buildList {
                     addAll(messages.renderLines("book.preview-menu.confirmation.materials.lore", locale, values))
                     confirmation.requiredMaterials.take(materialLineLimit).forEach { amount ->
@@ -320,12 +363,24 @@ internal class BuilderBookPreviewPresentation(
                     menuItems.create(
                         menuConfiguration.templates.getValue(if (remaining.isZero) "start" else "blocked"),
                         messages.render(
-                            "book.preview-menu.confirmation.${if (remaining.isZero) "start" else "blocked"}.name",
+                            "book.preview-menu.confirmation.${
+                                when {
+                                    !remaining.isZero -> "blocked"
+                                    activation -> "activation-start"
+                                    else -> "start"
+                                }
+                            }.name",
                             locale,
                             values,
                         ),
                         messages.renderLines(
-                            "book.preview-menu.confirmation.${if (remaining.isZero) "start" else "blocked"}.lore",
+                            "book.preview-menu.confirmation.${
+                                when {
+                                    !remaining.isZero -> "blocked"
+                                    activation -> "activation-start"
+                                    else -> "start"
+                                }
+                            }.lore",
                             locale,
                             values,
                         ),
@@ -337,7 +392,7 @@ internal class BuilderBookPreviewPresentation(
         }
         return PaperMenuContent(
             title = messages.render(
-                "book.preview-menu.confirmation.title",
+                "book.preview-menu.confirmation.${if (activation) "activation-title" else "title"}",
                 locale,
                 mapOf("name" to messages.literal(BuildBookItems.compactTitle(confirmation.title, 20))),
             ),
@@ -395,6 +450,10 @@ internal class BuilderBookPreviewPresentation(
             Component.translatable(prototype.type.translationKey())
         }
     }
+
+    private fun moneyLabel(amountMinor: Long): Component = BuilderCurrencyPresentation.amountWithCoin(
+        messages.literal(String.format(Locale.US, "%,.2f", BuilderMoney.decimal(amountMinor))),
+    )
 
     private fun replacePanel(site: ConstructionSite) {
         removePanel(site.player.uniqueId)
@@ -499,6 +558,7 @@ internal class BuilderBookPreviewPresentation(
         panels.keys.toList().forEach(::removePanel)
         snapshots.clear()
         placementSites.clear()
+        preparing.clear()
         menus.close()
     }
 
