@@ -24,13 +24,13 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Verify arc-core consumer architecture
-        uses: alexey-va/arc-core/.github/actions/verify-consumer@0dd8ced42e028e9bbb81028e452500ab67108fbf
+        uses: alexey-va/arc-core/.github/actions/verify-consumer@38b13cf342937d1853ab3f4f5271be58fac344be
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: Unit tests and production JAR
         run: ./gradlew --no-daemon test shadowJar
       - name: Verify production artifact
         run: |
-          jar_path="build/libs/ArcBuilder-1.0.14.jar"
+          jar_path="build/libs/ArcBuilder-1.0.15.jar"
           test -s "$jar_path"
           jar tf "$jar_path" | grep -Fx plugin.yml
           jar tf "$jar_path" | grep -Fq 'kotlin/collections/CollectionsKt.class'
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ArcBuilder-${{ github.sha }}
-          path: build/libs/ArcBuilder-1.0.14.jar
+          path: build/libs/ArcBuilder-1.0.15.jar
           if-no-files-found: error
 
   mysql-integration:
@@ -52,7 +52,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Verify arc-core consumer architecture
-        uses: alexey-va/arc-core/.github/actions/verify-consumer@0dd8ced42e028e9bbb81028e452500ab67108fbf
+        uses: alexey-va/arc-core/.github/actions/verify-consumer@38b13cf342937d1853ab3f4f5271be58fac344be
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: MySQL migrations, contention, recovery, and anti-duplication
         run: ./gradlew --no-daemon integrationTest

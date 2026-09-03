@@ -83,6 +83,7 @@ construction:
             progress: { slot: 12, kind: decoration, template: progress }
             resources: { slot: 14, kind: decoration, template: resources }
             control: { slot: 16, template: pause }
+            instant: { slot: 22, template: instant }
       templates:
         background:
           external-item: itemsadder:arc/background
@@ -94,6 +95,7 @@ construction:
         pause: { material: REDSTONE_TORCH }
         resume: { material: LIME_DYE }
         unavailable: { material: GRAY_DYE }
+        instant: { material: NETHER_STAR }
   projects-menu:
     layouts:
       construction-projects:
@@ -141,6 +143,7 @@ paper-menus:
         rows: 5
         background: { template: background }
         elements:
+          away: { slot: 2, template: arrow }
           up: { slot: 11, template: arrow }
           left: { slot: 19, template: arrow }
           rotate: { slot: 20, template: rotate }
@@ -149,6 +152,7 @@ paper-menus:
           down: { slot: 29, template: arrow }
           cancel: { slot: 34, template: cancel }
           mirror: { slot: 37, template: mirror }
+          toward: { slot: 38, template: arrow }
           reset: { slot: 39, template: reset }
       book-preview-confirmation:
         schema-version: 1
@@ -160,6 +164,12 @@ paper-menus:
           start: { slot: 25, template: start }
           back: { slot: 29, template: arrow }
           cancel: { slot: 34, template: cancel }
+      book-preview-inspection:
+        schema-version: 1
+        rows: 3
+        background: { template: background }
+        elements:
+          inspection-overview: { slot: 13, kind: decoration, template: overview }
     templates:
       background:
         external-item: itemsadder:arc/background
@@ -530,8 +540,8 @@ locales:
         - "<#8c8c8c>   4. <#e6fff3>ПКМ по блоку — поставить или перенести <hover:show_text:'Личный контур будущей постройки; мир пока не меняется.'>превью</hover>."
         - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — подробные настройки."
         - "<#8c8c8c>      <#969696>Черновик — только предпросмотр; он не строит."
-        - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — получить <hover:show_text:'Расчёт стоимости материалов и работы до списания денег.'>смету</hover> без оплаты."
-        - "<#8c8c8c>   6. <#e6fff3>Нажмите <#92bed8>[▶ Подтвердить]<#e6fff3> в сообщении со сметой."
+        - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — бесплатно узнать цену."
+        - "<#8c8c8c>   6. <#e6fff3>Нажмите <#92bed8>[▶ Подтвердить]<#e6fff3> в сообщении с ценой."
         - |-
           <#8c8c8c>   7. <#e6fff3>Автор может выпустить <hover:show_text:'Отдельный оплачиваемый экземпляр той же книги; каждую книгу можно использовать один раз.'>новую одноразовую копию</hover>.
           <#8c8c8c>      <#e6fff3>Используйте настройки или <click:run_command:'/builder book copy'><#d48763>/builder book copy</click>.
@@ -569,7 +579,7 @@ locales:
           <prefix><#2bba43>Этап 4/7: бесплатный черновик готов.
           <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
           <#8c8c8c>   <#e6fff3>ПКМ по блоку — поставить или перенести превью.
-          <#8c8c8c>   <#e6fff3>ПКМ в воздух — рассчитать смету.
+          <#8c8c8c>   <#e6fff3>ПКМ в воздух — узнать цену.
         draft-recovery: |-
 
           <prefix><#ff9f0f>Черновик сохранён и ожидает выдачи.
@@ -579,10 +589,10 @@ locales:
 
           <prefix><#2bba43>Этап 5/7: превью открыто.
           <#8c8c8c>   <#e6fff3>Контур обновляется постоянно.
-          <#8c8c8c>   <#e6fff3>ПКМ по блоку — перенести; ПКМ в воздух — смета.
+          <#8c8c8c>   <#e6fff3>ПКМ по блоку — перенести; ПКМ в воздух — узнать цену.
         quote: |-
 
-          <prefix><#ff9f0f>Этап 6/7: смета готова — <#2bba43><price><#ff9f0f>.
+          <prefix><#ff9f0f>Этап 6/7: цена рассчитана — <#2bba43><price><#ff9f0f>.
           <#8c8c8c>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Подтвердить]</click> <#8c8c8c>— <#e6fff3>осталось <#d48763><seconds> с<#e6fff3>.
         delivery: |-
 
@@ -608,7 +618,7 @@ locales:
         <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
         <#8c8c8c>   <#e6fff3>Блоков: <#d48763><count> <#8c8c8c>— <#969696>денег пока не списано
         <#8c8c8c>   <#e6fff3>ПКМ по блоку — поставить или перенести превью.
-        <#8c8c8c>   <#e6fff3>ПКМ в воздух — рассчитать смету.
+        <#8c8c8c>   <#e6fff3>ПКМ в воздух — узнать цену.
         <#8c8c8c>   <#e6fff3>Shift + ПКМ — настроить положение.
       draft-recovered: |-
 
@@ -659,7 +669,7 @@ locales:
       shop-unavailable: "<prefix><#ff9f0f>Цены админшопа сейчас недоступны."
       player-materials:
         included: "всё включено в стоимость"
-      price-limit: "<prefix><#c42323>Смета превышает безопасный лимит книги."
+      price-limit: "<prefix><#c42323>Цена книги получилась слишком большой."
       quote-kind:
         activation: "<hover:show_text:'Первый выпуск рабочей книги из бесплатного черновика.'>Активация</hover>"
         copy: "<hover:show_text:'Выпуск ещё одного одноразового экземпляра активной книги.'>Копия</hover>"
@@ -672,80 +682,105 @@ locales:
         <#8c8c8c>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[✖ Отмена]</click>
       preview-opened: |-
 
-        <prefix><#d48763>«<name>» <#8c8c8c>— <state>
-        <#8c8c8c>   Плашка — настройка и продолжение.
-        <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✖ Убрать превью]</click>
-        <#8c8c8c>   Закроется само через 3 минуты.
+        <prefix><#d48763>Контур дома «<name>» показан.
+        <#8c8c8c>   1. <#e6fff3>Подойдите к надписи перед домом.
+        <#8c8c8c>   2. <#e6fff3>Нажмите по ней ПКМ — откроется настройка места.
+        <#8c8c8c>   Контур сам исчезнет через 3 минуты.
+        <#8c8c8c>   <click:run_command:'/builder cancel'><#c42323>[✖ Убрать контур]</click>
       preview-panel: |-
-        <#ffb142><bold>Проверьте расположение</bold>
+        <#ffb142><bold>Проверьте место</bold>
         <#e6fff3><name>
-        <#92bed8>ПКМ — настроить и продолжить
+        <#92bed8>ПКМ — открыть настройку
       preview:
-        title: "<#ffb142>Предпросмотр размещён"
-        subtitle: "<#e6fff3>Нажмите на плашку перед постройкой"
-        actionbar: "<#d48763>Плашка: настроить и продолжить   <#8c8c8c>—   <#969696>/builder cancel"
-        bossbar-draft: "<#ffb142>Черновик «<name>» — выберите место"
-        bossbar-active: "<#2bba43>Книга «<name>» — проверьте место"
+        title: "<#ffb142>Контур дома показан"
+        subtitle: "<#e6fff3>Нажмите ПКМ по надписи перед домом"
+        actionbar: "<#d48763>Надпись перед домом: ПКМ — настроить   <#8c8c8c>—   <#969696>/builder cancel"
+        bossbar-draft: "<#ffb142>Черновик «<name>» — выберите место для дома"
+        bossbar-active: "<#2bba43>Книга «<name>» — проверьте место для дома"
+      hold-hint:
+        title: "<#ffb142>Выберите место для дома"
+        subtitle: "<#e6fff3>Нажмите ПКМ по земле"
       preview-menu:
         placement:
-          title: "<#ffb142>Настройка: <name>"
+          title: "<#ffb142>Место дома: <name>"
+          away:
+            name: "<#92bed8>⇧ От себя"
+            lore:
+              - "<#8c8c8c>Сдвинуть дом на один блок вперёд."
+              - "<#969696>Точка: <x>, <y>, <z>."
+              - "<#8c8c8c>[<#92bed8>▶<#8c8c8c>] <#92bed8>ЛКМ<#e6fff3> — сдвинуть"
           left:
             name: "<#92bed8>← Влево"
             lore:
-              - "<#8c8c8c>На один блок влево от вашего взгляда."
-              - "<#969696>Опора: <x>, <y>, <z>."
+              - "<#8c8c8c>Сдвинуть дом на один блок влево."
+              - "<#969696>Точка: <x>, <y>, <z>."
+              - "<#8c8c8c>[<#92bed8>▶<#8c8c8c>] <#92bed8>ЛКМ<#e6fff3> — сдвинуть"
           up:
             name: "<#92bed8>↑ Вверх"
             lore:
-              - "<#8c8c8c>На один блок вверх по миру."
-              - "<#969696>Опора: <x>, <y>, <z>."
+              - "<#8c8c8c>Поднять дом на один блок."
+              - "<#969696>Точка: <x>, <y>, <z>."
+              - "<#8c8c8c>[<#92bed8>▶<#8c8c8c>] <#92bed8>ЛКМ<#e6fff3> — поднять"
           rotate:
             name: "<#ffb142>↻ Повернуть"
             lore:
               - "<#8c8c8c>На 90° по часовой стрелке."
               - "<#969696>Книга не изменится."
+              - "<#8c8c8c>[<#ffb142>▶<#8c8c8c>] <#ffb142>ЛКМ<#e6fff3> — повернуть"
           mirror:
             name: "<#d48763>⇆ Отразить"
             lore:
               - "<#8c8c8c>Зеркально поменять левую и правую стороны."
-              - "<#969696>Действует только на это превью."
+              - "<#969696>Изменится только контур дома."
+              - "<#8c8c8c>[<#d48763>▶<#8c8c8c>] <#d48763>ЛКМ<#e6fff3> — отразить"
           reset:
             name: "<#e6fff3>Сбросить настройку"
             lore:
               - "<#8c8c8c>Вернуть место, поворот и отражение."
               - "<#969696>Сейчас: <x>, <y>, <z>; <rotation>°."
+              - "<#8c8c8c>[<#92bed8>▶<#8c8c8c>] <#92bed8>ЛКМ<#e6fff3> — сбросить"
           down:
             name: "<#92bed8>↓ Вниз"
             lore:
-              - "<#8c8c8c>На один блок вниз по миру."
-              - "<#969696>Опора: <x>, <y>, <z>."
+              - "<#8c8c8c>Опустить дом на один блок."
+              - "<#969696>Точка: <x>, <y>, <z>."
+              - "<#8c8c8c>[<#92bed8>▶<#8c8c8c>] <#92bed8>ЛКМ<#e6fff3> — опустить"
           right:
             name: "<#92bed8>→ Вправо"
             lore:
-              - "<#8c8c8c>На один блок вправо от вашего взгляда."
-              - "<#969696>Опора: <x>, <y>, <z>."
+              - "<#8c8c8c>Сдвинуть дом на один блок вправо."
+              - "<#969696>Точка: <x>, <y>, <z>."
+              - "<#8c8c8c>[<#92bed8>▶<#8c8c8c>] <#92bed8>ЛКМ<#e6fff3> — сдвинуть"
+          toward:
+            name: "<#92bed8>⇩ К себе"
+            lore:
+              - "<#8c8c8c>Сдвинуть дом на один блок к себе."
+              - "<#969696>Точка: <x>, <y>, <z>."
+              - "<#8c8c8c>[<#92bed8>▶<#8c8c8c>] <#92bed8>ЛКМ<#e6fff3> — сдвинуть"
           cancel:
             name: "<#c42323>Убрать превью"
             lore:
-              - "<#8c8c8c>Закрыть это превью без изменений мира."
+              - "<#8c8c8c>Убрать контур дома. Блоки не изменятся."
+              - "<#8c8c8c>[<#c42323>▶<#8c8c8c>] <#c42323>ЛКМ<#e6fff3> — убрать"
           continue:
-            name: "<#2bba43>Продолжить"
+            name: "<#2bba43>Проверить и продолжить"
             lore:
-              - "<#e6fff3>Рассчитать блоки и материалы."
-              - "<#969696>Мир пока не изменится."
+              - "<#e6fff3>Показать, что нужно для стройки."
+              - "<#969696>Блоки пока не изменятся."
+              - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — продолжить"
         confirmation:
-          title: "<#2bba43>Запуск: <name>"
-          activation-title: "<#2bba43>Активация: <name>"
+          title: "<#2bba43>Подтверждение: <name>"
+          activation-title: "<#2bba43>Создание книги: <name>"
           overview:
             name: "<#e6fff3>План строительства"
             lore:
               - "<#8c8c8c>Изменится блоков: <#92bed8><count>"
               - "<#969696>Проверьте место перед запуском."
           activation-overview:
-            name: "<#e6fff3>Активация черновика"
+            name: "<#e6fff3>Создание строительной книги"
             lore:
               - "<#8c8c8c>Блоков в постройке: <#92bed8><count>"
-              - "<#969696>После оплаты черновик станет строительной книгой."
+              - "<#969696>После оплаты вы получите готовую книгу."
           activation-price:
             name: "<#ffb142>Стоимость: <price>"
             lore:
@@ -753,7 +788,7 @@ locales:
               - "<#8c8c8c>Работа: <#e6fff3><labor>"
               - "<#969696>Сумма спишется только после нажатия кнопки."
           materials:
-            name: "<#ffb142>Нужно принести"
+            name: "<#ffb142>Что нужно для стройки"
             lore:
               - "<#8c8c8c>Материалы для изменяемых блоков:"
           material-line: "<#e6fff3><amount>× <material>"
@@ -762,17 +797,19 @@ locales:
           back:
             name: "<#92bed8>Назад к размещению"
             lore:
-              - "<#8c8c8c>Вернуться к этому же превью."
+              - "<#8c8c8c>Вернуться к контуру дома."
           start:
             name: "<#2bba43>Начать строительство"
             lore:
-              - "<#e6fff3>Книга будет применена один раз."
-              - "<#969696>Кулдаун начнётся после надёжной записи проекта."
+              - "<#e6fff3>После запуска книга исчезнет."
+              - "<#969696>Стройка сохранится и переживёт рестарт."
+              - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — начать стройку"
           activation-start:
-            name: "<#2bba43>Активировать книгу"
+            name: "<#2bba43>Создать книгу"
             lore:
-              - "<#e6fff3>Списать <price> и выпустить строительную книгу."
-              - "<#969696>Подтверждение в чате не потребуется."
+              - "<#e6fff3>Заплатить <price> и получить готовую книгу."
+              - "<#969696>После создания контур дома исчезнет."
+              - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — создать книгу"
           blocked:
             name: "<#ff9f0f>Пока недоступно"
             lore:
@@ -781,6 +818,21 @@ locales:
             name: "<#c42323>Отменить"
             lore:
               - "<#8c8c8c>Закрыть план. Мир не изменится."
+        inspection:
+          title: "<#20252b>Чужой контур дома"
+          overview:
+            name: "<#ffb142>Контур дома «<name>»"
+            lore:
+              - "<#8c8c8c>Игрок: <#e6fff3><owner>"
+              - "<#8c8c8c>Книга: <#e6fff3><state>"
+              - "<#8c8c8c>Точка: <#92bed8><x>, <y>, <z>"
+              - "<#8c8c8c>Поворот: <#92bed8><rotation>°"
+              - "<#8c8c8c>Отражение: <#e6fff3><mirror>"
+              - "<#8c8c8c>Исчезнет через: <#e6fff3><minutes> мин."
+              - "<#969696>Только просмотр — изменить чужой дом нельзя."
+          mirror:
+            yes: "да"
+            no: "нет"
       plan-ready:
         title: "<#2bba43>План готов"
         subtitle: "<#e6fff3>Подтвердите действие в чате"
@@ -789,19 +841,19 @@ locales:
         active: "<#2bba43>активна"
       quote-expired: |-
 
-        <prefix><#ff9f0f>Смета больше не действует.
+        <prefix><#ff9f0f>Эта цена устарела.
         <#8c8c8c>   <#e6fff3>Повторите выбранное действие с книгой.
-      quote-cancelled: "<prefix><#969696>Смета отменена. Деньги не списаны."
+      quote-cancelled: "<prefix><#969696>Расчёт цены отменён. Деньги не списаны."
       preview-cancelled: |-
 
-        <prefix><#969696>Предпросмотр книги отменён.
+        <prefix><#969696>Контур дома убран.
         <#8c8c8c>   <#e6fff3>ПКМ книгой по блоку — разместить заново.
-      preview-expired: "<prefix><#969696>Предпросмотр закрыт: прошло 3 минуты. Мир не изменён."
+      preview-expired: "<prefix><#969696>Контур убран через 3 минуты. Блоки не изменились."
       cooldown: |-
 
         <prefix><#ff9f0f>Строить по книге пока рано.
         <#8c8c8c>   <#e6fff3>Осталось: <hours> ч <minutes> мин.
-      nothing-to-cancel: "<prefix><#969696>Нет открытого превью или сметы."
+      nothing-to-cancel: "<prefix><#969696>Сейчас нет контура дома или открытой цены."
       economy-unavailable: "<prefix><#c42323>Экономика недоступна. Деньги не списаны."
       insufficient-funds: "<prefix><#ff9f0f>Не хватает денег. Черновик сохранён."
       payment-failed: "<prefix><#c42323>Платёж отклонён. Книга не активирована."
@@ -884,7 +936,7 @@ locales:
         ready: "<#8c8c8c>   <click:run_command:'/builder confirm'><#92bed8>[▶ Построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✖ Отмена]</click>"
       skipped: "<#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки план намеренно не меняет.'>Пропущено безопасно</hover>: <#969696><count>"
       market:
-        - "<#8c8c8c>   <hover:show_text:'Полная цена всех расходуемых материалов по админшопу.'>Смета</hover> <#d48763><full_price> <#8c8c8c>— <hover:show_text:'Цена только тех материалов, которых сейчас не хватает в инвентаре.'>докупить</hover> <#e6fff3><missing_price>"
+        - "<#8c8c8c>   <hover:show_text:'Полная цена всех расходуемых материалов по админшопу.'>Цена материалов</hover> <#d48763><full_price> <#8c8c8c>— <hover:show_text:'Цена только тех материалов, которых сейчас не хватает в инвентаре.'>докупить</hover> <#e6fff3><missing_price>"
         - "<#8c8c8c>   <click:run_command:'/builder confirm buy'><#92bed8>[▶ Купить и построить]</click> <#8c8c8c>   <click:run_command:'/builder cancel'><#969696>[✖ Отмена]</click>"
       market-item: "<#8c8c8c>     <#e6fff3><amount>× <material>"
       market-unavailable: "<prefix><#ff9f0f>В админшопе нет: <#d48763><material>"
@@ -953,6 +1005,7 @@ locales:
         <#8c8c8c>   <#e6fff3>или доступном сундуке рядом.
         <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total> <#e6fff3>блоков.
       completed: "<prefix><#2bba43>Строительный проект завершён: <#d48763><count> <#e6fff3>блоков."
+      instant-started: "<prefix><#2bba43>Стройка ускорена: пауз между блоками больше нет."
       recovery-required: |-
 
         <prefix><#c42323>Стройка остановлена из-за изменения мира или прав.
@@ -1071,6 +1124,12 @@ locales:
               lore:
                 - "<#e6fff3>Управлять может владелец проекта или администратор."
                 - "<#969696>Прогресс и материалы доступны для просмотра."
+          instant:
+            name: "<#d48763><bold>Построить мгновенно"
+            lore:
+              - "<#e6fff3>Убрать паузы между блоками этой стройки."
+              - "<#969696>Материалы и защита участка всё равно проверяются."
+              - "<#c42323>Только для администраторов."
       states:
         prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
         active: "<hover:show_text:'Стройка обрабатывает блоки по одному.'>строится</hover>"
@@ -1492,7 +1551,7 @@ locales:
       shop-unavailable: "<prefix><yellow>Could not read material prices from the admin shop."
       player-materials:
         included: "everything is included in the price"
-      price-limit: "<prefix><red>The estimate exceeds the safe book-price limit."
+      price-limit: "<prefix><red>The book price is too high."
       quote-kind:
         activation: "<hover:show_text:'The first working book issued from a free draft.'>Activation</hover>"
         copy: "<hover:show_text:'Another single-use instance issued from an active book.'>Copy</hover>"
@@ -1505,80 +1564,105 @@ locales:
         <dark_gray>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Confirm]</click>  <click:run_command:'/builder book cancel'><#969696>[✖ Cancel]</click>
       preview-opened: |-
 
-        <prefix><aqua>“<name>” <dark_gray>— <state>
-        <dark_gray>   Plaque — adjust or continue.
-        <dark_gray>   <click:run_command:'/builder cancel'><gray>[✖ Remove preview]</click>
-        <dark_gray>   Closes automatically after 3 minutes.
+        <prefix><aqua>The outline for “<name>” is visible.
+        <dark_gray>   1. <white>Walk to the text in front of the build.
+        <dark_gray>   2. <white>Right-click it to adjust the position.
+        <dark_gray>   The outline disappears automatically after 3 minutes.
+        <dark_gray>   <click:run_command:'/builder cancel'><red>[✖ Remove outline]</click>
       preview-panel: |-
-        <gold><bold>Check the placement</bold>
+        <gold><bold>Check this spot</bold>
         <white><name>
-        <aqua>Right-click — adjust and continue
+        <aqua>Right-click — open position controls
       preview:
-        title: "<gold>Preview placed"
-        subtitle: "<white>Click the plaque in front of the build"
-        actionbar: "<aqua>Plaque: adjust and continue   <dark_gray>—   <gray>/builder cancel"
-        bossbar-draft: "<gold>Draft “<name>” — choose its position"
-        bossbar-active: "<green>Book “<name>” — verify its position"
+        title: "<gold>Build outline shown"
+        subtitle: "<white>Right-click the text in front of the build"
+        actionbar: "<aqua>Text in front: right-click to adjust   <dark_gray>—   <gray>/builder cancel"
+        bossbar-draft: "<gold>Draft “<name>” — choose a spot for the build"
+        bossbar-active: "<green>Book “<name>” — check the build location"
+      hold-hint:
+        title: "<gold>Choose a spot for the build"
+        subtitle: "<white>Right-click the ground"
       preview-menu:
         placement:
-          title: "<gold>Adjust: <name>"
+          title: "<gold>Build position: <name>"
+          away:
+            name: "<aqua>⇧ Away from you"
+            lore:
+              - "<gray>Move the build one block forward."
+              - "<dark_gray>Point: <x>, <y>, <z>."
+              - "<dark_gray>[<aqua>▶<dark_gray>] <aqua>Left-click<white> — move"
           left:
             name: "<aqua>← Left"
             lore:
               - "<gray>One block left relative to your view."
-              - "<dark_gray>Anchor: <x>, <y>, <z>."
+              - "<dark_gray>Point: <x>, <y>, <z>."
+              - "<dark_gray>[<aqua>▶<dark_gray>] <aqua>Left-click<white> — move"
           up:
             name: "<aqua>↑ Up"
             lore:
               - "<gray>One world block upward."
-              - "<dark_gray>Anchor: <x>, <y>, <z>."
+              - "<dark_gray>Point: <x>, <y>, <z>."
+              - "<dark_gray>[<aqua>▶<dark_gray>] <aqua>Left-click<white> — raise"
           rotate:
             name: "<gold>↻ Rotate"
             lore:
               - "<gray>90° clockwise."
               - "<dark_gray>The book stays unchanged."
+              - "<dark_gray>[<gold>▶<dark_gray>] <gold>Left-click<white> — rotate"
           mirror:
             name: "<#d48763>⇆ Mirror"
             lore:
               - "<gray>Swap the left and right sides."
-              - "<dark_gray>This affects only the current preview."
+              - "<dark_gray>This affects only the build outline."
+              - "<dark_gray>[<#d48763>▶<dark_gray>] <#d48763>Left-click<white> — mirror"
           reset:
             name: "<white>Reset placement"
             lore:
               - "<gray>Reset movement, rotation, and mirroring."
               - "<dark_gray>Current: <x>, <y>, <z>; <rotation>°."
+              - "<dark_gray>[<aqua>▶<dark_gray>] <aqua>Left-click<white> — reset"
           down:
             name: "<aqua>↓ Down"
             lore:
               - "<gray>One world block downward."
-              - "<dark_gray>Anchor: <x>, <y>, <z>."
+              - "<dark_gray>Point: <x>, <y>, <z>."
+              - "<dark_gray>[<aqua>▶<dark_gray>] <aqua>Left-click<white> — lower"
           right:
             name: "<aqua>→ Right"
             lore:
               - "<gray>One block right relative to your view."
-              - "<dark_gray>Anchor: <x>, <y>, <z>."
+              - "<dark_gray>Point: <x>, <y>, <z>."
+              - "<dark_gray>[<aqua>▶<dark_gray>] <aqua>Left-click<white> — move"
+          toward:
+            name: "<aqua>⇩ Toward you"
+            lore:
+              - "<gray>Move the build one block toward you."
+              - "<dark_gray>Point: <x>, <y>, <z>."
+              - "<dark_gray>[<aqua>▶<dark_gray>] <aqua>Left-click<white> — move"
           cancel:
             name: "<red>Remove preview"
             lore:
-              - "<gray>Close this preview without changing the world."
+              - "<gray>Remove the build outline without changing blocks."
+              - "<dark_gray>[<red>▶<dark_gray>] <red>Left-click<white> — remove"
           continue:
-            name: "<green>Continue"
+            name: "<green>Check and continue"
             lore:
-              - "<white>Calculate blocks and materials."
-              - "<dark_gray>The world is still unchanged."
+              - "<white>Show what the build needs."
+              - "<dark_gray>Blocks are still unchanged."
+              - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — continue"
         confirmation:
-          title: "<green>Start: <name>"
-          activation-title: "<green>Activate: <name>"
+          title: "<green>Confirm: <name>"
+          activation-title: "<green>Create book: <name>"
           overview:
             name: "<white>Construction plan"
             lore:
               - "<gray>Blocks changed: <aqua><count>"
               - "<dark_gray>Check the placement before starting."
           activation-overview:
-            name: "<white>Activate the draft"
+            name: "<white>Create a build book"
             lore:
               - "<gray>Blocks in the build: <aqua><count>"
-              - "<dark_gray>After payment, the draft becomes a build book."
+              - "<dark_gray>After payment, you receive a ready build book."
           activation-price:
             name: "<gold>Price: <price>"
             lore:
@@ -1586,7 +1670,7 @@ locales:
               - "<gray>Labor: <white><labor>"
               - "<dark_gray>The total is charged only after you click confirm."
           materials:
-            name: "<gold>Bring these materials"
+            name: "<gold>Materials needed"
             lore:
               - "<gray>Materials for changed blocks:"
           material-line: "<white><amount>× <material>"
@@ -1595,17 +1679,19 @@ locales:
           back:
             name: "<aqua>Back to placement"
             lore:
-              - "<gray>Return to the same preview session."
+              - "<gray>Return to the same build outline."
           start:
             name: "<green>Start construction"
             lore:
-              - "<white>The book will be applied once."
-              - "<dark_gray>Cooldown starts after the project is durable."
+              - "<white>The book disappears after construction starts."
+              - "<dark_gray>The build is saved and survives a restart."
+              - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — start building"
           activation-start:
-            name: "<green>Activate book"
+            name: "<green>Create book"
             lore:
-              - "<white>Pay <price> and issue the build book."
-              - "<dark_gray>No chat confirmation is required."
+              - "<white>Pay <price> and receive a ready book."
+              - "<dark_gray>The build outline disappears afterward."
+              - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — create book"
           blocked:
             name: "<yellow>Not ready yet"
             lore:
@@ -1614,6 +1700,21 @@ locales:
             name: "<red>Cancel"
             lore:
               - "<gray>Close the plan. The world stays unchanged."
+        inspection:
+          title: "<#20252b>Another player's build outline"
+          overview:
+            name: "<gold>Build outline “<name>”"
+            lore:
+              - "<gray>Player: <white><owner>"
+              - "<gray>Book: <white><state>"
+              - "<gray>Point: <aqua><x>, <y>, <z>"
+              - "<gray>Rotation: <aqua><rotation>°"
+              - "<gray>Mirrored: <white><mirror>"
+              - "<gray>Disappears in: <white><minutes> min"
+              - "<dark_gray>Read only — you cannot move another player's build."
+          mirror:
+            yes: "yes"
+            no: "no"
       plan-ready:
         title: "<green>Plan ready"
         subtitle: "<white>Confirm it in chat"
@@ -1622,19 +1723,19 @@ locales:
         active: "<green>active"
       quote-expired: |-
 
-        <prefix><yellow>The quote is no longer valid.
+        <prefix><yellow>This price is out of date.
         <dark_gray>   <gray>Repeat the action you chose for this book.
       quote-cancelled: "<prefix><gray>Quote cancelled. No money was charged."
       preview-cancelled: |-
 
-        <prefix><gray>Book preview cancelled.
+        <prefix><gray>Build outline removed.
         <dark_gray>   <gray>Right-click a block with the book to place it again.
-      preview-expired: "<prefix><gray>Preview closed after 3 minutes. The world was not changed."
+      preview-expired: "<prefix><gray>Build outline removed after 3 minutes. Blocks were not changed."
       cooldown: |-
 
         <prefix><yellow>This build book is still on cooldown.
         <dark_gray>   <gray>Remaining: <hours>h <minutes>m.
-      nothing-to-cancel: "<prefix><gray>There is no open preview or quote."
+      nothing-to-cancel: "<prefix><gray>There is no build outline or open price right now."
       economy-unavailable: "<prefix><red>The economy is unavailable. No money was charged."
       insufficient-funds: "<prefix><yellow>Not enough money. Your draft is unchanged."
       payment-failed: "<prefix><red>Payment rejected. The book is unchanged."
@@ -1767,6 +1868,7 @@ locales:
         <dark_gray>   <gray>Free space in your inventory or an accessible nearby container.
         <dark_gray>   <gray>Progress: <white><count>/<total></white> blocks.
       completed: "<prefix><green>Construction completed: <white><count></white> blocks."
+      instant-started: "<prefix><green>Instant mode enabled: construction will continue without delays between blocks."
       recovery-required: |-
 
         <prefix><red>Construction stopped because the world or permissions changed.
@@ -1885,6 +1987,12 @@ locales:
               lore:
                 - "<#e6fff3>Only the project owner or an administrator can control it."
                 - "<gray>Progress and materials remain visible."
+          instant:
+            name: "<#d48763><bold>Build instantly"
+            lore:
+              - "<#e6fff3>Remove delays between blocks for this project."
+              - "<gray>Materials and land protection are still checked."
+              - "<red>Administrators only."
       states:
         prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"
         active: "<hover:show_text:'The project is processing one block at a time.'>building</hover>"

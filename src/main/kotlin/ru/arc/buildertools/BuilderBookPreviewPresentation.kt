@@ -16,7 +16,9 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
+import org.bukkit.event.inventory.InventoryCloseEvent
 import org.bukkit.event.player.PlayerInteractEntityEvent
+import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.plugin.java.JavaPlugin
@@ -67,6 +69,7 @@ internal interface BuilderBookPreviewPresentationHost {
     fun prepare(player: Player, site: ConstructionSite, complete: (BuilderBookPreviewConfirmation?) -> Unit)
     fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation?
     fun confirm(player: Player): Boolean
+    fun complete(player: Player, kind: BuilderBookPreviewConfirmationKind)
     fun restore(player: Player, snapshot: ConstructionSiteSnapshot): ConstructionSite?
     fun cancel(player: Player)
 }
@@ -98,6 +101,7 @@ internal class BuilderBookPreviewPresentation(
     private val snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
     private val placementSites = mutableMapOf<UUID, ConstructionSite>()
     private val preparing = mutableSetOf<UUID>()
+    private val confirmationInventories = mutableMapOf<UUID, org.bukkit.inventory.Inventory>()
     private val menuConfiguration = loadMenuConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
     private val menuItems = PaperMenuItemFactory(
@@ -135,12 +139,15 @@ internal class BuilderBookPreviewPresentation(
         removePanel(playerId)
         placementSites.remove(playerId)
         val player = Bukkit.getPlayer(playerId)
-        player?.let(menus::session)?.takeIf { it.menuId == PLACEMENT_MENU }?.close()
+        if (playerId !in snapshots) {
+            player?.let(menus::session)?.takeIf { it.menuId == PLACEMENT_MENU }?.close()
+        }
     }
 
     fun clearPlayer(playerId: UUID) {
         close(playerId)
         snapshots.remove(playerId)
+        confirmationInventories.remove(playerId)
         placementSites.remove(playerId)
         val player = Bukkit.getPlayer(playerId)
         player?.let(menus::session)?.close()
@@ -151,14 +158,43 @@ internal class BuilderBookPreviewPresentation(
         if (event.hand != EquipmentSlot.HAND) return
         val ownerId = interactionOwners[event.rightClicked.uniqueId] ?: return
         event.isCancelled = true
-        if (event.player.uniqueId != ownerId) return
         val site = panels[ownerId]?.site ?: return
-        openPlacement(event.player, site)
+        when (BuilderBookPreviewAccess.level(
+            ownerId,
+            event.player.uniqueId,
+            event.player.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION),
+        )) {
+            BuilderBookPreviewAccessLevel.OWNER -> openPlacement(event.player, site)
+            BuilderBookPreviewAccessLevel.INSPECT -> openInspection(event.player, site)
+            BuilderBookPreviewAccessLevel.NONE -> Unit
+        }
+    }
+
+    @EventHandler
+    fun onJoin(event: PlayerJoinEvent) {
+        if (!event.player.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) return
+        renderer.syncBookViewer(event.player)
+        panels.values
+            .filter { it.site.world.uid == event.player.world.uid }
+            .flatMap(PanelScene::entities)
+            .forEach { event.player.showEntity(plugin, it) }
     }
 
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         clearPlayer(event.player.uniqueId)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
+    fun onMenuClose(event: InventoryCloseEvent) {
+        val player = event.player as? Player ?: return
+        val playerId = player.uniqueId
+        val inventory = confirmationInventories[playerId] ?: return
+        if (event.view.topInventory !== inventory) return
+        confirmationInventories.remove(playerId)
+        val snapshot = snapshots.remove(playerId) ?: return
+        if (closed || !player.isOnline) return
+        host.restore(player, snapshot)?.let { placementSites[playerId] = it }
     }
 
     private fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment) {
@@ -168,6 +204,7 @@ internal class BuilderBookPreviewPresentation(
 
     private fun cancel(player: Player) {
         snapshots.remove(player.uniqueId)
+        confirmationInventories.remove(player.uniqueId)
         host.cancel(player)
         player.closeInventory()
     }
@@ -184,7 +221,7 @@ internal class BuilderBookPreviewPresentation(
                 snapshots.remove(player.uniqueId)
                 player.closeInventory()
             } else {
-                openConfirmation(player, confirmation)
+                openConfirmation(player)
             }
         }
     }
@@ -192,7 +229,9 @@ internal class BuilderBookPreviewPresentation(
     private fun backToPlacement(player: Player) {
         val snapshot = snapshots.remove(player.uniqueId) ?: return player.closeInventory()
         val site = host.restore(player, snapshot) ?: return player.closeInventory()
-        openPlacement(player, site)
+        confirmationInventories.remove(player.uniqueId)
+        placementSites[player.uniqueId] = site
+        menus.session(player)?.requestRefresh()
     }
 
     private fun start(player: Player) {
@@ -204,6 +243,8 @@ internal class BuilderBookPreviewPresentation(
         }
         if (host.confirm(player)) {
             snapshots.remove(player.uniqueId)
+            confirmationInventories.remove(player.uniqueId)
+            host.complete(player, confirmation.kind)
             player.closeInventory()
         } else {
             menus.session(player)?.requestRefresh()
@@ -211,16 +252,63 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun openPlacement(player: Player, site: ConstructionSite) {
+        snapshots.remove(player.uniqueId)
+        confirmationInventories.remove(player.uniqueId)
         placementSites[player.uniqueId] = site
-        menus.open(player, PLACEMENT_MENU) { placementContent(player) }
+        menus.open(player, PLACEMENT_MENU) { menuContent(player) }
     }
 
     internal fun openPlacementForTest(player: Player, site: ConstructionSite) = openPlacement(player, site)
 
-    private fun openConfirmation(player: Player, confirmation: BuilderBookPreviewConfirmation) {
-        menus.open(player, CONFIRMATION_MENU) {
-            confirmationContent(player, host.currentConfirmation(player) ?: confirmation)
-        }
+    internal fun openInspectionForTest(player: Player, site: ConstructionSite) = openInspection(player, site)
+
+    private fun openInspection(player: Player, site: ConstructionSite) {
+        menus.open(player, INSPECTION_MENU) { inspectionContent(player, site) }
+    }
+
+    private fun openConfirmation(player: Player) {
+        val session = menus.session(player) ?: return player.closeInventory()
+        confirmationInventories[player.uniqueId] = session.inventory
+        session.requestRefresh()
+    }
+
+    private fun menuContent(player: Player): PaperMenuContent = snapshots[player.uniqueId]
+        ?.let { host.currentConfirmation(player) }
+        ?.let { confirmationContent(player, it) }
+        ?: placementContent(player)
+
+    private fun inspectionContent(viewer: Player, site: ConstructionSite): PaperMenuContent {
+        val anchor = site.centerBlock.block
+        val locale = locale(viewer)
+        val remainingMinutes = ((site.expiresAtMillis - System.currentTimeMillis()).coerceAtLeast(0L) + 59_999L) / 60_000L
+        val values = mapOf(
+            "name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24)),
+            "owner" to messages.literal(site.player.name),
+            "state" to messages.render(if (site.bookData.draft) "book.state.draft" else "book.state.active", locale),
+            "x" to messages.literal(anchor.x),
+            "y" to messages.literal(anchor.y),
+            "z" to messages.literal(anchor.z),
+            "rotation" to messages.literal(site.rotation),
+            "mirror" to messages.render(
+                if (site.mirrored) "book.preview-menu.inspection.mirror.yes" else "book.preview-menu.inspection.mirror.no",
+                locale,
+            ),
+            "minutes" to messages.literal(remainingMinutes),
+        )
+        return PaperMenuContent(
+            title = messages.render("book.preview-menu.inspection.title", locale),
+            background = background(INSPECTION_MENU),
+            elements = mapOf(
+                INSPECTION_OVERVIEW to PaperMenuEntry(
+                    menuItems.create(
+                        menuConfiguration.template(INSPECTION_MENU, INSPECTION_OVERVIEW),
+                        messages.render("book.preview-menu.inspection.overview.name", locale, values),
+                        messages.renderLines("book.preview-menu.inspection.overview.lore", locale, values),
+                    ),
+                    enabled = false,
+                ),
+            ),
+        )
     }
 
     private fun placementContent(player: Player): PaperMenuContent {
@@ -264,6 +352,12 @@ internal class BuilderBookPreviewPresentation(
                 RIGHT to action(PLACEMENT_MENU, RIGHT, "right", values, locale) {
                     adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.RIGHT))
                 },
+                AWAY to action(PLACEMENT_MENU, AWAY, "away", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.AWAY))
+                },
+                TOWARD to action(PLACEMENT_MENU, TOWARD, "toward", values, locale) {
+                    adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.TOWARD))
+                },
                 CANCEL to action(PLACEMENT_MENU, CANCEL, "cancel", values, locale) { cancel(it.player) },
                 CONTINUE to action(PLACEMENT_MENU, CONTINUE, "continue", values, locale) {
                     continueToConfirmation(it.player)
@@ -289,26 +383,20 @@ internal class BuilderBookPreviewPresentation(
         val locale = locale(player)
         val activation = confirmation.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION
         val overviewKey = if (activation) "activation-overview" else "overview"
-        val noMaterialsLore = if (confirmation.requiredMaterials.isEmpty()) {
-            listOf(messages.render("book.preview-menu.confirmation.materials-none", locale))
-        } else {
-            emptyList()
-        }
         val elements = buildMap {
             put(
-                OVERVIEW,
+                LEFT,
                 confirmationItem(
                     OVERVIEW,
                     overviewKey,
                     values,
                     locale,
-                    if (activation) emptyList() else noMaterialsLore,
                     enabled = false,
                 ),
             )
             if (activation) {
                 put(
-                    MATERIALS,
+                    RIGHT,
                     PaperMenuEntry(
                         menuItems.create(
                             menuConfiguration.templates.getValue("price"),
@@ -328,7 +416,7 @@ internal class BuilderBookPreviewPresentation(
                                 locale,
                                 mapOf(
                                     "amount" to messages.literal(amount.amount),
-                                    "material" to requiredMaterialLabel(amount),
+                                    "material" to requiredMaterialLabel(player, amount),
                                 ),
                             ),
                         )
@@ -345,7 +433,7 @@ internal class BuilderBookPreviewPresentation(
                     }
                 }
                 put(
-                    MATERIALS,
+                    RIGHT,
                     PaperMenuEntry(
                         menuItems.create(
                             menuConfiguration.template(CONFIRMATION_MENU, MATERIALS),
@@ -356,9 +444,9 @@ internal class BuilderBookPreviewPresentation(
                     ),
                 )
             }
-            put(BACK, confirmationItem(BACK, "back", values, locale) { backToPlacement(it.player) })
+            put(DOWN, confirmationItem(BACK, "back", values, locale) { backToPlacement(it.player) })
             put(
-                START,
+                CONTINUE,
                 PaperMenuEntry(
                     menuItems.create(
                         menuConfiguration.templates.getValue(if (remaining.isZero) "start" else "blocked"),
@@ -392,11 +480,11 @@ internal class BuilderBookPreviewPresentation(
         }
         return PaperMenuContent(
             title = messages.render(
-                "book.preview-menu.confirmation.${if (activation) "activation-title" else "title"}",
+                "book.preview-menu.placement.title",
                 locale,
                 mapOf("name" to messages.literal(BuildBookItems.compactTitle(confirmation.title, 20))),
             ),
-            background = background(CONFIRMATION_MENU),
+            background = background(PLACEMENT_MENU),
             elements = elements,
         )
     }
@@ -441,13 +529,13 @@ internal class BuilderBookPreviewPresentation(
         emptyList(),
     )
 
-    private fun requiredMaterialLabel(amount: BuilderItemAmount): Component {
+    private fun requiredMaterialLabel(player: Player, amount: BuilderItemAmount): Component {
         val prototype = BuilderItemCodec.decodePrototype(amount.itemBase64)
         val meta = prototype.itemMeta
         return if (meta.hasDisplayName()) {
             checkNotNull(meta.displayName())
         } else {
-            Component.translatable(prototype.type.translationKey())
+            BuilderMaterialPresentation.label(player, prototype.type)
         }
     }
 
@@ -530,6 +618,9 @@ internal class BuilderBookPreviewPresentation(
         entity.isInvulnerable = true
         entity.setGravity(false)
         player.showEntity(plugin, entity)
+        Bukkit.getOnlinePlayers()
+            .filter { it.world.uid == player.world.uid && it.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION) }
+            .forEach { it.showEntity(plugin, entity) }
     }
 
     private fun removePanel(playerId: UUID) {
@@ -547,6 +638,7 @@ internal class BuilderBookPreviewPresentation(
         mapOf(
             PLACEMENT_MENU to PLACEMENT_CONTRACT,
             CONFIRMATION_MENU to CONFIRMATION_CONTRACT,
+            INSPECTION_MENU to INSPECTION_CONTRACT,
         ),
         requiredTemplates = setOf("blocked"),
     )
@@ -557,6 +649,7 @@ internal class BuilderBookPreviewPresentation(
         HandlerList.unregisterAll(this)
         panels.keys.toList().forEach(::removePanel)
         snapshots.clear()
+        confirmationInventories.clear()
         placementSites.clear()
         preparing.clear()
         menus.close()
@@ -565,10 +658,13 @@ internal class BuilderBookPreviewPresentation(
     private companion object {
         val PLACEMENT_MENU = MenuId.of("book-preview-placement")
         val CONFIRMATION_MENU = MenuId.of("book-preview-confirmation")
+        val INSPECTION_MENU = MenuId.of("book-preview-inspection")
         val UP = MenuElementId.of("up")
         val LEFT = MenuElementId.of("left")
         val ROTATE = MenuElementId.of("rotate")
         val RIGHT = MenuElementId.of("right")
+        val AWAY = MenuElementId.of("away")
+        val TOWARD = MenuElementId.of("toward")
         val CONTINUE = MenuElementId.of("continue")
         val DOWN = MenuElementId.of("down")
         val CANCEL = MenuElementId.of("cancel")
@@ -578,12 +674,14 @@ internal class BuilderBookPreviewPresentation(
         val MATERIALS = MenuElementId.of("materials")
         val BACK = MenuElementId.of("back")
         val START = MenuElementId.of("start")
+        val INSPECTION_OVERVIEW = MenuElementId.of("inspection-overview")
         val PLACEMENT_CONTRACT = MenuContract(
-            requiredElements = setOf(UP, LEFT, ROTATE, RIGHT, CONTINUE, DOWN, CANCEL, MIRROR, RESET),
+            requiredElements = setOf(UP, LEFT, ROTATE, RIGHT, AWAY, TOWARD, CONTINUE, DOWN, CANCEL, MIRROR, RESET),
         )
         val CONFIRMATION_CONTRACT = MenuContract(
             requiredElements = setOf(OVERVIEW, START, BACK, CANCEL),
             optionalElements = setOf(MATERIALS),
         )
+        val INSPECTION_CONTRACT = MenuContract(requiredElements = setOf(INSPECTION_OVERVIEW))
     }
 }

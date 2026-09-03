@@ -7,11 +7,8 @@ import java.util.Locale
 
 /** Keeps internal Bukkit material identifiers away from player-facing surfaces. */
 internal object BuilderMaterialPresentation {
-    fun label(player: Player, material: Material): Component = label(
-        material = material,
-        localeTag = player.locale().toLanguageTag(),
-        russianTranslation = { null },
-    )
+    fun label(@Suppress("UNUSED_PARAMETER") player: Player, material: Material): Component =
+        Component.translatable(material.translationKey())
 
     internal fun label(
         material: Material,

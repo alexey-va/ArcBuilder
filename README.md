@@ -7,7 +7,7 @@ selection, fill, exact block replacement, copy/paste with player-relative
 anchors and rotation, deconstruction, procedural tree crowns, construction-book
 drafts, pricing, activation, copying, selling, and one-time-use protection.
 
-The plugin uses arc-core 2.2.5 and does not depend on the ARC monolith.
+The plugin uses arc-core 2.4.4 and does not depend on the ARC monolith.
 
 ## Player flow
 
@@ -90,7 +90,7 @@ vanilla item textures, and declared custom item models such as
 Generation fails if a new player-visible key is not assigned to a surface or a
 placeholder has no representative value.
 
-The production artifact is `build/libs/ArcBuilder-1.0.14.jar`. From the ops
+The production artifact is `build/libs/ArcBuilder-1.0.15.jar`. From the ops
 repository it is deployed independently with:
 
 ```bash

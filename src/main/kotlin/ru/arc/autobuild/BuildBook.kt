@@ -534,7 +534,7 @@ object BuildBookItems {
 
     private fun playerMaterialLore(config: Config, data: BuildBookData): List<Component> {
         if (data.draft) {
-            return listOfNotNull(strip(config.component("build-book.player-materials.draft", "<#8c8c8c>Материалы: <#ffb142>после сметы")))
+            return listOfNotNull(strip(config.component("build-book.player-materials.draft", "<#8c8c8c>Материалы: <#ffb142>после расчёта цены")))
         }
         if (!data.playerCreated && data.systemMaterialsIncluded != true) {
             return listOfNotNull(

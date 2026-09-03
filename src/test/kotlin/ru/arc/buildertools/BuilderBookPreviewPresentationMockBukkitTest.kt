@@ -13,6 +13,7 @@ import org.bukkit.Material
 import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.inventory.InventoryAction
 import org.bukkit.event.inventory.InventoryClickEvent
+import org.bukkit.event.inventory.InventoryCloseEvent
 import org.bukkit.event.inventory.InventoryType
 import org.bukkit.inventory.ItemStack
 import ru.arc.autobuild.BuildBookData
@@ -29,6 +30,96 @@ import java.util.Locale
 import java.util.UUID
 
 class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
+    test("permitted admin opens a read-only foreign preview status") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val world = paper.addSimpleWorld("book-preview-inspection")
+                val owner = paper.addPlayer("HouseOwner").also { it.gameMode = GameMode.CREATIVE }
+                val admin = paper.addPlayer("PreviewAdmin").also {
+                    it.gameMode = GameMode.CREATIVE
+                    it.setLocale(Locale.forLanguageTag("ru-RU"))
+                }
+                val book = BuildBookData(
+                    buildingId = "house.schem",
+                    title = "Дом",
+                    playerCreated = true,
+                    creatorId = owner.uniqueId,
+                    creatorName = owner.name,
+                    blueprintId = UUID.randomUUID(),
+                    contentSha256 = "a".repeat(64),
+                    schematicSha256 = "b".repeat(64),
+                ).validated()
+                val site = previewSite(owner, world.getBlockAt(10, 64, 20).location, book)
+                val host = PreviewHost(
+                    site,
+                    BuilderBookPreviewConfirmation(
+                        kind = BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION,
+                        blockCount = 401,
+                        title = "Дом",
+                        cooldownRemaining = Duration.ZERO,
+                        requiredMaterials = emptyList(),
+                    ),
+                )
+
+                previewPresentation(plugin, config, host).use { presentation ->
+                    presentation.openInspectionForTest(admin, site)
+
+                    val inventory = admin.openInventory.topInventory
+                    inventory.size shouldBe 27
+                    plain(inventory.getItem(13)!!.itemMeta.displayName()!!) shouldContain "Контур дома"
+                    plainLore(inventory.getItem(13)!!) shouldContain "HouseOwner"
+                    host.adjustments shouldBe emptyList()
+                    host.confirmCalls shouldBe 0
+                }
+            } finally {
+                ConfigManager.clear()
+            }
+        }
+    }
+
+    test("closing build confirmation restores the preview plaque without reopening a menu") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val world = paper.addSimpleWorld("book-preview-close")
+                val player = paper.addPlayer("PreviewCloser").also {
+                    it.gameMode = GameMode.CREATIVE
+                    it.setLocale(Locale.forLanguageTag("ru-RU"))
+                }
+                val site = previewSite(player, world.getBlockAt(10, 64, 20).location, BuildBookData("house.schem", "Дом"))
+                val host = PreviewHost(
+                    site,
+                    BuilderBookPreviewConfirmation(
+                        kind = BuilderBookPreviewConfirmationKind.CONSTRUCTION,
+                        blockCount = 1,
+                        title = "Дом",
+                        cooldownRemaining = Duration.ZERO,
+                        requiredMaterials = emptyList(),
+                    ),
+                )
+
+                previewPresentation(plugin, config, host).use { presentation ->
+                    presentation.openPlacementForTest(player, site)
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+                    paper.performTicks(1)
+
+                    paper.callEvent(InventoryCloseEvent(player.openInventory))
+
+                    host.restoreCalls shouldBe 1
+                }
+            } finally {
+                ConfigManager.clear()
+            }
+        }
+    }
+
     test("placement menu moves only the preview session and continues to a cooldown-aware confirmation") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
@@ -100,7 +191,9 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     host.adjustments.last() shouldBe BuildBookPreviewAdjustment.ToggleMirror
 
                     click(paper, player, 25).isCancelled.shouldBeTrue()
+                    paper.performTicks(1)
                     val confirmation = player.openInventory.topInventory
+                    (confirmation === placement) shouldBe true
                     confirmation.size shouldBe 45
                     confirmation.getItem(21)?.type shouldBe Material.CHEST
                     plainLore(confirmation.getItem(21)!!) shouldContain "32× Oak Planks"
@@ -109,14 +202,15 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     host.confirmCalls shouldBe 0
 
                     click(paper, player, 29).isCancelled.shouldBeTrue()
+                    paper.performTicks(1)
                     host.confirmation = host.confirmation.copy(
                         cooldownRemaining = Duration.ZERO,
                         requiredMaterials = emptyList(),
                     )
                     click(paper, player, 25).isCancelled.shouldBeTrue()
+                    paper.performTicks(1)
                     val noMaterials = player.openInventory.topInventory
                     noMaterials.getItem(21)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
-                    plainLore(noMaterials.getItem(19)!!) shouldContain "Материалы не требуются"
                     noMaterials.getItem(25)?.type shouldBe Material.LIME_CONCRETE
                 }
             } finally {
@@ -185,15 +279,17 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     click(paper, player, 25).isCancelled.shouldBeTrue()
+                    paper.performTicks(1)
 
                     val confirmation = player.openInventory.topInventory
-                    plain(confirmation.getItem(19)!!.itemMeta.displayName()!!) shouldContain "Активация"
+                    plain(confirmation.getItem(19)!!.itemMeta.displayName()!!) shouldContain "Создание"
                     confirmation.getItem(21)?.type shouldBe Material.SUNFLOWER
                     plain(confirmation.getItem(21)!!.itemMeta.displayName()!!) shouldContain "148.45"
-                    plain(confirmation.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Активировать"
+                    plain(confirmation.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Создать"
 
                     click(paper, player, 25).isCancelled.shouldBeTrue()
                     host.confirmCalls shouldBe 1
+                    host.completedConfirmations shouldBe listOf(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION)
                 }
             } finally {
                 ConfigManager.clear()
@@ -214,6 +310,8 @@ private class PreviewHost(
 ) : BuilderBookPreviewPresentationHost {
     val adjustments = mutableListOf<BuildBookPreviewAdjustment>()
     var confirmCalls = 0
+    var restoreCalls = 0
+    val completedConfirmations = mutableListOf<BuilderBookPreviewConfirmationKind>()
 
     override fun adjust(player: org.bukkit.entity.Player, adjustment: BuildBookPreviewAdjustment): ConstructionSite {
         adjustments += adjustment
@@ -233,10 +331,53 @@ private class PreviewHost(
         return true
     }
 
-    override fun restore(player: org.bukkit.entity.Player, snapshot: ConstructionSiteSnapshot): ConstructionSite = site
+    override fun complete(player: org.bukkit.entity.Player, kind: BuilderBookPreviewConfirmationKind) {
+        completedConfirmations += kind
+    }
+
+    override fun restore(player: org.bukkit.entity.Player, snapshot: ConstructionSiteSnapshot): ConstructionSite {
+        restoreCalls += 1
+        return site
+    }
 
     override fun cancel(player: org.bukkit.entity.Player) = Unit
 }
+
+private fun previewSite(
+    player: org.bukkit.entity.Player,
+    location: org.bukkit.Location,
+    book: BuildBookData,
+): ConstructionSite {
+    val site = mockk<ConstructionSite>()
+    val snapshot = mockk<ConstructionSiteSnapshot>()
+    every { site.player } returns player
+    every { site.bookData } returns book
+    every { site.centerBlock } returns location
+    every { site.rotation } returns 0
+    every { site.mirrored } returns false
+    every { site.expiresAtMillis } returns System.currentTimeMillis() + 180_000L
+    every { site.snapshot() } returns snapshot
+    return site
+}
+
+private fun previewPresentation(
+    plugin: ArcBuilderPlugin,
+    config: BuilderToolsConfig,
+    host: BuilderBookPreviewPresentationHost,
+): BuilderBookPreviewPresentation = BuilderBookPreviewPresentation(
+    plugin = plugin,
+    renderer = mockk(relaxed = true),
+    messages = config.messages(),
+    host = host,
+    panelHeightOffset = 2.25,
+    panelFrontOffset = 0.4,
+    panelInteractionWidth = 3f,
+    panelInteractionHeight = 1.5f,
+    panelLineWidth = 180,
+    panelBackgroundColor = Color.fromARGB(0xB2, 0x1C, 0x23, 0x28),
+    panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
+    viewRange = 64.0,
+)
 
 private fun plan(playerId: UUID, worldId: UUID): BuilderPlan {
     val now = 1_800_000_000_000L

@@ -90,3 +90,6 @@ permissions:
   arcbuild.admin.construction:
     description: Control construction projects owned by other players
     default: op
+  arcbuild.admin.preview:
+    description: View and inspect build previews owned by other players
+    default: op

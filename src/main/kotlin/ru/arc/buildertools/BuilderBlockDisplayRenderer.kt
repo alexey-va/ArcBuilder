@@ -38,6 +38,7 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
     fun plan(player: Player, plan: BuilderPlan)
     fun clearPlan(playerId: UUID)
     fun clearPlayer(playerId: UUID)
+    fun syncBookViewer(viewer: Player) = Unit
 }
 
 /** Keeps every small preview and turns large previews into a deterministic player-centred window. */
@@ -364,7 +365,10 @@ internal class BuilderBlockDisplayRenderer(
         val previousEntities = previous?.entities.orEmpty().filterValues(Entity::isValid)
         val nextSpecs = specs.associateBy { it.key() }
         val delta = BuilderDisplaySceneDiff.between(previousEntities.keys, nextSpecs.keys.toList())
-        if (delta.added.isEmpty() && delta.removed.isEmpty()) return
+        if (delta.added.isEmpty() && delta.removed.isEmpty()) {
+            if (layer == Layer.BOOK) syncBookSceneVisibility(player, previousEntities.values)
+            return
+        }
         val nextEntities = LinkedHashMap<DisplayKey, Entity>(delta.retained.size + delta.added.size)
         delta.retained.forEach { displayKey -> nextEntities[displayKey] = previousEntities.getValue(displayKey) }
         val spawned = mutableListOf<Entity>()
@@ -388,7 +392,8 @@ internal class BuilderBlockDisplayRenderer(
                         Quaternionf(),
                     )
                 }
-                player.showEntity(plugin, display)
+                if (layer == Layer.BOOK) syncBookSceneVisibility(player, listOf(display))
+                else player.showEntity(plugin, display)
                 spawned += display
                 nextEntities[displayKey] = display
             }
@@ -398,6 +403,27 @@ internal class BuilderBlockDisplayRenderer(
             spawned.forEach(Entity::remove)
             throw failure
         }
+    }
+
+    override fun syncBookViewer(viewer: Player) {
+        if (!viewer.isOnline || !viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) return
+        scenes.forEach { (key, scene) ->
+            if (key.second == Layer.BOOK && scene.worldId == viewer.world.uid) {
+                scene.entities.values.filter(Entity::isValid).forEach { viewer.showEntity(plugin, it) }
+            }
+        }
+    }
+
+    private fun syncBookSceneVisibility(owner: Player, entities: Collection<Entity>) {
+        Bukkit.getOnlinePlayers()
+            .filter { it.world.uid == owner.world.uid }
+            .forEach { viewer ->
+                if (viewer.uniqueId == owner.uniqueId || viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) {
+                    entities.forEach { viewer.showEntity(plugin, it) }
+                } else {
+                    entities.forEach { viewer.hideEntity(plugin, it) }
+                }
+            }
     }
 
     private fun DisplaySpec.key() = DisplayKey(

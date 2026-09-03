@@ -7,6 +7,8 @@ internal enum class BuildBookPreviewMove {
     DOWN,
     LEFT,
     RIGHT,
+    TOWARD,
+    AWAY,
 }
 
 /**
@@ -52,6 +54,18 @@ internal data class BuildBookPreviewPlacement(
                 180 -> Triple(-1, 0, 0)
                 270 -> Triple(0, 0, -1)
                 else -> Triple(1, 0, 0)
+            }
+            BuildBookPreviewMove.AWAY -> when (facing) {
+                90 -> Triple(1, 0, 0)
+                180 -> Triple(0, 0, 1)
+                270 -> Triple(-1, 0, 0)
+                else -> Triple(0, 0, -1)
+            }
+            BuildBookPreviewMove.TOWARD -> when (facing) {
+                90 -> Triple(-1, 0, 0)
+                180 -> Triple(0, 0, -1)
+                270 -> Triple(1, 0, 0)
+                else -> Triple(0, 0, 1)
             }
         }
         return copy(

@@ -75,6 +75,8 @@ internal class BuilderConstructionMenuManager(
     private val projectLookup: (UUID) -> BuilderConstructionProjectRecord?,
     private val canControl: (Player, BuilderConstructionProjectRecord) -> Boolean,
     private val requestPaused: (Player, UUID, Boolean) -> Boolean,
+    private val canBuildInstantly: (Player) -> Boolean,
+    private val requestInstant: (Player, UUID) -> Boolean,
 ) : Listener, AutoCloseable {
     private val configuration = loadConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), configuration)
@@ -132,31 +134,57 @@ internal class BuilderConstructionMenuManager(
                 Component.empty(),
                 emptyList(),
             ),
-            elements = mapOf(
-                OVERVIEW to entry(
+            elements = buildMap {
+                put(
                     OVERVIEW,
-                    "overview",
-                    messages.render("construction.site.menu.overview.name", locale(player), values),
-                    messages.renderLines("construction.site.menu.overview.lore", locale(player), values),
-                    enabled = false,
-                ),
-                PROGRESS to entry(
+                    entry(
+                        OVERVIEW,
+                        "overview",
+                        messages.render("construction.site.menu.overview.name", locale(player), values),
+                        messages.renderLines("construction.site.menu.overview.lore", locale(player), values),
+                        enabled = false,
+                    ),
+                )
+                put(
                     PROGRESS,
-                    "progress",
-                    messages.render("construction.site.menu.progress.name", locale(player), values),
-                    messages.renderLines("construction.site.menu.progress.lore", locale(player), values),
-                    enabled = false,
-                ),
-                RESOURCES to entry(
+                    entry(
+                        PROGRESS,
+                        "progress",
+                        messages.render("construction.site.menu.progress.name", locale(player), values),
+                        messages.renderLines("construction.site.menu.progress.lore", locale(player), values),
+                        enabled = false,
+                    ),
+                )
+                put(
                     RESOURCES,
-                    "resources",
-                    messages.render("construction.site.menu.resources.name", locale(player), values),
-                    resourceLore(player, project, values),
-                    enabled = false,
-                ),
-                CONTROL to controlEntry(player, project, values),
-            ),
+                    entry(
+                        RESOURCES,
+                        "resources",
+                        messages.render("construction.site.menu.resources.name", locale(player), values),
+                        resourceLore(player, project, values),
+                        enabled = false,
+                    ),
+                )
+                put(CONTROL, controlEntry(player, project, values))
+                if (canBuildInstantly(player)) put(INSTANT, instantEntry(player, project, values))
+            },
         )
+    }
+
+    private fun instantEntry(
+        player: Player,
+        project: BuilderConstructionProjectRecord,
+        values: Map<String, Component>,
+    ): PaperMenuEntry = entry(
+        INSTANT,
+        "instant",
+        messages.render("construction.site.menu.instant.name", locale(player), values),
+        messages.renderLines("construction.site.menu.instant.lore", locale(player), values),
+    ) { click ->
+        if (canBuildInstantly(click.player) && requestInstant(click.player, project.projectId)) {
+            click.player.playSound(click.player.location, Sound.UI_BUTTON_CLICK, 0.7f, 1.35f)
+        }
+        refreshViewer(click.player.uniqueId)
     }
 
     private fun controlEntry(
@@ -341,6 +369,7 @@ internal class BuilderConstructionMenuManager(
         val PROGRESS = MenuElementId.of("progress")
         val RESOURCES = MenuElementId.of("resources")
         val CONTROL = MenuElementId.of("control")
-        val CONTRACT = MenuContract(requiredElements = setOf(OVERVIEW, PROGRESS, RESOURCES, CONTROL))
+        val INSTANT = MenuElementId.of("instant")
+        val CONTRACT = MenuContract(requiredElements = setOf(OVERVIEW, PROGRESS, RESOURCES, CONTROL, INSTANT))
     }
 }

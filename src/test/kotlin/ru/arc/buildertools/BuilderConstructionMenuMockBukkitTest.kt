@@ -25,6 +25,31 @@ import java.util.UUID
 import java.util.Locale
 
 class BuilderConstructionMenuMockBukkitTest : FunSpec({
+    test("only an admin sees and can request instant construction") {
+        withMenuFixture { fixture ->
+            val owner = fixture.paper.addPlayer("InstantOwner").also { it.setLocale(Locale.forLanguageTag("ru-RU")) }
+            val admin = fixture.paper.addPlayer("InstantAdmin").also { it.setLocale(Locale.forLanguageTag("ru-RU")) }
+            val project = fixture.project(owner.uniqueId)
+            val requests = mutableListOf<UUID>()
+            fixture.openManager(
+                projectLookup = { project },
+                canControl = { player, record -> player.uniqueId == record.playerId },
+                requestPaused = { _, _, _ -> true },
+                canBuildInstantly = { it.uniqueId == admin.uniqueId },
+                requestInstant = { _, projectId -> requests += projectId; true },
+            ).use { menu ->
+                menu.open(owner, project)
+                owner.openInventory.topInventory.getItem(22)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
+
+                menu.open(admin, project)
+                admin.openInventory.topInventory.getItem(22)?.type shouldBe Material.NETHER_STAR
+                plain(admin.openInventory.topInventory.getItem(22)!!.itemMeta.displayName()!!) shouldContain "мгновенно"
+                fixture.click(admin, 22).isCancelled.shouldBeTrue()
+                requests shouldBe listOf(project.projectId)
+            }
+        }
+    }
+
     test("owner opens a complete 27-slot control menu and pauses and resumes through its action slot") {
         withMenuFixture { fixture ->
             val owner = fixture.paper.addPlayer("MenuOwner").also {
@@ -208,6 +233,8 @@ private class ConstructionMenuFixture(
         projectLookup: (UUID) -> BuilderConstructionProjectRecord?,
         canControl: (org.bukkit.entity.Player, BuilderConstructionProjectRecord) -> Boolean,
         requestPaused: (org.bukkit.entity.Player, UUID, Boolean) -> Boolean,
+        canBuildInstantly: (org.bukkit.entity.Player) -> Boolean = { false },
+        requestInstant: (org.bukkit.entity.Player, UUID) -> Boolean = { _, _ -> false },
     ): BuilderConstructionMenuManager = BuilderConstructionMenuManager(
         plugin = plugin,
         settings = config.constructionMenuSettings(),
@@ -216,6 +243,8 @@ private class ConstructionMenuFixture(
         projectLookup = projectLookup,
         canControl = canControl,
         requestPaused = requestPaused,
+        canBuildInstantly = canBuildInstantly,
+        requestInstant = requestInstant,
     )
 
     fun click(player: org.bukkit.entity.Player, rawSlot: Int): InventoryClickEvent = paper.callEvent(

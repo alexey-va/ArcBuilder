@@ -75,6 +75,7 @@ placeholders:
   max: '2 000'
   missing_price: '640.00 <white>💰</white>'
   minutes: '18'
+  mirror: да
   name: 'Дом у северной гавани'
   noise: 'мягкий'
   offset_x: '-5'
@@ -121,6 +122,9 @@ glyphs:
 
 surfaces:
   hud:
+    - id: book-draft-hold-hint
+      title: builder:book.hold-hint.title
+      subtitle: builder:book.hold-hint.subtitle
     - id: book-draft-preview
       title: builder:book.preview.title
       subtitle: builder:book.preview.subtitle
@@ -233,6 +237,7 @@ surfaces:
       background-item: arc:background
       placeholders: {name: Дом у северной гавани, x: '-1266', y: '85', z: '-506', rotation: '90'}
       items:
+        - {slot: 2, material: ARROW, name: builder:book.preview-menu.placement.away.name, lore: builder:book.preview-menu.placement.away.lore}
         - {slot: 11, material: ARROW, name: builder:book.preview-menu.placement.up.name, lore: builder:book.preview-menu.placement.up.lore}
         - {slot: 19, material: ARROW, name: builder:book.preview-menu.placement.left.name, lore: builder:book.preview-menu.placement.left.lore}
         - {slot: 20, material: COMPASS, name: builder:book.preview-menu.placement.rotate.name, lore: builder:book.preview-menu.placement.rotate.lore}
@@ -241,9 +246,18 @@ surfaces:
         - {slot: 29, material: ARROW, name: builder:book.preview-menu.placement.down.name, lore: builder:book.preview-menu.placement.down.lore}
         - {slot: 34, material: RED_CONCRETE, name: builder:book.preview-menu.placement.cancel.name, lore: builder:book.preview-menu.placement.cancel.lore}
         - {slot: 37, material: AMETHYST_SHARD, name: builder:book.preview-menu.placement.mirror.name, lore: builder:book.preview-menu.placement.mirror.lore}
+        - {slot: 38, material: ARROW, name: builder:book.preview-menu.placement.toward.name, lore: builder:book.preview-menu.placement.toward.lore}
         - {slot: 39, material: RECOVERY_COMPASS, name: builder:book.preview-menu.placement.reset.name, lore: builder:book.preview-menu.placement.reset.lore}
+    - id: book-preview-inspection
+      title: builder:book.preview-menu.inspection.title
+      rows: 3
+      filler: GRAY_STAINED_GLASS_PANE
+      background-item: arc:background
+      placeholders: {name: Дом у северной гавани, owner: GrocerMC, state: черновик, x: '-1266', y: '85', z: '-506', rotation: '90', mirror: да, minutes: '3'}
+      items:
+        - {slot: 13, material: BOOK, name: builder:book.preview-menu.inspection.overview.name, lore: builder:book.preview-menu.inspection.overview.lore}
     - id: book-preview-confirmation-ready
-      title: builder:book.preview-menu.confirmation.title
+      title: builder:book.preview-menu.placement.title
       rows: 5
       filler: GRAY_STAINED_GLASS_PANE
       background-item: arc:background
@@ -252,9 +266,7 @@ surfaces:
         - slot: 19
           material: BOOK
           name: builder:book.preview-menu.confirmation.overview.name
-          lore:
-            - builder:book.preview-menu.confirmation.overview.lore
-            - builder:book.preview-menu.confirmation.materials-none
+          lore: builder:book.preview-menu.confirmation.overview.lore
         - {slot: 25, material: LIME_CONCRETE, name: builder:book.preview-menu.confirmation.start.name, lore: builder:book.preview-menu.confirmation.start.lore}
         - {slot: 29, material: ARROW, name: builder:book.preview-menu.confirmation.back.name, lore: builder:book.preview-menu.confirmation.back.lore}
         - {slot: 34, material: RED_CONCRETE, name: builder:book.preview-menu.confirmation.cancel.name, lore: builder:book.preview-menu.confirmation.cancel.lore}
@@ -271,7 +283,7 @@ surfaces:
             - builder:book.preview-menu.confirmation.material-line
         - {slot: 25, material: BARRIER, name: builder:book.preview-menu.confirmation.blocked.name, lore: builder:book.preview-menu.confirmation.blocked.lore}
     - id: book-preview-draft-activation
-      title: builder:book.preview-menu.confirmation.activation-title
+      title: builder:book.preview-menu.placement.title
       rows: 5
       filler: GRAY_STAINED_GLASS_PANE
       background-item: arc:background
@@ -396,6 +408,13 @@ surfaces:
           material: LIME_DYE
           name: builder:construction.site.menu.control.resume.name
           lore: builder:construction.site.menu.control.resume.lore
+    - id: construction-control-admin
+      extends: construction-control-active
+      items:
+        - slot: 22
+          material: NETHER_STAR
+          name: builder:construction.site.menu.instant.name
+          lore: builder:construction.site.menu.instant.lore
     - id: construction-control-readonly
       extends: construction-control-active
       items:

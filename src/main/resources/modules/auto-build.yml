@@ -41,7 +41,7 @@ build-book:
   draft-preview-message: |-
 
     <white>🛠</white> <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
-    <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — смета
+    <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — узнать цену
   player-copy:
     max-offset: 16
     max-per-player: 24
@@ -184,7 +184,7 @@ display:
 start-message: |-
 
   <white>🛠</white> <#e6fff3>Превью открыто.
-  <#8c8c8c>   Нажмите на плашку — настроить или продолжить.
+  <#8c8c8c>   ПКМ по надписи — настроить.
 confirm-time: 180
 construction:
   # Legacy import value. The durable builder-tools cooldown is authoritative and cannot be weakened by book PDC.

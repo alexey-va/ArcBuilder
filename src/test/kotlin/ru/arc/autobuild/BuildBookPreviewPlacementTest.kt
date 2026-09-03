@@ -47,6 +47,17 @@ class BuildBookPreviewPlacementTest : StringSpec({
         origin.move(BuildBookPreviewMove.DOWN, 90).anchor shouldBe BlockVector3.at(0, -1, 0)
     }
 
+    "toward and away follow the player's view on both horizontal axes" {
+        val origin = BuildBookPreviewPlacement(BlockVector3.ZERO, baseRotation = 0, maxOffset = 16)
+
+        origin.move(BuildBookPreviewMove.AWAY, 0).anchor shouldBe BlockVector3.at(0, 0, -1)
+        origin.move(BuildBookPreviewMove.TOWARD, 0).anchor shouldBe BlockVector3.at(0, 0, 1)
+        origin.move(BuildBookPreviewMove.AWAY, 90).anchor shouldBe BlockVector3.at(1, 0, 0)
+        origin.move(BuildBookPreviewMove.TOWARD, 90).anchor shouldBe BlockVector3.at(-1, 0, 0)
+        origin.move(BuildBookPreviewMove.AWAY, 180).anchor shouldBe BlockVector3.at(0, 0, 1)
+        origin.move(BuildBookPreviewMove.TOWARD, 270).anchor shouldBe BlockVector3.at(1, 0, 0)
+    }
+
     "preview placement is bounded and reset restores the original click" {
         var placement = BuildBookPreviewPlacement(BlockVector3.at(4, 70, -8), baseRotation = 90, maxOffset = 2)
         repeat(5) {

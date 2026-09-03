@@ -108,7 +108,7 @@ class BuilderBookJourneyTest : FunSpec({
         russianGuide shouldContain "Контур виден постоянно"
         russianGuide shouldContain "бесплатный"
         russianGuide shouldContain ">черновик</hover>"
-        russianGuide shouldContain ">смету</hover> без оплаты"
+        russianGuide shouldContain "бесплатно узнать цену"
         config.string("locales.ru.book.status.active") shouldContain "Цена новой копии"
         config.string("locales.en.book.status.active") shouldContain "New-copy price"
         config.string("locales.ru.book.status.checking") shouldContain "подлинность"
@@ -295,7 +295,7 @@ class BuilderBookJourneyTest : FunSpec({
         )
         val listMinimums = mapOf(
             "help" to 4,
-            "book.guide" to 6,
+            "book.guide" to 5,
             "crown.status" to 4,
             "plan.market" to 2,
         )

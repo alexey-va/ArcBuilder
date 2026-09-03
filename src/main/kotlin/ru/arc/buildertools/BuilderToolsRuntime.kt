@@ -296,10 +296,12 @@ internal class BuilderToolsRuntime(
     private val plannedConstructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionPauseRequests = BuilderConstructionPauseRequests()
+    private val constructionInstantRequests = mutableSetOf<UUID>()
     private val constructionMenus: BuilderConstructionMenuManager
     private val constructionProjectsMenu: BuilderConstructionProjectsMenuManager
     private val constructionSiteDisplays: BuilderConstructionSiteDisplayManager
     private val bookPreviewPresentation: BuilderBookPreviewPresentation
+    private val bookHoldHints = BuilderBookHoldHintTracker()
     private val constructionWrites = mutableSetOf<UUID>()
     private val constructionCompletions = mutableSetOf<UUID>()
     private val constructionLocks = mutableSetOf<UUID>()
@@ -498,6 +500,8 @@ internal class BuilderToolsRuntime(
                 projectLookup = constructionProjects::get,
                 canControl = ::canControlConstruction,
                 requestPaused = ::requestConstructionPaused,
+                canBuildInstantly = { it.hasPermission(CONSTRUCTION_ADMIN_PERMISSION) },
+                requestInstant = ::requestInstantConstruction,
             ).also { initializedConstructionMenus = it }
             constructionProjectsMenu = BuilderConstructionProjectsMenuManager(
                 plugin = plugin,
@@ -533,6 +537,12 @@ internal class BuilderToolsRuntime(
 
                     override fun confirm(player: Player): Boolean = confirmBookPreview(player)
 
+                    override fun complete(player: Player, kind: BuilderBookPreviewConfirmationKind) {
+                        if (kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION) {
+                            BuildingManager.closePreview(player.uniqueId)
+                        }
+                    }
+
                     override fun restore(
                         player: Player,
                         snapshot: ru.arc.autobuild.ConstructionSiteSnapshot,
@@ -564,6 +574,7 @@ internal class BuilderToolsRuntime(
                             send(player, "book.preview-expired")
                         }
                     }
+                    Bukkit.getOnlinePlayers().forEach(::refreshBookHoldHint)
                 },
             ) { "Builder build-book preview expiry task was not scheduled" }
             previews = BuilderPreviewSessions(
@@ -1432,6 +1443,7 @@ internal class BuilderToolsRuntime(
         snapshot: ru.arc.autobuild.ConstructionSiteSnapshot,
     ): ConstructionSite? = runBookPreviewAction(player) {
         requireMatchingPreviewBook(player, snapshot.bookData)
+        books.cancelPreviewActivation(player.uniqueId)
         discardPreparedBookPlan(player.uniqueId)
         BuildingManager.restorePreview(snapshot, System.currentTimeMillis())
             ?: throw BuilderUserFailure("errors.expired")
@@ -1840,6 +1852,7 @@ internal class BuilderToolsRuntime(
                     if (durable.state == BuilderConstructionProjectState.COMPLETED) {
                         finalizeConstructionCompletion(durable)
                     }
+                    continueInstantConstruction(durable)
                 },
             )
         }
@@ -2372,9 +2385,35 @@ internal class BuilderToolsRuntime(
                         "cursor" to durable.cursor,
                     ),
                 )
+                continueInstantConstruction(durable)
             },
         )
         return true
+    }
+
+    private fun requestInstantConstruction(player: Player, projectId: UUID): Boolean {
+        if (!player.hasPermission(CONSTRUCTION_ADMIN_PERMISSION)) return false
+        val project = constructionProjects[projectId]?.takeUnless(BuilderConstructionProjectRecord::terminal)
+            ?: return false
+        if (project.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) return false
+        constructionInstantRequests += projectId
+        val accepted = if (project.state == BuilderConstructionProjectState.PAUSED) {
+            requestConstructionPaused(player, projectId, pause = false)
+        } else {
+            taskScope.runSync(::tickConstructionProjects) != null
+        }
+        if (!accepted) constructionInstantRequests -= projectId
+        if (accepted) send(player, "construction.instant-started")
+        return accepted
+    }
+
+    private fun continueInstantConstruction(project: BuilderConstructionProjectRecord) {
+        if (project.projectId !in constructionInstantRequests) return
+        if (project.terminal || project.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) {
+            constructionInstantRequests -= project.projectId
+            return
+        }
+        taskScope.runSync(::tickConstructionProjects)
     }
 
     private fun teleportToConstruction(player: Player, requested: BuilderConstructionProjectRecord) {
@@ -2662,6 +2701,21 @@ internal class BuilderToolsRuntime(
         sendPlayerMessage(player, messages.render(path, locale(player), values))
     }
 
+    private fun refreshBookHoldHint(player: Player) {
+        val data = BuildBookCodec.read(player.inventory.itemInMainHand)?.takeIf(BuildBookData::draft)
+        val identity = data?.let { "${it.blueprintId}:${it.contentSha256}" }
+        if (!bookHoldHints.shouldShow(player.uniqueId, identity, BuildingManager.pending(player.uniqueId) != null)) return
+        player.showTitle(
+            Title.title(
+                messages.render("book.hold-hint.title", locale(player)),
+                messages.render("book.hold-hint.subtitle", locale(player)),
+                5,
+                40,
+                10,
+            ),
+        )
+    }
+
     private fun locale(player: Player): String = player.locale().toLanguageTag()
 
     private fun java.time.Duration.toTicks(): Long = (toMillis() / 50L).coerceAtLeast(1L)
@@ -2858,6 +2912,7 @@ internal class BuilderToolsRuntime(
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
         discardPendingPlan(event.player.uniqueId)
+        bookHoldHints.clear(event.player.uniqueId)
         selections.clear(event.player.uniqueId)
         BuildingManager.closePreview(event.player.uniqueId)
         displayRenderer.clearPlayer(event.player.uniqueId)
@@ -2960,6 +3015,8 @@ internal class BuilderToolsRuntime(
         constructionProjectsMenu.close()
         constructionMenus.close()
         constructionPauseRequests.clear()
+        constructionInstantRequests.clear()
+        bookHoldHints.clear()
         bookPreviewPresentation.close()
         taskScope.close()
         closeStorageExecutor()
