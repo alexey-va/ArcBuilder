@@ -90,7 +90,7 @@ vanilla item textures, and declared custom item models such as
 Generation fails if a new player-visible key is not assigned to a surface or a
 placeholder has no representative value.
 
-The production artifact is `build/libs/ArcBuilder-1.0.15.jar`. From the ops
+The production artifact is the versioned `build/libs/ArcBuilder-<version>.jar`. From the ops
 repository it is deployed independently with:
 
 ```bash

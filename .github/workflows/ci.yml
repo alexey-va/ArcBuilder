@@ -29,17 +29,26 @@ jobs:
       - name: Unit tests and production JAR
         run: ./gradlew --no-daemon test shadowJar
       - name: Verify production artifact
+        id: artifact
         run: |
-          jar_path="build/libs/ArcBuilder-1.0.15.jar"
+          shopt -s nullglob
+          candidates=(build/libs/ArcBuilder-*.jar)
+          jar_paths=()
+          for candidate in "${candidates[@]}"; do
+            [[ "$candidate" == *-plain.jar ]] || jar_paths+=("$candidate")
+          done
+          test "${#jar_paths[@]}" -eq 1
+          jar_path="${jar_paths[0]}"
           test -s "$jar_path"
           jar tf "$jar_path" | grep -Fx plugin.yml
           jar tf "$jar_path" | grep -Fq 'kotlin/collections/CollectionsKt.class'
           ! jar tf "$jar_path" | grep -Eq '^(org/bukkit|io/papermc|com/sk89q)/'
           unzip -p "$jar_path" plugin.yml | grep -Fx 'name: ArcBuilder'
+          printf 'path=%s\n' "$jar_path" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ArcBuilder-${{ github.sha }}
-          path: build/libs/ArcBuilder-1.0.15.jar
+          path: ${{ steps.artifact.outputs.path }}
           if-no-files-found: error
 
   mysql-integration:
