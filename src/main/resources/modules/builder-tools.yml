@@ -833,8 +833,8 @@ locales:
               - "<#8c8c8c>Исчезнет через: <#e6fff3><minutes> мин."
               - "<#969696>Только просмотр — изменить чужой дом нельзя."
           mirror:
-            yes: "да"
-            no: "нет"
+            "yes": "да"
+            "no": "нет"
       plan-ready:
         title: "<#2bba43>План готов"
         subtitle: "<#e6fff3>Подтвердите действие в чате"
@@ -1717,8 +1717,8 @@ locales:
               - "<gray>Disappears in: <white><minutes> min"
               - "<dark_gray>Read only — you cannot move another player's build."
           mirror:
-            yes: "yes"
-            no: "no"
+            "yes": "yes"
+            "no": "no"
       plan-ready:
         title: "<green>Plan ready"
         subtitle: "<white>Confirm it in chat"
