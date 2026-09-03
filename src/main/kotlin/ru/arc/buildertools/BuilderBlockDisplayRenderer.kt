@@ -296,6 +296,22 @@ internal class BuilderBlockDisplayRenderer(
             model.bounds.takeIf(List<*>::isNotEmpty)?.let {
                 addAll(bounds(it, Material.ORANGE_STAINED_GLASS, Color.fromRGB(255, 177, 66)))
             }
+            val anchor = site.centerBlock.block
+            val origin = BuilderDisplayGeometry.originMarker(
+                BuilderBlockPos(site.world.uid, anchor.x, anchor.y, anchor.z),
+            )
+            add(
+                DisplaySpec(
+                    origin.x,
+                    origin.y,
+                    origin.z,
+                    Material.LIME_STAINED_GLASS.createBlockData(),
+                    origin.scaleX,
+                    origin.scaleY,
+                    origin.scaleZ,
+                    glow = Color.LIME,
+                ),
+            )
         }
         replace(site.player, Layer.BOOK, specs)
     }

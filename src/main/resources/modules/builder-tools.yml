@@ -11,7 +11,7 @@ limits:
   max-changes: 4096
   max-clipboard-blocks: 4096
   max-scan-volume: 8192
-  absolute-max-axis: 48
+  absolute-max-axis: 100
   blocks-per-tick: 16
   base-hourly-changes: 20000
   maximum-range: 64
@@ -48,14 +48,14 @@ construction:
       enabled: true
       # Fallback for legacy projects. New projects persist the nearest vertical face to the owner at confirmation.
       face: MAX_Z
-      height-offset: 2.25
+      height-offset: 1.6
       front-offset: 0.4
       interaction-width: 3.0
       interaction-height: 1.5
       line-width: 180
       max-material-lines: 8
-      # ARGB: semi-transparent dark builder surface.
-      background-color: '#B21C2328'
+      # ARGB: nearly opaque dark surface, readable against bright builds and sky.
+      background-color: '#E6101418'
     menu:
       rows: 3
       refresh-period-ticks: 10
@@ -682,27 +682,28 @@ locales:
         <#8c8c8c>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Подтвердить]</click> <#8c8c8c>   <click:run_command:'/builder book cancel'><#969696>[✖ Отмена]</click>
       preview-opened: |-
 
-        <prefix><#d48763>Контур дома «<name>» показан.
-        <#8c8c8c>   1. <#e6fff3>Подойдите к надписи перед домом.
-        <#8c8c8c>   2. <#e6fff3>Нажмите по ней ПКМ — откроется настройка места.
-        <#8c8c8c>   Контур сам исчезнет через 3 минуты.
-        <#8c8c8c>   <click:run_command:'/builder cancel'><#c42323>[✖ Убрать контур]</click>
+        <prefix><#d48763>Превью постройки «<name>» готово.
+        <#8c8c8c>   1. <#e6fff3>Найдите светящуюся табличку перед постройкой.
+        <#8c8c8c>   2. <#e6fff3>Нажмите по табличке ПКМ — откроется меню настройки.
+        <#8c8c8c>   <#2bba43>Зелёный куб<#e6fff3> показывает выбранный блок.
+        <#8c8c8c>   Превью и табличка исчезнут сами через 3 минуты.
+        <#8c8c8c>   <click:run_command:'/builder cancel'><#c42323>[✖ Убрать превью]</click>
       preview-panel: |-
-        <#ffb142><bold>Проверьте место</bold>
+        <#ffb142><bold>Настроить постройку</bold>
         <#e6fff3><name>
-        <#92bed8>ПКМ — открыть настройку
+        <#92bed8>ПКМ — открыть меню
       preview:
-        title: "<#ffb142>Контур дома показан"
-        subtitle: "<#e6fff3>Нажмите ПКМ по надписи перед домом"
-        actionbar: "<#d48763>Надпись перед домом: ПКМ — настроить   <#8c8c8c>—   <#969696>/builder cancel"
-        bossbar-draft: "<#ffb142>Черновик «<name>» — выберите место для дома"
-        bossbar-active: "<#2bba43>Книга «<name>» — проверьте место для дома"
+        title: "<#ffb142>Превью постройки готово"
+        subtitle: "<#e6fff3>Нажмите ПКМ по светящейся табличке"
+        actionbar: "<#d48763>Светящаяся табличка: ПКМ — открыть меню   <#8c8c8c>—   <#969696>/builder cancel"
+        bossbar-draft: "<#ffb142>Черновик «<name>» — нажмите ПКМ по табличке"
+        bossbar-active: "<#2bba43>Книга «<name>» — нажмите ПКМ по табличке"
       hold-hint:
-        title: "<#ffb142>Выберите место для дома"
-        subtitle: "<#e6fff3>Нажмите ПКМ по земле"
+        title: "<#ffb142>Поставьте превью постройки"
+        subtitle: "<#e6fff3>Нажмите ПКМ по нужному блоку"
       preview-menu:
         placement:
-          title: "<#ffb142>Место дома: <name>"
+          title: "<#ffb142>Настройка постройки: <name>"
           away:
             name: "<#92bed8>⇧ От себя"
             lore:
@@ -760,7 +761,7 @@ locales:
           cancel:
             name: "<#c42323>Убрать превью"
             lore:
-              - "<#8c8c8c>Убрать контур дома. Блоки не изменятся."
+              - "<#8c8c8c>Убрать превью. Блоки не изменятся."
               - "<#8c8c8c>[<#c42323>▶<#8c8c8c>] <#c42323>ЛКМ<#e6fff3> — убрать"
           continue:
             name: "<#2bba43>Проверить и продолжить"
@@ -769,13 +770,14 @@ locales:
               - "<#969696>Блоки пока не изменятся."
               - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — продолжить"
         confirmation:
-          title: "<#2bba43>Подтверждение: <name>"
+          title: "<#2bba43>Финальная проверка: <name>"
           activation-title: "<#2bba43>Создание книги: <name>"
           overview:
-            name: "<#e6fff3>План строительства"
+            name: "<#e6fff3>Что изменится"
             lore:
               - "<#8c8c8c>Изменится блоков: <#92bed8><count>"
-              - "<#969696>Проверьте место перед запуском."
+              - "<#c42323>Красные блоки будут удалены."
+              - "<#969696>Осмотрите постройку перед запуском."
           activation-overview:
             name: "<#e6fff3>Создание строительной книги"
             lore:
@@ -795,9 +797,9 @@ locales:
           material-more: "<#969696>И ещё <count> видов"
           materials-none: "<#2bba43>Материалы не требуются"
           back:
-            name: "<#92bed8>Назад к размещению"
+            name: "<#92bed8>Изменить место"
             lore:
-              - "<#8c8c8c>Вернуться к контуру дома."
+              - "<#8c8c8c>Вернуться к перемещению и повороту постройки."
           start:
             name: "<#2bba43>Начать строительство"
             lore:
@@ -1564,27 +1566,28 @@ locales:
         <dark_gray>   <click:run_command:'/builder book confirm'><#92bed8>[▶ Confirm]</click>  <click:run_command:'/builder book cancel'><#969696>[✖ Cancel]</click>
       preview-opened: |-
 
-        <prefix><aqua>The outline for “<name>” is visible.
-        <dark_gray>   1. <white>Walk to the text in front of the build.
-        <dark_gray>   2. <white>Right-click it to adjust the position.
-        <dark_gray>   The outline disappears automatically after 3 minutes.
-        <dark_gray>   <click:run_command:'/builder cancel'><red>[✖ Remove outline]</click>
+        <prefix><aqua>The preview for “<name>” is ready.
+        <dark_gray>   1. <white>Find the glowing sign in front of the build.
+        <dark_gray>   2. <white>Right-click the sign to open the controls.
+        <dark_gray>   <green>The green cube<white> marks the selected block.
+        <dark_gray>   The preview and sign disappear automatically after 3 minutes.
+        <dark_gray>   <click:run_command:'/builder cancel'><red>[✖ Remove preview]</click>
       preview-panel: |-
-        <gold><bold>Check this spot</bold>
+        <gold><bold>Adjust the build</bold>
         <white><name>
-        <aqua>Right-click — open position controls
+        <aqua>Right-click — open controls
       preview:
-        title: "<gold>Build outline shown"
-        subtitle: "<white>Right-click the text in front of the build"
-        actionbar: "<aqua>Text in front: right-click to adjust   <dark_gray>—   <gray>/builder cancel"
-        bossbar-draft: "<gold>Draft “<name>” — choose a spot for the build"
-        bossbar-active: "<green>Book “<name>” — check the build location"
+        title: "<gold>Build preview ready"
+        subtitle: "<white>Right-click the glowing sign"
+        actionbar: "<aqua>Glowing sign: right-click to open controls   <dark_gray>—   <gray>/builder cancel"
+        bossbar-draft: "<gold>Draft “<name>” — right-click the sign"
+        bossbar-active: "<green>Book “<name>” — right-click the sign"
       hold-hint:
-        title: "<gold>Choose a spot for the build"
-        subtitle: "<white>Right-click the ground"
+        title: "<gold>Place the build preview"
+        subtitle: "<white>Right-click the block you want"
       preview-menu:
         placement:
-          title: "<gold>Build position: <name>"
+          title: "<gold>Adjust build: <name>"
           away:
             name: "<aqua>⇧ Away from you"
             lore:
@@ -1651,13 +1654,14 @@ locales:
               - "<dark_gray>Blocks are still unchanged."
               - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — continue"
         confirmation:
-          title: "<green>Confirm: <name>"
+          title: "<green>Final check: <name>"
           activation-title: "<green>Create book: <name>"
           overview:
-            name: "<white>Construction plan"
+            name: "<white>What will change"
             lore:
               - "<gray>Blocks changed: <aqua><count>"
-              - "<dark_gray>Check the placement before starting."
+              - "<red>Red blocks will be removed."
+              - "<dark_gray>Inspect the build before starting."
           activation-overview:
             name: "<white>Create a build book"
             lore:
@@ -1677,9 +1681,9 @@ locales:
           material-more: "<dark_gray>And <count> more types"
           materials-none: "<green>No materials required"
           back:
-            name: "<aqua>Back to placement"
+            name: "<aqua>Change position"
             lore:
-              - "<gray>Return to the same build outline."
+              - "<gray>Return to moving and rotating the build."
           start:
             name: "<green>Start construction"
             lore:

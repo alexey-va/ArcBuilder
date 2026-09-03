@@ -74,7 +74,7 @@ class BuilderToolsConfig(
             config.string("construction.site.panel.face", "MAX_Z").uppercase(Locale.ROOT),
         )
     val constructionSitePanelHeightOffset: Double
-        get() = config.double("construction.site.panel.height-offset", 2.25)
+        get() = config.double("construction.site.panel.height-offset", 1.6)
     val constructionSitePanelFrontOffset: Double
         get() = config.double("construction.site.panel.front-offset", 0.4)
     val constructionSitePanelInteractionWidth: Float
@@ -85,7 +85,7 @@ class BuilderToolsConfig(
     val constructionSiteMaxMaterialLines: Int
         get() = config.integer("construction.site.panel.max-material-lines", 8)
     val constructionSitePanelBackgroundColor: String
-        get() = config.string("construction.site.panel.background-color", "#B21C2328")
+        get() = config.string("construction.site.panel.background-color", "#E6101418")
     val constructionSiteMenuRows: Int get() = config.integer("construction.site.menu.rows", 3)
     val constructionSiteMenuRefreshPeriodTicks: Long
         get() = config.long("construction.site.menu.refresh-period-ticks", 10L)

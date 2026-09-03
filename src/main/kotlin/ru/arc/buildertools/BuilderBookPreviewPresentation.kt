@@ -192,9 +192,6 @@ internal class BuilderBookPreviewPresentation(
         val inventory = confirmationInventories[playerId] ?: return
         if (event.view.topInventory !== inventory) return
         confirmationInventories.remove(playerId)
-        val snapshot = snapshots.remove(playerId) ?: return
-        if (closed || !player.isOnline) return
-        host.restore(player, snapshot)?.let { placementSites[playerId] = it }
     }
 
     private fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment) {
@@ -252,10 +249,15 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun openPlacement(player: Player, site: ConstructionSite) {
-        snapshots.remove(player.uniqueId)
         confirmationInventories.remove(player.uniqueId)
         placementSites[player.uniqueId] = site
+        if (player.uniqueId in snapshots && host.currentConfirmation(player) == null) {
+            snapshots.remove(player.uniqueId)
+        }
         menus.open(player, PLACEMENT_MENU) { menuContent(player) }
+        if (player.uniqueId in snapshots && host.currentConfirmation(player) != null) {
+            menus.session(player)?.inventory?.let { confirmationInventories[player.uniqueId] = it }
+        }
     }
 
     internal fun openPlacementForTest(player: Player, site: ConstructionSite) = openPlacement(player, site)
