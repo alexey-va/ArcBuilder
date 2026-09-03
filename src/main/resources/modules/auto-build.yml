@@ -41,13 +41,13 @@ build-book:
   draft-preview-message: |-
 
     <white>🛠</white> <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
-    <#8c8c8c>   ПКМ по блоку — перенести; ПКМ в воздух — узнать цену
+    <#8c8c8c>   ПКМ по блоку — переставить; ПКМ в воздух — узнать цену
   player-copy:
     max-offset: 16
     max-per-player: 24
     custom-model-data: 0
-    draft-custom-model-data: 0
-    active-custom-model-data: 0
+    draft-custom-model-data: 12150
+    active-custom-model-data: 12151
     # Stable per-book variants backed by arc:builder_book_ready_01..20 in ItemsAdder.
     active-custom-model-data-pool:
       - 12160
@@ -184,7 +184,7 @@ display:
 start-message: |-
 
   <white>🛠</white> <#e6fff3>Превью открыто.
-  <#8c8c8c>   ПКМ по надписи — настроить.
+  <#8c8c8c>   ПКМ по светящейся табличке — открыть меню.
 confirm-time: 180
 construction:
   # Legacy import value. The durable builder-tools cooldown is authoritative and cannot be weakened by book PDC.
