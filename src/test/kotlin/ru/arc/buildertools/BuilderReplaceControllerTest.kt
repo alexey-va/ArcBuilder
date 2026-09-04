@@ -152,8 +152,10 @@ private class ReplaceHarness(
     val controller = BuilderReplaceController(
         safety = safety,
         maximumChanges = maximumChanges,
-        host = object : BuilderReplaceHost {
-            override fun ensurePermission(player: Player) = Unit
+        host = object : BuilderPlanningHost {
+            override fun ensurePermission(player: Player, feature: BuilderFeature) {
+                feature shouldBe BuilderFeature.REPLACE
+            }
 
             override fun requiredSelection(player: Player): BuilderSelection =
                 selection ?: throw ReplaceFailure("errors.selection-missing")
@@ -163,12 +165,13 @@ private class ReplaceHarness(
 
             override fun placementData(material: Material): BlockData = material.createBlockData()
 
-            override fun ensurePlacement(player: Player, block: Block, material: Material) {
+            override fun ensureMutable(player: Player, block: Block, placing: Material?) {
                 mutableChecks++
             }
 
             override fun createPlan(
                 player: Player,
+                kind: BuilderPlanKind,
                 changes: List<BuilderBlockChange>,
                 costs: List<BuilderItemAmount>,
                 rewards: List<BuilderItemAmount>,
@@ -178,7 +181,7 @@ private class ReplaceHarness(
                 return BuilderPlan(
                     id = UUID.randomUUID(),
                     playerId = player.uniqueId,
-                    kind = BuilderPlanKind.REPLACE,
+                    kind = kind,
                     changes = changes,
                     costs = costs,
                     rewards = rewards,

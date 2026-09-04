@@ -116,8 +116,9 @@ private class FillHarness(
     val controller = BuilderFillController(
         safety = safety,
         maximumChanges = maximumChanges,
-        host = object : BuilderFillHost {
-            override fun ensurePermission(player: Player) {
+        host = object : BuilderPlanningHost {
+            override fun ensurePermission(player: Player, feature: BuilderFeature) {
+                feature shouldBe BuilderFeature.FILL
                 permissionChecks++
             }
 
@@ -129,7 +130,7 @@ private class FillHarness(
 
             override fun placementData(material: Material): BlockData = material.createBlockData()
 
-            override fun ensureMutable(player: Player, block: Block) {
+            override fun ensureMutable(player: Player, block: Block, placing: Material?) {
                 mutableChecks++
                 if (!mutable) throw FillFailure("errors.protection")
             }
@@ -141,17 +142,21 @@ private class FillHarness(
 
             override fun createPlan(
                 player: Player,
+                kind: BuilderPlanKind,
                 changes: List<BuilderBlockChange>,
                 costs: List<BuilderItemAmount>,
+                rewards: List<BuilderItemAmount>,
+                skippedUnsafeBlocks: Int,
             ): BuilderPlan {
                 createdPlans++
                 return BuilderPlan(
                     id = UUID.randomUUID(),
                     playerId = player.uniqueId,
-                    kind = BuilderPlanKind.FILL,
+                    kind = kind,
                     changes = changes,
                     costs = costs,
-                    rewards = emptyList(),
+                    rewards = rewards,
+                    skippedUnsafeBlocks = skippedUnsafeBlocks,
                     createdAtMillis = 1_800_000_000_000L,
                     expiresAtMillis = 1_800_000_030_000L,
                 ).validated(maximumChanges)

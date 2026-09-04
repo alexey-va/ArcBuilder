@@ -113,6 +113,36 @@ internal class BuilderToolsRuntime(
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
     private val safety = BuilderBlockSafety(plugin, config.replaceableMaterials)
+    private val planningHost = object : BuilderPlanningHost {
+        override fun ensurePermission(player: Player, feature: BuilderFeature) = ensureFeaturePermission(player, feature)
+
+        override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
+
+        override fun world(worldId: UUID): World = requireWorld(worldId)
+
+        override fun placementData(material: Material) = this@BuilderToolsRuntime.placementData(material)
+
+        override fun ensureMutable(player: Player, block: Block, placing: Material?) =
+            this@BuilderToolsRuntime.ensureMutable(player, block, placing)
+
+        override fun createPlan(
+            player: Player,
+            kind: BuilderPlanKind,
+            changes: List<BuilderBlockChange>,
+            costs: List<BuilderItemAmount>,
+            rewards: List<BuilderItemAmount>,
+            skippedUnsafeBlocks: Int,
+        ): BuilderPlan = newPlan(
+            player = player,
+            kind = kind,
+            changes = changes,
+            costs = costs,
+            rewards = rewards,
+            skippedUnsafeBlocks = skippedUnsafeBlocks,
+        )
+
+        override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
+    }
     private val coreProtect = BuilderCoreProtectBridge.resolve()
     private val journal = BuilderJournalStore(plugin.dataPath, config.maxChanges)
     private val constructionStore = BuilderConstructionProjectStore(plugin.dataPath, config.maxChanges)
@@ -131,79 +161,16 @@ internal class BuilderToolsRuntime(
     private val fillController = BuilderFillController(
         safety = safety,
         maximumChanges = config.maxChanges,
-        host = object : BuilderFillHost {
-            override fun ensurePermission(player: Player) = ensureFeaturePermission(player, BuilderFeature.FILL)
-
-            override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
-
-            override fun world(worldId: UUID): World = requireWorld(worldId)
-
-            override fun placementData(material: Material) = this@BuilderToolsRuntime.placementData(material)
-
-            override fun ensureMutable(player: Player, block: Block) = this@BuilderToolsRuntime.ensureMutable(player, block)
-
-            override fun ensurePlacement(player: Player, block: Block, material: Material) =
-                this@BuilderToolsRuntime.ensureMutable(player, block, material)
-
-            override fun createPlan(
-                player: Player,
-                changes: List<BuilderBlockChange>,
-                costs: List<BuilderItemAmount>,
-            ): BuilderPlan = newPlan(player, BuilderPlanKind.FILL, changes, costs, emptyList())
-
-            override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
-        },
+        host = planningHost,
     )
     private val replaceController = BuilderReplaceController(
         safety = safety,
         maximumChanges = config.maxChanges,
-        host = object : BuilderReplaceHost {
-            override fun ensurePermission(player: Player) = ensureFeaturePermission(player, BuilderFeature.REPLACE)
-
-            override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
-
-            override fun world(worldId: UUID): World = requireWorld(worldId)
-
-            override fun placementData(material: Material) = this@BuilderToolsRuntime.placementData(material)
-
-            override fun ensurePlacement(player: Player, block: Block, material: Material) =
-                this@BuilderToolsRuntime.ensureMutable(player, block, material)
-
-            override fun createPlan(
-                player: Player,
-                changes: List<BuilderBlockChange>,
-                costs: List<BuilderItemAmount>,
-                rewards: List<BuilderItemAmount>,
-                skippedUnsafeBlocks: Int,
-            ): BuilderPlan = newPlan(
-                player = player,
-                kind = BuilderPlanKind.REPLACE,
-                changes = changes,
-                costs = costs,
-                rewards = rewards,
-                skippedUnsafeBlocks = skippedUnsafeBlocks,
-            )
-
-            override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
-        },
+        host = planningHost,
     )
     private val fenceConnectionController = BuilderFenceConnectionController(
         maximumChanges = config.maxChanges,
-        host = object : BuilderFenceConnectionHost {
-            override fun ensurePermission(player: Player) =
-                ensureFeaturePermission(player, BuilderFeature.FENCE_DISCONNECT)
-
-            override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
-
-            override fun world(worldId: UUID): World = requireWorld(worldId)
-
-            override fun ensureMutable(player: Player, block: Block) = this@BuilderToolsRuntime.ensureMutable(player, block)
-
-            override fun createPlan(player: Player, changes: List<BuilderBlockChange>): BuilderPlan =
-                newPlan(player, BuilderPlanKind.FENCE_DISCONNECT, changes, emptyList(), emptyList())
-
-            override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
-        },
+        host = planningHost,
     )
     private val clipboardController = BuilderClipboardController(
         safety = safety,

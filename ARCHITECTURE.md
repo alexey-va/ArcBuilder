@@ -46,6 +46,9 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 permissions. `arcbuild.use` is the umbrella permission; size and hourly tiers
 are resolved there as well.
 
+`BuilderPlanningHost` is the shared runtime preflight and plan boundary for
+the fill, replace, and fence-disconnect controllers.
+
 ## Selection and preview
 
 `BuilderSelectionController` owns two in-memory corners per player. The selector
