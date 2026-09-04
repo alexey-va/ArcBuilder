@@ -1,7 +1,5 @@
 # Persistent Construction Projects Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Turn confirmed construction books into restart-safe projects that consume player materials incrementally from authorized nearby inventories.
 
 **Architecture:** `BUILD_BOOK` is routed to a dedicated project controller backed by `DurableRecordJournal`; ordinary builder plans keep their atomic inventory/journal flow. A small resource gateway owns exact player/container exchange and asks Lands for `INTERACT_CONTAINER` at every container mutation.

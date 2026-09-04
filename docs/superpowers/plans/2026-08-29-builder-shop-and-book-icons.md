@@ -1,7 +1,5 @@
 # Builder Shop and Book Icons Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Publish identical comprehensive building shops on spawn and survival and replace both construction-book textures with native 32x32 pixel art.
 
 **Architecture:** The ops repository owns two byte-identical split EconomyShopGUI section/shop files. Spawn ItemsAdder `contents/` remains the only texture source; normal pack publication mirrors and activates it on survival.

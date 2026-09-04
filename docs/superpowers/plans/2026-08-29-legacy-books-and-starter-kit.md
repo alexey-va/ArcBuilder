@@ -1,7 +1,5 @@
 # Legacy Books and Starter Kit Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Expose the shared legacy schematic library safely in ArcBuilder and make the CMI start kit issue a compatible first-home construction book.
 
 **Architecture:** A tracked system-book catalog whitelists legacy building keys and immutable schematic digests. ArcBuilder accepts catalog-backed physical books without misrepresenting them as player-authored MySQL instances; CMI continues issuing the book through its native kit API.
