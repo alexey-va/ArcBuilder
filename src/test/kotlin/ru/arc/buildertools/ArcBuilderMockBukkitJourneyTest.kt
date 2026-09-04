@@ -607,6 +607,73 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("runtime keeps feature permissions and plan contracts isolated") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            fun Player.grant(permission: String) {
+                addAttachment(journey.plugin, permission, true)
+                recalculatePermissions()
+            }
+
+            val fill = journey.paper.addPlayer("RuntimeFillOnly").also {
+                it.gameMode = GameMode.SURVIVAL
+                it.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+                it.grant("arcbuild.fill")
+                it.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            }
+            journey.world.getBlockAt(0, 64, 0).type = Material.DIRT
+            fill.performCommand("builder wand") shouldBe true
+            journey.select(fill, journey.world, fill.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            fill.performCommand("builder replace dirt stone") shouldBe true
+            journey.renderer.plans[fill.uniqueId] shouldBe null
+            journey.world.getBlockAt(0, 64, 0).type = Material.AIR
+            fill.inventory.addItem(ItemStack(Material.STONE))
+            fill.performCommand("builder fill stone") shouldBe true
+            val fillPlan = checkNotNull(journey.renderer.plans[fill.uniqueId])
+            fillPlan.kind shouldBe BuilderPlanKind.FILL
+            fillPlan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:stone" to 1)
+            fill.performCommand("builder cancel") shouldBe true
+
+            val replace = journey.paper.addPlayer("RuntimeReplaceOnly").also {
+                it.gameMode = GameMode.SURVIVAL
+                it.teleport(Location(journey.world, 1.5, 64.0, 3.5))
+                it.grant("arcbuild.replace")
+                it.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            }
+            journey.world.getBlockAt(1, 64, 0).type = Material.AIR
+            replace.performCommand("builder wand") shouldBe true
+            journey.select(replace, journey.world, replace.inventory.itemInMainHand, 1, 64, 0, 1, 64, 0)
+            replace.performCommand("builder fill deepslate") shouldBe true
+            journey.renderer.plans[replace.uniqueId] shouldBe null
+            journey.world.getBlockAt(1, 64, 0).type = Material.STONE
+            replace.inventory.addItem(ItemStack(Material.DEEPSLATE))
+            replace.performCommand("builder replace stone deepslate") shouldBe true
+            val replacePlan = checkNotNull(journey.renderer.plans[replace.uniqueId])
+            replacePlan.kind shouldBe BuilderPlanKind.REPLACE
+            replacePlan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:deepslate" to 1)
+            replacePlan.rewards.map { it.materialKey to it.amount } shouldBe listOf("minecraft:stone" to 1)
+            replace.performCommand("builder cancel") shouldBe true
+
+            val disconnect = journey.paper.addPlayer("RuntimeDisconnectOnly").also {
+                it.gameMode = GameMode.CREATIVE
+                it.teleport(Location(journey.world, 2.5, 64.0, 3.5))
+                it.grant("arcbuild.disconnect")
+                it.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            }
+            val fence = Material.OAK_FENCE.createBlockData() as MultipleFacing
+            fence.setFace(BlockFace.NORTH, true)
+            journey.world.getBlockAt(2, 64, 0).setBlockData(fence, false)
+            disconnect.performCommand("builder wand") shouldBe true
+            journey.select(disconnect, journey.world, disconnect.inventory.itemInMainHand, 2, 64, 0, 2, 64, 0)
+            disconnect.performCommand("builder replace oak_fence stone") shouldBe true
+            journey.renderer.plans[disconnect.uniqueId] shouldBe null
+            disconnect.performCommand("builder disconnect") shouldBe true
+            val disconnectPlan = checkNotNull(journey.renderer.plans[disconnect.uniqueId])
+            disconnectPlan.kind shouldBe BuilderPlanKind.FENCE_DISCONNECT
+            disconnectPlan.costs shouldBe emptyList()
+            disconnectPlan.rewards shouldBe emptyList()
+        }
+    }
+
     test("replace previews an exact survival exchange preserves state and remains undoable") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("StateReplacer", GameMode.SURVIVAL)
