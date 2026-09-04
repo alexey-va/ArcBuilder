@@ -607,6 +607,47 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("completion preserves feature permissions argument positions and case insensitive prefixes") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val queries = listOf(
+                "builder Fi" to "fill",
+                "builder ReP" to "replace",
+                "builder replace dirt stone C" to "confirm",
+                "builder disconnect C" to "confirm",
+                "builder paste R" to "rotate",
+                "builder book G" to "guide",
+                "builder crown shape R" to "round",
+            )
+            val permissions = listOf(
+                "arcbuild.fill", "arcbuild.replace", "arcbuild.disconnect", "arcbuild.paste",
+                "arcbuild.book.use", "arcbuild.crown", "arcbuild.use",
+            )
+            permissions.forEachIndexed { index, permission ->
+                val player = journey.paper.addPlayer("Completion$index")
+                player.addAttachment(journey.plugin, permission, true)
+                player.recalculatePermissions()
+                queries.forEach { (query, expected) ->
+                    val command = when (query) {
+                        "builder Fi" -> "fill"
+                        "builder ReP" -> "replace"
+                        else -> query.split(' ')[1].lowercase()
+                    }
+                    val allowed = permission == "arcbuild.use" || permission == "arcbuild.$command" ||
+                        command == "book" && permission == "arcbuild.book.use"
+                    val matches = journey.paper.server.getCommandTabComplete(player, query)
+                    if (allowed) (expected in matches) shouldBe true else matches shouldBe emptyList()
+                }
+                journey.paper.server.getCommandTabComplete(player, "builder confirm B") shouldBe listOf("buy")
+                listOf("builder unknown x", "builder fill stone extra", "builder replace dirt stone confirm extra").forEach {
+                    journey.paper.server.getCommandTabComplete(player, it) shouldBe emptyList()
+                }
+            }
+            val denied = journey.paper.addPlayer("CompletionDenied")
+            journey.paper.server.getCommandTabComplete(denied, "builder fill stone") shouldBe emptyList()
+            journey.paper.server.getCommandTabComplete(denied, "builder confirm b") shouldBe emptyList()
+        }
+    }
+
     test("runtime keeps feature permissions and plan contracts isolated") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             fun Player.grant(permission: String) {

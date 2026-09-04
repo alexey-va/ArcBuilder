@@ -792,33 +792,27 @@ internal class BuilderToolsRuntime(
                 args[0],
             )
         }
-        if (args.size == 2 && args[0].equals("confirm", true)) return filterPrefix(listOf("buy"), args[1])
-        if (args.size == 2 && args[0].equals("disconnect", true)) {
-            if (!BuilderPermissionPolicy.canUse(BuilderFeature.FENCE_DISCONNECT, sender::hasPermission)) return emptyList()
-            return filterPrefix(listOf("confirm"), args[1])
+        val root = BuilderRootCommand.parse(args.firstOrNull()) ?: return emptyList()
+        if (!rootCommandAvailable(sender, root)) return emptyList()
+        if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)
+        if (root == BuilderRootCommand.REPLACE) {
+            val suggestions = when (args.size) {
+                2, 3 -> safeMaterialNames()
+                4 -> listOf("confirm")
+                else -> emptyList()
+            }
+            return filterPrefix(suggestions, args.lastOrNull())
         }
-        if (args.firstOrNull().equals("replace", true)) {
-            if (!BuilderPermissionPolicy.canUse(BuilderFeature.REPLACE, sender::hasPermission)) return emptyList()
-            if (args.size == 2 || args.size == 3) return filterPrefix(safeMaterialNames(), args.last())
-            if (args.size == 4) return filterPrefix(listOf("confirm"), args[3])
+        if (args.size != 2) return emptyList()
+        val suggestions = when (root) {
+            BuilderRootCommand.CONFIRM -> listOf("buy")
+            BuilderRootCommand.DISCONNECT -> listOf("confirm")
+            BuilderRootCommand.PASTE -> listOf("rotate", "left", "right")
+            BuilderRootCommand.BOOK -> listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel")
+            BuilderRootCommand.FILL -> safeMaterialNames()
+            else -> emptyList()
         }
-        if (args.size == 2 && args[0].equals("paste", true)) {
-            if (!BuilderPermissionPolicy.canUse(BuilderFeature.PASTE, sender::hasPermission)) return emptyList()
-            return filterPrefix(listOf("rotate", "left", "right"), args[1])
-        }
-        if (args.size == 2 && args[0].equals("book", true)) {
-            if (!BuilderPermissionPolicy.canUseBook(sender::hasPermission)) return emptyList()
-            return filterPrefix(listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel"), args[1])
-        }
-        if (args.firstOrNull().equals("crown", true)) {
-            if (!BuilderPermissionPolicy.canUse(BuilderFeature.CROWN, sender::hasPermission)) return emptyList()
-            return crown.tabComplete(args)
-        }
-        if (args.size == 2 && args[0].equals("fill", true)) {
-            if (!BuilderPermissionPolicy.canUse(BuilderFeature.FILL, sender::hasPermission)) return emptyList()
-            return filterPrefix(safeMaterialNames(), args[1])
-        }
-        return emptyList()
+        return filterPrefix(suggestions, args[1])
     }
 
     private fun handleBuilder(player: Player, args: Array<out String>) {
