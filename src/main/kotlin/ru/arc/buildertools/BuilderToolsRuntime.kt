@@ -1916,6 +1916,9 @@ internal class BuilderToolsRuntime(
                     constructionResources.forget(durable.projectId)
                     unlockConstruction(durable)
                     Bukkit.getPlayer(durable.playerId)?.takeIf(Player::isOnline)?.let { player ->
+                        emitCommittedOperation(durable.plan, player.gameMode)
+                    }
+                    Bukkit.getPlayer(durable.playerId)?.takeIf(Player::isOnline)?.let { player ->
                         send(
                             player,
                             "construction.completed",
@@ -2110,8 +2113,15 @@ internal class BuilderToolsRuntime(
             player.sendActionBar(messages.render("clipboard.retained", locale(player)))
         }
         info(debugLine.line("event" to "committed", "operation" to durable.operationId, "player" to durable.playerId, "kind" to durable.plan.kind, "blocks" to durable.plan.changes.size))
+        emitCommittedOperation(durable.plan, player.gameMode)
         durable.plan.sourceRecordId?.let { markSourceUndone(it) }
         cleanupOldRecords()
+    }
+
+    private fun emitCommittedOperation(plan: BuilderPlan, gameMode: GameMode) {
+        val event = BuilderOperationCommittedEventFactory.create(plan, gameMode) ?: return
+        runCatching { Bukkit.getPluginManager().callEvent(event) }
+            .onFailure { failure -> warn("Builder operation listener failed for {}", plan.id, failure) }
     }
 
     private fun rollback(player: Player, operation: BuilderActiveOperation, reason: String) {
