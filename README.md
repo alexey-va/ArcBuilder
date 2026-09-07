@@ -65,12 +65,14 @@ transitions, and fail-closed rollback), see
 ## Build
 
 ```bash
-./gradlew --no-daemon test shadowJar
-python3 ../arc-core/scripts/verify_consumer_architecture.py .
+./gradlew shadowJar
 ```
 
-The disposable MySQL integration suite is intentionally CI-only and runs in
-the repository's `mysql-integration` GitHub Actions job.
+For a focused change, run the relevant unit test explicitly, for example
+`./gradlew test --tests '*BuilderToolsReloadPreflightTest' shadowJar`. Consumer architecture
+verification is opt-in with `python3 ../arc-core/scripts/verify_consumer_architecture.py .`.
+Full `clean check shadowJar` verification and the disposable MySQL integration
+suite are intentionally CI-owned.
 
 ## Complete visual preview
 

@@ -18,6 +18,8 @@ Standalone Kotlin/Paper plugin for survival-friendly Builder Tools and construct
   offsets).
   Hover help supplements visible critical information; it never hides a
   required action, warning, price, or destructive consequence.
-- Locally run only `./gradlew --no-daemon test shadowJar` and the arc-core consumer verifier.
-  Never run `integrationTest`, Testcontainers, Docker, or a transitive integration gate locally.
-  The MySQL suite belongs to the required GitHub Actions CI job.
+- For the fast developer lane run `./gradlew shadowJar`. Run a focused unit test
+  with `./gradlew test --tests '<fully-qualified-test-pattern>' shadowJar` when
+  the change needs it. The arc-core consumer verifier is opt-in; full
+  `clean check shadowJar`, Docker, and the MySQL integration suite belong to CI
+  or an explicitly requested validation run.
