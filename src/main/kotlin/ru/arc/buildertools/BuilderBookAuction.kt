@@ -42,11 +42,13 @@ internal object BuilderBookAuctionTokenCodec {
     }
 
     fun read(item: ItemStack): BuilderBookAuctionToken? {
-        val data = BuildBookCodec.read(item)?.takeIf(BuildBookData::registered) ?: return null
         val pdc = item.itemMeta?.persistentDataContainer ?: return null
+        val instanceValue = pdc.get(instanceKey, PersistentDataType.STRING) ?: return null
+        val leaseValue = pdc.get(leaseKey, PersistentDataType.STRING) ?: return null
         return runCatching {
-            val instanceId = UUID.fromString(pdc.get(instanceKey, PersistentDataType.STRING) ?: return null)
-            val leaseId = UUID.fromString(pdc.get(leaseKey, PersistentDataType.STRING) ?: return null)
+            val instanceId = UUID.fromString(instanceValue)
+            val leaseId = UUID.fromString(leaseValue)
+            val data = BuildBookCodec.read(item)?.takeIf(BuildBookData::registered) ?: return null
             BuilderBookAuctionToken(instanceId, leaseId).takeIf { it.instanceId == data.instanceId }
         }.getOrNull()
     }
