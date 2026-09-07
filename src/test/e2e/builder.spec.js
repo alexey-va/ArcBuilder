@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { expect, test, waitUntil } from '@drownek/plugwright';
 
 test('builder enforces its permission boundary on the real Paper command route', async ({ player }) => {
@@ -54,6 +55,17 @@ async function selectReplacement(player, server, signal, materials = 2) {
   await expect(player).toHaveReceivedMessage('Position 2 selected.');
 }
 
+let completionId = 0;
+async function completions(player, text) {
+  const transactionId = ++completionId;
+  const response = once(player.bot._client, 'tab_complete', { signal: AbortSignal.timeout(10000) });
+  // Mineflayer's helper omits the transactionId required by the 1.21.11 protocol.
+  player.bot._client.write('tab_complete', { transactionId, text });
+  const [packet] = await response;
+  assert.equal(packet.transactionId, transactionId);
+  return packet.matches;
+}
+
 function itemCount(player, material) {
   return player.bot.inventory.items().filter(item => item.name === material).reduce((n, item) => n + item.count, 0);
 }
@@ -68,10 +80,10 @@ test('survival selection previews without world mutation; confirm and undo updat
     ['/builder replace oak_planks АЛМ', 'алмазныйБлок'],
     ['/builder replace oak_planks diamond_b', 'diamond_block'],
   ]) {
-    const matches = await player.bot.tabComplete(query);
+    const matches = await completions(player, query);
     assert.ok(matches.some(match => match.match === expected), `${query}: ${JSON.stringify(matches)}`);
   }
-  assert.deepEqual(await player.bot.tabComplete('/builder replace oak_planks oak_door'), []);
+  assert.deepEqual(await completions(player, '/builder replace oak_planks oak_door'), []);
   player.chat('/builder replace дубовыеДоски алмазныйБлок');
   await expect(player).toHaveReceivedMessage('[▶ Build]');
   await assertWorld(server, observer, 'oak_planks');
