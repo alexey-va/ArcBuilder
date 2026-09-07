@@ -61,7 +61,7 @@ async function completions(player, text) {
   const response = once(player.bot._client, 'tab_complete', { signal: AbortSignal.timeout(10000) });
   // Mineflayer's helper omits the transactionId required by the 1.21.11 protocol.
   player.bot._client.write('tab_complete', { transactionId, text });
-  const [packet] = await response;
+  const [packet] = await response.catch(cause => { throw new Error(`No completion response for ${text}`, { cause }); });
   assert.equal(packet.transactionId, transactionId);
   return packet.matches;
 }
@@ -83,7 +83,9 @@ test('survival selection previews without world mutation; confirm and undo updat
     const matches = await completions(player, query);
     assert.ok(matches.some(match => match.match === expected), `${query}: ${JSON.stringify(matches)}`);
   }
-  assert.deepEqual(await completions(player, '/builder replace oak_planks oak_door'), []);
+  const oakMatches = await completions(player, '/builder replace oak_planks oak_');
+  assert.ok(oakMatches.length > 0);
+  assert.ok(!oakMatches.some(match => match.match === 'oak_door'));
   player.chat('/builder replace дубовыеДоски алмазныйБлок');
   await expect(player).toHaveReceivedMessage('[▶ Build]');
   await assertWorld(server, observer, 'oak_planks');
