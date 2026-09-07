@@ -2,7 +2,6 @@ package ru.arc.buildertools
 
 import org.bukkit.Material
 import org.bukkit.entity.Player
-import org.bukkit.inventory.ItemStack
 
 /**
  * Main-thread owner of bounded fill planning.
@@ -39,7 +38,9 @@ internal class BuilderFillController(
 
         if (changes.isEmpty()) host.fail("errors.nothing-to-change")
         val costs = if (BuilderGameModePolicy.usesInventory(player.gameMode)) {
-            BuilderItemCodec.aggregate(listOf(ItemStack(material, changes.size)))
+            BuilderItemCodec.aggregate(listOf(checkNotNull(BuilderPlacementCost.itemOrNull(after)).also {
+                it.amount *= changes.size
+            }))
         } else {
             emptyList()
         }

@@ -11,11 +11,10 @@ import org.bukkit.block.Block
 import org.bukkit.block.TileState
 import org.bukkit.block.data.BlockData
 import org.bukkit.block.data.Bisected
-import org.bukkit.block.data.Lightable
 import org.bukkit.block.data.Segmentable
-import org.bukkit.block.data.Powerable
 import org.bukkit.block.data.Waterlogged
 import org.bukkit.block.data.type.Bed
+import org.bukkit.block.data.type.Piston
 import org.bukkit.block.data.type.Candle
 import org.bukkit.block.data.type.FlowerBed
 import org.bukkit.block.data.type.SeaPickle
@@ -125,6 +124,9 @@ internal object BuilderPlacementCost {
     fun constructionItem(material: Material): Material? = when (material) {
         Material.WALL_TORCH -> Material.TORCH
         Material.SOUL_WALL_TORCH -> Material.SOUL_TORCH
+        Material.REDSTONE_WALL_TORCH -> Material.REDSTONE_TORCH
+        Material.REDSTONE_WIRE -> Material.REDSTONE
+        Material.TRIPWIRE -> Material.STRING
         else -> material.takeIf(Material::isItem)
     }
 }
@@ -498,13 +500,15 @@ internal class BuilderBlockSafety(
     fun isSafeSystemLootContainer(data: BlockData): Boolean =
         data.material == Material.CHEST && isSafeState(data)
 
+    private val tileMaterials = mutableMapOf<Material, Boolean>()
+
     fun isSafeMaterial(material: Material): Boolean {
-        if (!material.isBlock || material.isAir || BuilderPlacementCost.constructionItem(material) == null) return false
+        if (material.isLegacy || !material.isBlock || material.isAir || BuilderPlacementCost.constructionItem(material) == null) return false
         if (BuilderRewardOrePolicy.isBlocked(material)) return false
         if (material in UNSAFE_MATERIALS) return false
         val name = material.name
         if (UNSAFE_FRAGMENTS.any(name::contains)) return false
-        return true
+        return !tileMaterials.getOrPut(material) { material.createBlockData().createBlockState() is TileState }
     }
 
     fun isLeaf(material: Material): Boolean = material.name.endsWith("_LEAVES") && isSafeMaterial(material)
@@ -512,8 +516,7 @@ internal class BuilderBlockSafety(
     private fun isSafeState(data: BlockData): Boolean =
         data.asString.startsWith("minecraft:") &&
             (data !is Waterlogged || !data.isWaterlogged) &&
-            (data !is Lightable || !data.isLit) &&
-            (data !is Powerable || !data.isPowered) &&
+            (data !is Piston || !data.isExtended) &&
             (data !is Bed || !data.isOccupied)
 
     private fun isCustom(block: Block): Boolean {
@@ -543,57 +546,8 @@ internal class BuilderBlockSafety(
             Material.END_GATEWAY,
             Material.MOVING_PISTON,
         )
-        private val UNSAFE_FRAGMENTS = listOf(
-            "COMMAND_BLOCK",
-            "STRUCTURE_BLOCK",
-            "JIGSAW",
-            "SPAWNER",
-            "TRIAL_SPAWNER",
-            "VAULT",
-            "OBSERVER",
-            "REDSTONE_LAMP",
-            "COPPER_BULB",
-            "NOTE_BLOCK",
-            "COMPOSTER",
-            "SCULK_SENSOR",
-            "SCULK_SHRIEKER",
-            "_PORTAL",
-            "_SIGN",
-            "_HANGING_SIGN",
-            "CHEST",
-            "BARREL",
-            "SHULKER_BOX",
-            "FURNACE",
-            "SMOKER",
-            "HOPPER",
-            "DISPENSER",
-            "DROPPER",
-            "CRAFTER",
-            "LECTERN",
-            "JUKEBOX",
-            "CHISELED_BOOKSHELF",
-            "DECORATED_POT",
-            "BEEHIVE",
-            "BEE_NEST",
-            "BREWING_STAND",
-            "ENCHANTING_TABLE",
-            "PISTON",
-            "_HEAD",
-            "_SKULL",
-            "REDSTONE_TORCH",
-            "_RAIL",
-            "_BUTTON",
-            "_PRESSURE_PLATE",
-            "REDSTONE_WIRE",
-            "REPEATER",
-            "COMPARATOR",
-            "TRIPWIRE",
-            "LEVER",
-            "_BANNER",
-            "CANDLE_CAKE",
-            "TURTLE_EGG",
-            "FROGSPAWN",
-        )
+        // These compound/stacked blocks do not have a lossless item exchange yet.
+        private val UNSAFE_FRAGMENTS = listOf("CANDLE_CAKE", "TURTLE_EGG", "FROGSPAWN")
     }
 }
 

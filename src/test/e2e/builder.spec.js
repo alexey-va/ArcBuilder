@@ -63,7 +63,16 @@ test('survival selection previews without world mutation; confirm and undo updat
   const observer = await createPlayer({ username: 'BuildObserver' });
   await observer.teleport(2.5, 65, 1.5);
   await clientBlocks(observer, 'oak_planks', signal);
-  player.chat('/builder replace oak_planks diamond_block');
+  for (const [query, expected] of [
+    ['/builder replace дуб', 'дубовыеДоски'],
+    ['/builder replace oak_planks АЛМ', 'алмазныйБлок'],
+    ['/builder replace oak_planks diamond_b', 'diamond_block'],
+  ]) {
+    const matches = await player.bot.tabComplete(query);
+    assert.ok(matches.some(match => match.match === expected), `${query}: ${JSON.stringify(matches)}`);
+  }
+  assert.deepEqual(await player.bot.tabComplete('/builder replace oak_planks oak_door'), []);
+  player.chat('/builder replace дубовыеДоски алмазныйБлок');
   await expect(player).toHaveReceivedMessage('[▶ Build]');
   await assertWorld(server, observer, 'oak_planks');
   await clientBlocks(player, 'oak_planks', signal);
@@ -123,4 +132,33 @@ test('insufficient materials leave the whole replacement untouched; retry commit
   await clientBlocks(player, 'diamond_block', signal);
   assert.equal(itemCount(player, 'diamond_block'), 0);
   assert.equal(itemCount(player, 'oak_planks'), 2);
+});
+
+test('committed replacement updates neighbour redstone physics and undo turns it off; ores stay blocked', async ({ player, server, signal }) => {
+  await selectReplacement(player, server, signal);
+  await player.giveItem('redstone_block', 2);
+  await commands(server, player, ['minecraft:setblock 0 64 -1 redstone_lamp[lit=false]']);
+  player.chat('/builder replace oak_planks diamond_ore');
+  await expect(player).toHaveReceivedMessage('That material is not supported.');
+  await assertWorld(server, player, 'oak_planks');
+  player.chat('/builder replace oak_planks redstone_block');
+  await expect(player).toHaveReceivedMessage('[▶ Build]');
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('completed: 2 blocks.');
+  await assertWorld(server, player, 'redstone_block');
+  await waitUntil(() => player.bot.blockAt(player.bot.entity.position.clone().set(0, 64, -1))?.getProperties().lit === true, { signal });
+  const lit = `lit-${randomUUID()}`;
+  server.execute(`minecraft:execute if block 0 64 -1 redstone_lamp[lit=true] run tellraw ${player.username} {"text":"${lit}"}`);
+  await expect(player).toHaveReceivedMessage(lit);
+  assert.equal(itemCount(player, 'redstone_block'), 0);
+  assert.equal(itemCount(player, 'oak_planks'), 2);
+  const since = player.messageBuffer.length;
+  player.chat('/builder undo');
+  await expect(player).toHaveReceivedMessage('[▶ Build]', { since });
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('completed: 2 blocks.', { since });
+  await assertWorld(server, player, 'oak_planks');
+  await waitUntil(() => player.bot.blockAt(player.bot.entity.position.clone().set(0, 64, -1))?.getProperties().lit === false, { signal });
+  assert.equal(itemCount(player, 'redstone_block'), 2);
+  assert.equal(itemCount(player, 'oak_planks'), 0);
 });

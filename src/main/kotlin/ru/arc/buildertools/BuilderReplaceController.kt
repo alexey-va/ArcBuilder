@@ -76,6 +76,8 @@ internal class BuilderReplaceController(
         )
     }
 
-    private fun isCoupledMultiBlock(data: BlockData): Boolean =
-        data is Bed || data is Door || (data is Bisected && data !is Stairs && data !is TrapDoor)
+    companion object {
+        fun isCoupledMultiBlock(data: BlockData): Boolean =
+            data is Bed || data is Door || (data is Bisected && data !is Stairs && data !is TrapDoor)
+    }
 }

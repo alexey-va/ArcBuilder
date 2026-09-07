@@ -315,6 +315,7 @@ private fun withCommandFixture(block: (CommandFixture) -> Unit) {
                     config = BuilderToolsConfig(config).validated(),
                     displayRenderer = NoopBuilderDisplayRenderer(),
                     blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
+                    physicsUpdater = RecordingBuilderPhysicsUpdater(),
                     draftStorage = UnusedCommandDraftStorage,
                     bookSchematicVerifier = BuilderBookSchematicVerifier { true },
                     systemBuildBookResolver = { null },

@@ -74,6 +74,13 @@ class BuilderOperationLocksTest : FunSpec({
                 paper.callEvent(externalBreak)
                 externalBreak.isCancelled shouldBe true
 
+                val extend = org.bukkit.event.block.BlockPistonExtendEvent(block, emptyList(), org.bukkit.block.BlockFace.UP)
+                paper.callEvent(extend)
+                extend.isCancelled shouldBe true
+                val retract = org.bukkit.event.block.BlockPistonRetractEvent(block, emptyList(), org.bukkit.block.BlockFace.UP)
+                paper.callEvent(retract)
+                retract.isCancelled shouldBe true
+
                 locks.finish(operation)
                 locks.activeOperationCount shouldBe 0
 

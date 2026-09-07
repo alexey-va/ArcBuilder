@@ -101,6 +101,7 @@ internal class BuilderToolsRuntime(
         taskScope,
     ),
     blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
+    private val physicsUpdater: BuilderPhysicsUpdater = PaperBuilderPhysicsUpdater,
     draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
     bookSchematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
     private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
@@ -797,7 +798,7 @@ internal class BuilderToolsRuntime(
         if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)
         if (root == BuilderRootCommand.REPLACE) {
             val suggestions = when (args.size) {
-                2, 3 -> safeMaterialNames()
+                2, 3 -> replaceMaterialNames
                 4 -> listOf("confirm")
                 else -> emptyList()
             }
@@ -809,7 +810,7 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.DISCONNECT -> listOf("confirm")
             BuilderRootCommand.PASTE -> listOf("rotate", "left", "right")
             BuilderRootCommand.BOOK -> listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel")
-            BuilderRootCommand.FILL -> safeMaterialNames()
+            BuilderRootCommand.FILL -> safeMaterialNames
             else -> emptyList()
         }
         return filterPrefix(suggestions, args[1])
@@ -1136,7 +1137,7 @@ internal class BuilderToolsRuntime(
 
     private fun materialArgument(player: Player, raw: String?): Material {
         if (raw == null) return player.inventory.itemInMainHand.type.takeUnless(Material::isAir) ?: throw BuilderUserFailure("errors.material")
-        return Material.matchMaterial(raw) ?: Material.matchMaterial(raw.uppercase(Locale.ROOT)) ?: throw BuilderUserFailure("errors.material")
+        return explicitMaterialArgument(raw)
     }
 
     private fun replaceRequest(args: Array<out String>): ReplaceRequest {
@@ -1151,7 +1152,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun explicitMaterialArgument(raw: String): Material =
-        Material.matchMaterial(raw) ?: Material.matchMaterial(raw.uppercase(Locale.ROOT))
+        BuilderMaterialArguments.parse(raw)
         ?: throw BuilderUserFailure("errors.material")
 
     private fun newPlan(
@@ -1495,6 +1496,7 @@ internal class BuilderToolsRuntime(
             }
             return
         }
+        if (updatesPhysics(plan)) physicsUpdater.validate()
         if (!operationLocks.tryLock(plan)) throw BuilderUserFailure("errors.busy")
         previews.remove(player.uniqueId, pending)
         shop.clear(player.uniqueId)
@@ -2089,9 +2091,44 @@ internal class BuilderToolsRuntime(
         )
     }
 
-    private fun finalizeCommittedOperation(player: Player, operation: BuilderActiveOperation) {
+    private fun updatesPhysics(plan: BuilderPlan): Boolean =
+        plan.kind != BuilderPlanKind.FENCE_DISCONNECT &&
+            !(plan.kind == BuilderPlanKind.UNDO &&
+                committedRecords[plan.sourceRecordId]?.plan?.kind == BuilderPlanKind.FENCE_DISCONNECT)
+
+    private fun finalizeCommittedOperation(
+        player: Player,
+        operation: BuilderActiveOperation,
+        physicsCursor: Int = 0,
+        physicsFailures: Int = 0,
+    ) {
         val durable = operation.record
+        check(durable.phase == BuilderJournalPhase.COMMITTED)
+        var failures = physicsFailures
+        if (updatesPhysics(durable.plan)) {
+            // Release world locks for vanilla neighbour events, but retain the player lease until finished.
+            if (physicsCursor == 0) operationLocks.unlock(durable.plan)
+            val end = minOf(physicsCursor + config.blocksPerTick, durable.plan.changes.size)
+            for (index in physicsCursor until end) {
+                val change = durable.plan.changes[index]
+                try {
+                    val target = block(requireWorld(change.position.worldId), change.position)
+                    // Earlier physics or another player may already have changed this block. Never rewrite it.
+                    if (target.blockData.asString == change.afterBlockData) {
+                        physicsUpdater.update(target, Bukkit.createBlockData(change.beforeBlockData))
+                    }
+                } catch (failure: Throwable) {
+                    if (failures++ == 0) error("Builder-tools committed physics failed for ${durable.operationId}", failure)
+                }
+            }
+            if (end < durable.plan.changes.size) {
+                taskScope.runLater(1L) { finalizeCommittedOperation(player, operation, end, failures) }
+                return
+            }
+        }
+        // Physics is outside the rollback-safe transaction; drops must never be duplicated by restoration.
         finishOperation(operation)
+        if (failures > 0) send(player, "operation.physics-failed")
         val completion = messages.render(
             "operation.completed",
             locale(player),
@@ -2694,13 +2731,17 @@ internal class BuilderToolsRuntime(
 
     private fun filterPrefix(values: List<String>, raw: String?): List<String> {
         val prefix = raw.orEmpty().lowercase(Locale.ROOT)
-        return values.filter { it.startsWith(prefix) }.take(100)
+        return values.filter { it.startsWith(prefix, ignoreCase = true) }.take(100)
     }
 
-    private fun safeMaterialNames(): List<String> = Material.entries.asSequence()
-        .filter(safety::isSafeMaterial)
-        .map { it.name.lowercase(Locale.ROOT) }
-        .toList()
+    private val safeMaterials by lazy { Material.entries.filter(safety::isSafeMaterial) }
+    private val safeMaterialNames by lazy { BuilderMaterialArguments.names(safeMaterials) }
+    private val replaceMaterialNames by lazy {
+        BuilderMaterialArguments.names(safeMaterials.filter { material ->
+            val data = material.createBlockData()
+            safety.isSafePlacement(data) && !BuilderReplaceController.isCoupledMultiBlock(data)
+        })
+    }
 
     private data class ReplaceRequest(
         val source: Material,

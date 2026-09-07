@@ -18,6 +18,7 @@ The plugin uses arc-core 2.4.5 and does not depend on the ARC monolith.
   sides of vanilla fences in the current selection. Add `confirm` to apply the
   same plan immediately without a preview. Later neighbor updates may reconnect
   fences according to vanilla block physics.
+- Material arguments also accept Russian names such as `алмазныйБлок` and `дубовыеДоски`; Tab completes both Russian and English names.
 - `/builder replace <old> <new>` previews an exact-material replacement inside
   the selection. Compatible state such as stair orientation, slab type, log
   axis, and fence sides is preserved. Add final `confirm` to apply immediately.

@@ -49,6 +49,20 @@ class BuilderFillControllerTest : FunSpec({
         }
     }
 
+    test("fill charges construction items for wall torches and redstone wire") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("fill-items")
+            val player = paper.addPlayer("WireBuilder")
+            player.gameMode = GameMode.SURVIVAL
+            val harness = FillHarness(paper.createSimplePlugin("FillItems"), world)
+            harness.select(0, 64, 0, 1, 64, 0)
+            listOf(Material.WALL_TORCH to "minecraft:torch", Material.REDSTONE_WALL_TORCH to "minecraft:redstone_torch",
+                Material.REDSTONE_WIRE to "minecraft:redstone").forEach { (block, item) ->
+                harness.controller.plan(player, block).costs.map { it.materialKey to it.amount } shouldBe listOf(item to 2)
+            }
+        }
+    }
+
     test("fill rejects a Lands protection failure before producing a plan or changing blocks") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderFillProtectionTest")

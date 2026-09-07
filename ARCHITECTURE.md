@@ -98,15 +98,45 @@ inventory exchange, block-safety policy, placement-cost rules, and optional
 CoreProtect bridge. `BuilderPlayerRecoveryCoordinator` owns delayed player-state
 recovery after disconnects or uncertain acknowledgement.
 
+## Committed neighbour physics
+
+Ordinary plans write blocks without physics while inventory and journal rollback
+are still possible. After the COMMITTED durability barrier, the runtime releases
+the plan's world locks and runs one bounded pass (at most `blocks-per-tick`
+positions per tick), retaining the player lease until it finishes. It never
+rewrites a block that earlier physics or another actor has already changed.
+Physics failures are logged and reported separately; a committed operation is
+never rolled back after vanilla drops or neighbour changes may have happened.
+
+`PaperBuilderPhysicsUpdater` binds the exact Paper 1.21.11
+`Level.notifyAndUpdatePhysics` method. It uses UPDATE_NEIGHBORS (1), depth 512,
+and the original/current block states. This performs both neighbour and shape
+updates without a second block write or duplicate client packet. The binding is
+validated before entering the mutation transaction. Reapplying identical data
+with `setBlockData(..., true)` is a vanilla no-op and is not used as a refresh.
+The adapter is version-bound; the real Paper E2E lamp/undo scenario verifies it.
+The implementation contract is documented in [Paper 1.21.11 Level.java.patch](https://raw.githubusercontent.com/PaperMC/Paper/ver/1.21.11/paper-server/patches/sources/net/minecraft/world/level/Level.java.patch).
+
+Fence-disconnection plans and their undo intentionally skip this pass. Durable
+construction-book steps use their separate existing lifecycle. Vanilla physics
+may change blocks beyond the selected region and continue on later ticks; undo
+retains exact-state validation and refuses stale tracked states. This pass is
+best-effort across server shutdown, not a persisted physics simulation or a
+snapshot of all possible vanilla cascades.
+
 ## Safety and integrations
 
 `BuilderBlockSafety` rejects unsafe technical state, tile entities, custom
-Slimefun/ItemsAdder blocks, powered or lit state, occupied beds, waterlogged
+Slimefun/ItemsAdder blocks, extended pistons, occupied beds, waterlogged
 state, materials without a canonical construction item, every current
 `*_ORE` material, and ancient debris. Treating reward-bearing ores as unsafe
 also excludes them from clipboard capture and makes both ordinary-plan and
 durable construction-book revalidation fail closed. Individual controllers add
-operation-specific restrictions.
+operation-specific restrictions. Ordinary redstone components, lit and powered
+states are allowed. The material gate detects tile entities from Paper's
+`BlockData.createBlockState()` and caches the result, rather than rejecting
+whole name families. Containers and other blocks with tile data remain outside
+the lossless plain-item transaction.
 
 `BuilderToolsRuntime.ensureMutable` is the shared boundary for range, loaded
 chunks, world border, Lands build permission, and placement checks. Wilderness
@@ -163,6 +193,19 @@ the normal plugin restart path rather than `/builder reload`.
 material. The plain command prepares a preview; adding `confirm` as the final
 argument applies the same plan immediately. Both paths use the ordinary
 preflight, inventory, journal, CoreProtect, and undo transaction.
+
+Material arguments in `replace` and `fill` accept both Bukkit names and Russian
+camelCase names, for example `diamond_block` or `алмазныйБлок`. Matching ignores
+case; Russian aliases also accept `е` for `ё` and underscore separators.
+`BuilderMaterialArguments` owns parsing and completion names. Ambiguous Russian
+names are omitted instead of silently choosing a material. Replace completion
+uses the planner's coupled-block restriction and default-state safety checks;
+legacy materials are excluded before querying modern Bukkit material metadata.
+
+The bundled `materials/ru_ru.json` contains the `block.minecraft.<id>` labels from
+Minecraft 1.21.11's official Russian asset (SHA-1
+`6efaa4396b51eae6de896704c442cd8002b1a66c`, asset index
+`951ed1deacbc1d616ba0378d8e110008249c3e40`). It requires no runtime download.
 
 `BuilderReplaceController` copies only block-data properties supported by both
 source and target through `BuilderCompatibleBlockState`. This preserves useful

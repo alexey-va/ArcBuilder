@@ -1,0 +1,91 @@
+{
+  "assessment_id": "arcbuilder-replace-20260907",
+  "assumptions": [
+    "Requested expansion covers vanilla construction and redstone; all *_ORE and ancient debris stay blocked on planning and revalidation.",
+    "100/1000/10000 changed blocks per player-day and 1/5/20 players are low/base/high illustrative upper-throughput scenarios, not measured income. Existing per-operation/hour permissions and limits remain unchanged.",
+    "Every replace consumes exact construction items and returns the old construction items; counts including slabs and candles remain unchanged. Undo reverses the same exchange. No random drops, rewards, prices or earning multiplier are added.",
+    "vault and tokens direct mint remain zero; existing optional shop purchase stays an unchanged debit. Existing operation telemetry/contract progress limits remain unchanged. No new player BlockPlace or BlockBreak events are fired.",
+    "EconomyShopGUI SELL remains current/conditional as recorded in canonical inventory; planned removal and contract transition are unchanged. No investment or SHADOW income is assumed.",
+    "Physics may produce vanilla drops from unsupported neighboring blocks; no journal rollback is allowed after committed physics, to avoid restoring both blocks and drops. Undo must fail closed if physics changed the expected block state."
+  ],
+  "participants": [
+    1,
+    5,
+    20
+  ],
+  "currencies": {
+    "vault": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "replacement_direct_vault",
+          "kind": "mint",
+          "source": "BuilderReplaceController + BuilderToolsRuntime",
+          "basis": "No money mint in the replacement path before or after.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "tokens": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "replacement_direct_tokens",
+          "kind": "mint",
+          "source": "BuilderReplaceController + BuilderToolsRuntime",
+          "basis": "No money mint in the replacement path before or after.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "prices": [],
+  "version": 1,
+  "title": "ARCBuilder: construction and redstone replacement without new currency or ore rewards"
+}

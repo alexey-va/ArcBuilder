@@ -676,9 +676,23 @@ class BuilderToolsDomainTest : FunSpec({
             safety.isSafeMaterial(Material.SAND) shouldBe true
             safety.isSafeMaterial(Material.BROWN_CONCRETE_POWDER) shouldBe true
             safety.isSafeMaterial(Material.BEDROCK) shouldBe false
-            safety.isSafeMaterial(Material.REDSTONE_TORCH) shouldBe false
-            safety.isSafeMaterial(Material.REDSTONE_WALL_TORCH) shouldBe false
-            safety.isSafeMaterial(Material.PISTON) shouldBe false
+            safety.isSafeMaterial(Material.REDSTONE_TORCH) shouldBe true
+            safety.isSafeMaterial(Material.REDSTONE_WALL_TORCH) shouldBe true
+            safety.isSafeMaterial(Material.PISTON) shouldBe true
+            listOf(Material.OBSERVER, Material.REDSTONE_LAMP, Material.COPPER_BULB,
+                Material.NOTE_BLOCK, Material.COMPOSTER, Material.POWERED_RAIL, Material.OAK_BUTTON,
+                Material.STONE_PRESSURE_PLATE, Material.LEVER, Material.REPEATER, Material.REDSTONE_WIRE,
+            ).forEach { material ->
+                safety.isSafeMaterial(material) shouldBe true
+                safety.isSafePlacement(material.createBlockData()) shouldBe true
+            }
+            listOf(Material.CAMPFIRE, Material.BEACON, Material.COMPARATOR, Material.OAK_SIGN).forEach {
+                safety.isSafeMaterial(it) shouldBe false
+            }
+            val extended = Material.PISTON.createBlockData() as org.bukkit.block.data.type.Piston
+            extended.isExtended = true
+            safety.isSafePlacement(extended) shouldBe false
+            BuilderPlacementCost.itemOrNull(Material.REDSTONE_WIRE.createBlockData())?.type shouldBe Material.REDSTONE
             safety.isSafeMaterial(Material.HOPPER) shouldBe false
             safety.isSafeMaterial(Material.CHEST) shouldBe false
 

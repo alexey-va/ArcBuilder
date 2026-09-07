@@ -973,6 +973,7 @@ locales:
         <prefix><#ff9f0f>Строительство не началось.
         <#8c8c8c>   <#e6fff3>Материалы уже у вас; создайте план снова.
     operation:
+      physics-failed: "<prefix><#c42323>Блоки заменены, но физика обновилась не полностью. Сообщите администрации."
       started: |-
 
         <prefix><#ff9f0f>Строительство начато.
@@ -1843,6 +1844,7 @@ locales:
         - "<prefix><gray>Bought earlier: <white><purchased></white>."
       world-untouched: "<prefix><gray>Bought items stay yours; world unchanged."
     operation:
+      physics-failed: "<prefix><red>Blocks were changed, but some physics updates failed. Please contact an administrator."
       started: |-
 
         <prefix><yellow>Construction started: <white><count> blocks

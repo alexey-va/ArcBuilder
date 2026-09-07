@@ -760,6 +760,68 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("physics visits each changed block only after full placement and durable commit") {
+        lateinit var journey: ArcBuilderJourney
+        val ticks = mutableListOf<Long>()
+        val updater = object : BuilderPhysicsUpdater {
+            override fun validate() = Unit
+            override fun update(block: org.bukkit.block.Block, before: BlockData) {
+                journey.countLine(journey.world, Material.STONE) shouldBe 5
+                val records = BuilderJournalStore(journey.plugin.dataPath, 64).loadAll()
+                records.single().value.phase shouldBe BuilderJournalPhase.COMMITTED
+                val event = org.bukkit.event.block.BlockPhysicsEvent(block, block.blockData)
+                journey.paper.callEvent(event)
+                event.isCancelled shouldBe false
+                ticks += journey.paper.server.scheduler.currentTick
+            }
+        }
+        strictMockBukkit(open = { ArcBuilderJourney.open(blocksPerTick = 2, physicsUpdater = updater) }) { opened ->
+            journey = opened
+            val player = journey.builder("PhysicsBuilder", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 4, 64, 0)
+            player.inventory.addItem(ItemStack(Material.STONE, 5))
+            player.performCommand("builder fill stone") shouldBe true
+            ticks shouldBe emptyList()
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { ticks.size == 5 }
+            ticks.groupingBy { it }.eachCount().values.all { it <= 2 } shouldBe true
+            journey.amount(player, Material.STONE) shouldBe 0
+        }
+    }
+
+    test("Russian block aliases complete and replace through confirmation and undo") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("RussianReplacer", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            player.inventory.addItem(ItemStack(Material.DIAMOND_BLOCK))
+            journey.paper.server.getCommandTabComplete(player, "builder replace кам").contains("камень") shouldBe true
+            journey.paper.server.getCommandTabComplete(player, "builder replace stone АЛМ").contains("алмазныйБлок") shouldBe true
+            journey.paper.server.getCommandTabComplete(player, "builder fill алм").contains("алмазныйБлок") shouldBe true
+            journey.paper.server.getCommandTabComplete(player, "builder replace stone diamond_b").contains("diamond_block") shouldBe true
+            journey.paper.server.getCommandTabComplete(player, "builder replace stone oak_door") shouldBe emptyList()
+            player.performCommand("builder replace КАМЕНЬ АлмазныйБлок") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).kind shouldBe BuilderPlanKind.REPLACE
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.DIAMOND_BLOCK }
+            journey.amount(player, Material.DIAMOND_BLOCK) shouldBe 0
+            journey.amount(player, Material.STONE) shouldBe 1
+            player.performCommand("builder undo") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE }
+            journey.amount(player, Material.DIAMOND_BLOCK) shouldBe 1
+            journey.amount(player, Material.STONE) shouldBe 0
+        }
+    }
+
     test("replace confirm applies immediately only when confirm is the final argument") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("DirectReplace", GameMode.SURVIVAL)
@@ -1168,6 +1230,7 @@ private class ArcBuilderJourney private constructor(
     companion object {
         fun open(
             blocksPerTick: Int = 2,
+            physicsUpdater: BuilderPhysicsUpdater = RecordingBuilderPhysicsUpdater(),
             systemResolver: (ru.arc.autobuild.BuildBookData) -> SystemBuildBookDefinition? = { null },
             lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
             lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
@@ -1191,6 +1254,7 @@ private class ArcBuilderJourney private constructor(
                     config = BuilderToolsConfig(config).validated(),
                     displayRenderer = renderer,
                     blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
+                    physicsUpdater = physicsUpdater,
                     draftStorage = InMemoryBuilderDraftStorage(),
                     bookSchematicVerifier = BuilderBookSchematicVerifier { true },
                     bookReplacementRefund = { block -> ItemStack(block.type) },

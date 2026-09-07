@@ -323,12 +323,12 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onPistonExtend(event: BlockPistonExtendEvent) {
-        if (event.blocks.any { isLocked(it) || isLocked(it.getRelative(event.direction)) }) event.isCancelled = true
+        if (isLocked(event.block) || event.blocks.any { isLocked(it) || isLocked(it.getRelative(event.direction)) }) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onPistonRetract(event: BlockPistonRetractEvent) {
-        if (event.blocks.any { isLocked(it) || isLocked(it.getRelative(event.direction)) }) event.isCancelled = true
+        if (isLocked(event.block) || event.blocks.any { isLocked(it) || isLocked(it.getRelative(event.direction)) }) event.isCancelled = true
     }
 
     private fun isLocked(block: Block): Boolean =
