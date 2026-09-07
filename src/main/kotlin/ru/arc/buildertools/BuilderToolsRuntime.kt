@@ -2113,6 +2113,7 @@ internal class BuilderToolsRuntime(
             player.sendActionBar(messages.render("clipboard.retained", locale(player)))
         }
         info(debugLine.line("event" to "committed", "operation" to durable.operationId, "player" to durable.playerId, "kind" to durable.plan.kind, "blocks" to durable.plan.changes.size))
+        ExternalArcBuilderTelemetryBridge.completed(durable.plan.playerId, durable.operationId.toString())
         emitCommittedOperation(durable.plan, player.gameMode)
         durable.plan.sourceRecordId?.let { markSourceUndone(it) }
         cleanupOldRecords()
