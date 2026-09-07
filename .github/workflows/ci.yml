@@ -27,7 +27,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Verify arc-core consumer architecture
-        uses: alexey-va/arc-core/.github/actions/verify-consumer@b95cf4236e9c78f12582c5b22247a5e07a833843
+        uses: alexey-va/arc-core-public/.github/actions/verify-consumer@7602ccd8b0636147189f3606bdebcd8287b0684b
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: Unit tests and production JAR
         run: ./gradlew --no-daemon --build-cache test shadowJar
@@ -64,7 +64,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Verify arc-core consumer architecture
-        uses: alexey-va/arc-core/.github/actions/verify-consumer@b95cf4236e9c78f12582c5b22247a5e07a833843
+        uses: alexey-va/arc-core-public/.github/actions/verify-consumer@7602ccd8b0636147189f3606bdebcd8287b0684b
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: MySQL migrations, contention, recovery, and anti-duplication
         run: ./gradlew --no-daemon integrationTest
