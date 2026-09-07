@@ -1,5 +1,7 @@
 package ru.arc.buildertools
 
+import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
+import com.mojang.brigadier.suggestion.SuggestionsBuilder
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
@@ -807,6 +809,15 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.paper.server.getCommandTabComplete(player, "builder fill алм").contains("алмазныйБлок") shouldBe true
             journey.paper.server.getCommandTabComplete(player, "builder replace stone diamond_b").contains("diamond_block") shouldBe true
             journey.paper.server.getCommandTabComplete(player, "builder replace stone oak_door") shouldBe emptyList()
+            for (buffer in listOf("/builder replace ", "/builder replace stone ", "/arcbuilder:builder fill ")) {
+                val suggestions = SuggestionsBuilder(buffer, buffer.length)
+                    .suggest("stone").suggest("камень").suggest("diamond_block").suggest("алмазныйБлок").build()
+                val event = AsyncPlayerSendSuggestionsEvent(player, suggestions, buffer)
+                journey.paper.server.pluginManager.callEvent(event)
+                event.suggestions.list.map { it.text } shouldBe
+                    listOf("алмазныйБлок", "камень", "diamond_block", "stone")
+                event.suggestions.range shouldBe suggestions.range
+            }
             player.performCommand("builder replace КАМЕНЬ АлмазныйБлок") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).kind shouldBe BuilderPlanKind.REPLACE
             world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
@@ -819,6 +830,40 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE }
             journey.amount(player, Material.DIAMOND_BLOCK) shouldBe 1
             journey.amount(player, Material.STONE) shouldBe 0
+        }
+    }
+
+    test("air replacement consumes only target items and undo restores each original air variant") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("AirReplacer", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            val originals = listOf(Material.AIR, Material.CAVE_AIR, Material.VOID_AIR)
+            originals.forEachIndexed { x, material -> world.getBlockAt(x, 64, 0).type = material }
+            world.getBlockAt(3, 64, 0).type = Material.DIRT
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand")
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 3, 64, 0)
+            journey.paper.server.getCommandTabComplete(player, "builder replace воз").contains("воздух") shouldBe true
+            journey.paper.server.getCommandTabComplete(player, "builder replace a").contains("air") shouldBe true
+            journey.paper.server.getCommandTabComplete(player, "builder replace stone air") shouldBe emptyList()
+            player.performCommand("builder replace воздух камень")
+            val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
+            plan.changes.size shouldBe 3
+            plan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:stone" to 3)
+            plan.rewards shouldBe emptyList()
+            player.performCommand("builder confirm")
+            originals.forEachIndexed { x, material -> world.getBlockAt(x, 64, 0).type shouldBe material }
+            player.inventory.addItem(ItemStack(Material.STONE, 3))
+            player.performCommand("builder confirm")
+            journey.awaitSettled(player) { (0..2).all { world.getBlockAt(it, 64, 0).type == Material.STONE } }
+            journey.amount(player, Material.STONE) shouldBe 0
+            world.getBlockAt(3, 64, 0).type shouldBe Material.DIRT
+            player.performCommand("builder undo")
+            player.performCommand("builder confirm")
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.AIR }
+            originals.forEachIndexed { x, material -> world.getBlockAt(x, 64, 0).type shouldBe material }
+            journey.amount(player, Material.STONE) shouldBe 3
         }
     }
 

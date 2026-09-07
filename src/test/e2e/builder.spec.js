@@ -75,6 +75,13 @@ test('survival selection previews without world mutation; confirm and undo updat
   const observer = await createPlayer({ username: 'BuildObserver' });
   await observer.teleport(2.5, 65, 1.5);
   await clientBlocks(observer, 'oak_planks', signal);
+  for (const query of ['/builder replace ', '/builder replace oak_planks ']) {
+    const names = (await completions(player, query)).map(match => match.match);
+    const firstEnglish = names.findIndex(name => /^[a-z]/i.test(name));
+    assert.ok(firstEnglish > 0, `${query}: Russian names must precede English: ${names}`);
+    assert.ok(names.slice(0, firstEnglish).every(name => /^[а-яё]/i.test(name)));
+    assert.ok(names.slice(firstEnglish).every(name => /^[a-z]/i.test(name)));
+  }
   for (const [query, expected] of [
     ['/builder replace дуб', 'дубовыеДоски'],
     ['/builder replace oak_planks АЛМ', 'алмазныйБлок'],
@@ -122,6 +129,32 @@ test('cancelled replacement rejects a stale confirmation without consuming or re
   await clientBlocks(player, 'oak_planks', signal);
   assert.equal(itemCount(player, 'diamond_block'), 2);
   assert.equal(itemCount(player, 'oak_planks'), 0);
+});
+
+test('air replacement costs target blocks, creates no source reward and restores air on undo', async ({ player, server, signal }) => {
+  await selectReplacement(player, server, signal);
+  await commands(server, player, ['minecraft:fill 0 64 0 1 64 0 air']);
+  await clientBlocks(player, 'air', signal);
+  const matches = await completions(player, '/builder replace воз');
+  assert.ok(matches.some(match => match.match === 'воздух'));
+  await player.giveItem('stone', 2);
+  player.chat('/builder replace air stone');
+  await expect(player).toHaveReceivedMessage('[▶ Build]');
+  await assertWorld(server, player, 'air');
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('completed: 2 blocks.');
+  await assertWorld(server, player, 'stone');
+  await clientBlocks(player, 'stone', signal);
+  assert.equal(itemCount(player, 'stone'), 0);
+  assert.equal(itemCount(player, 'oak_planks'), 0);
+  const since = player.messageBuffer.length;
+  player.chat('/builder undo');
+  await expect(player).toHaveReceivedMessage('[▶ Build]', { since });
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('completed: 2 blocks.', { since });
+  await assertWorld(server, player, 'air');
+  await clientBlocks(player, 'air', signal);
+  await waitUntil(() => itemCount(player, 'stone') === 2, { signal });
 });
 
 test('insufficient materials leave the whole replacement untouched; retry commits only once', async ({ player, server, signal }) => {

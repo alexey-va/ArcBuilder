@@ -201,6 +201,10 @@ case; Russian aliases also accept `е` for `ё` and underscore separators.
 names are omitted instead of silently choosing a material. Replace completion
 uses the planner's coupled-block restriction and default-state safety checks;
 legacy materials are excluded before querying modern Bukkit material metadata.
+Russian names precede English identifiers in material completions. The runtime
+also reorders the final `AsyncPlayerSendSuggestionsEvent` result because
+Brigadier sorts Bukkit completions before packet delivery; it preserves the
+existing suggestions, ranges, tooltips and permission filtering.
 
 The bundled `materials/ru_ru.json` contains the `block.minecraft.<id>` labels from
 Minecraft 1.21.11's official Russian asset (SHA-1
@@ -217,7 +221,11 @@ skipped, while coupled targets are rejected, so the operation never creates or
 replaces a single incomplete half.
 
 In survival, every changed block consumes the target construction item and
-returns the source construction item. Creative plans carry no item exchange.
+returns the source construction item when present. `replace air stone` (or
+`replace воздух камень`) fills all three vanilla air variants and returns no
+source item. Explicit `cave_air` and `void_air` match only their exact variant.
+The journal retains each original state for undo. Air is suggested only as the
+source argument. Creative plans carry no item exchange.
 Replacing with air remains unsupported; removal belongs to `deconstruct`.
 
 ## Clipboard and construction books

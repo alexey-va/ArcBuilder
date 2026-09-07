@@ -37,9 +37,9 @@ internal class BuilderReplaceController(
 
         selection.positionsBottomUp().forEach { position ->
             val block = world.getBlockAt(position.x, position.y, position.z)
-            if (block.type != source) return@forEach
+            if (block.type != source && !(source == Material.AIR && block.type.isAir)) return@forEach
             val before = block.blockData
-            if (!safety.isSafeExisting(block) || isCoupledMultiBlock(before)) {
+            if (!safety.isSafeExisting(block, allowAir = true) || isCoupledMultiBlock(before)) {
                 skippedUnsafe += 1
                 return@forEach
             }
@@ -51,7 +51,7 @@ internal class BuilderReplaceController(
             }
             val cost = BuilderPlacementCost.itemOrNull(after)
             val reward = BuilderPlacementCost.itemOrNull(before)
-            if (usesInventory && (cost == null || reward == null)) {
+            if (usesInventory && (cost == null || reward == null && !before.material.isAir)) {
                 skippedUnsafe += 1
                 return@forEach
             }
@@ -60,7 +60,7 @@ internal class BuilderReplaceController(
             changes += BuilderBlockChange(position, before.asString, after.asString)
             if (usesInventory) {
                 costs += checkNotNull(cost)
-                rewards += checkNotNull(reward)
+                reward?.let(rewards::add)
             }
             if (changes.size > maximumChanges) host.fail("errors.selection-too-large")
         }

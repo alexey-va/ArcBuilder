@@ -6,7 +6,8 @@
     "Every replace consumes exact construction items and returns the old construction items; counts including slabs and candles remain unchanged. Undo reverses the same exchange. No random drops, rewards, prices or earning multiplier are added.",
     "vault and tokens direct mint remain zero; existing optional shop purchase stays an unchanged debit. Existing operation telemetry/contract progress limits remain unchanged. No new player BlockPlace or BlockBreak events are fired.",
     "EconomyShopGUI SELL remains current/conditional as recorded in canonical inventory; planned removal and contract transition are unchanged. No investment or SHADOW income is assumed.",
-    "Physics may produce vanilla drops from unsupported neighboring blocks; no journal rollback is allowed after committed physics, to avoid restoring both blocks and drops. Undo must fail closed if physics changed the expected block state."
+    "Physics may produce vanilla drops from unsupported neighboring blocks; no journal rollback is allowed after committed physics, to avoid restoring both blocks and drops. Undo must fail closed if physics changed the expected block state.",
+    "1.0.19 adds air-to-block replacement: before, no plan or exchange; after, one canonical target item is consumed per placement and air returns no item. Undo removes the placed block and refunds only the original debit. AIR matches AIR/CAVE_AIR/VOID_AIR with exact original data journaled. Direct vault/tokens mint, ore policy and operation limits are unchanged; the existing fill command already offers this paid placement flow."
   ],
   "participants": [
     1,

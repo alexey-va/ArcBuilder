@@ -489,8 +489,8 @@ internal class BuilderBlockSafety(
 
     fun isReplaceable(block: Block): Boolean = block.type in replaceable && !isCustom(block) && block.state !is TileState
 
-    fun isSafeExisting(block: Block): Boolean =
-        isSafePlacement(block.blockData) && block.state !is TileState && !isCustom(block)
+    fun isSafeExisting(block: Block, allowAir: Boolean = false): Boolean =
+        (allowAir && block.type.isAir || isSafePlacement(block.blockData)) && block.state !is TileState && !isCustom(block)
 
     fun isSafePlacement(data: BlockData): Boolean =
         isSafeMaterial(data.material) &&

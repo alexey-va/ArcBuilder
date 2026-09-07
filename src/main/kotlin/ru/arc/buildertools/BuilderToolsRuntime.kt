@@ -1,5 +1,7 @@
 package ru.arc.buildertools
 
+import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
+import com.mojang.brigadier.suggestion.Suggestions
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.title.Title
@@ -798,7 +800,8 @@ internal class BuilderToolsRuntime(
         if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)
         if (root == BuilderRootCommand.REPLACE) {
             val suggestions = when (args.size) {
-                2, 3 -> replaceMaterialNames
+                2 -> replaceSourceMaterialNames
+                3 -> replaceMaterialNames
                 4 -> listOf("confirm")
                 else -> emptyList()
             }
@@ -814,6 +817,19 @@ internal class BuilderToolsRuntime(
             else -> emptyList()
         }
         return filterPrefix(suggestions, args[1])
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    fun onSendSuggestions(event: AsyncPlayerSendSuggestionsEvent) {
+        val parts = event.buffer.removePrefix("/").lowercase(Locale.ROOT).split(' ')
+        if (parts.firstOrNull() !in setOf("builder", "arcbuilder:builder")) return
+        if (!(parts.getOrNull(1) == "fill" && parts.size == 3 ||
+                parts.getOrNull(1) == "replace" && parts.size in 3..4)) return
+        // Brigadier sorts Bukkit completions again; reorder the final packet without adding suggestions.
+        val suggestions = event.suggestions
+        event.suggestions = Suggestions(suggestions.range, suggestions.list.sortedBy {
+            !BuilderMaterialArguments.isRussianName(it.text)
+        })
     }
 
     private fun handleBuilder(player: Player, args: Array<out String>) {
@@ -2732,6 +2748,7 @@ internal class BuilderToolsRuntime(
     private fun filterPrefix(values: List<String>, raw: String?): List<String> {
         val prefix = raw.orEmpty().lowercase(Locale.ROOT)
         return values.filter { it.startsWith(prefix, ignoreCase = true) }.take(100)
+            .sortedBy { !BuilderMaterialArguments.isRussianName(it) }
     }
 
     private val safeMaterials by lazy { Material.entries.filter(safety::isSafeMaterial) }
@@ -2741,6 +2758,9 @@ internal class BuilderToolsRuntime(
             val data = material.createBlockData()
             safety.isSafePlacement(data) && !BuilderReplaceController.isCoupledMultiBlock(data)
         })
+    }
+    private val replaceSourceMaterialNames by lazy {
+        BuilderMaterialArguments.names(listOf(Material.AIR, Material.CAVE_AIR, Material.VOID_AIR)) + replaceMaterialNames
     }
 
     private data class ReplaceRequest(

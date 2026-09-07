@@ -23,8 +23,10 @@ internal object BuilderMaterialArguments {
 
     fun names(materials: Iterable<Material>): List<String> = materials.flatMap { material ->
         val russian = russianNames[material]?.takeIf { aliases[normalize(it)] == material }
-        listOfNotNull(material.name.lowercase(Locale.ROOT), russian)
+        listOfNotNull(russian, material.name.lowercase(Locale.ROOT))
     }
+
+    fun isRussianName(name: String): Boolean = name.firstOrNull()?.let { it in 'А'..'я' || it == 'Ё' || it == 'ё' } == true
 
     private fun camelCase(label: String): String = label.lowercase(Locale.ROOT)
         .split(Regex("[^\\p{L}\\p{N}]+"))
