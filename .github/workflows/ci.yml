@@ -8,12 +8,6 @@ on:
     branches: [main]
     paths-ignore: ['**/*.md', 'docs/**', '.agents/**', '.codex/**', 'src/test/e2e/**']
   workflow_dispatch:
-    inputs:
-      heavy_tests:
-        description: Run MySQL integration and real-Paper E2E jobs
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
@@ -61,7 +55,6 @@ jobs:
           if-no-files-found: error
 
   mysql-integration:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.heavy_tests }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -86,7 +79,6 @@ jobs:
           if-no-files-found: warn
 
   e2e:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.heavy_tests }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
