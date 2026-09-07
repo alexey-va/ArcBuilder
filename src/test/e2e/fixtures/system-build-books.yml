@@ -1,0 +1,5 @@
+books:
+  - building-id: e2e.schem
+    title: E2E fixture
+    sha256: 2be8167d19b000081c80962fbab3683a24583b6744394c40c552e551fce16303
+    player-enabled: false

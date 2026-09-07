@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.3.0"
     id("com.gradleup.shadow") version "9.3.0"
+    id("io.github.drownek.plugwright") version "2.0.4"
     jacoco
 }
 
@@ -121,4 +122,28 @@ tasks {
         relocate("de.tr7zw.changeme.nbtapi", "ru.ruscrafting.builder.libs.nbtapi")
     }
     check { dependsOn(shadowJar) }
+}
+
+plugwright {
+    minecraftVersion.set("1.21.11")
+    downloadPlugins {
+        url("https://cdn.modrinth.com/data/Vebnzrzj/versions/OrIs0S6b/LuckPerms-Bukkit-5.5.17.jar")
+        url("https://cdn.modrinth.com/data/1u6JkXh5/versions/p8T2aZ8U/worldedit-bukkit-7.4.2.jar")
+    }
+    runDir.set(layout.buildDirectory.dir("plugwright"))
+    testsDir.set(layout.projectDirectory.dir("src/test/e2e"))
+    downloadNode.set(true)
+    nodeVersion.set("22.14.0")
+    acceptEula.set(true)
+    jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
+    writeFiles {
+        file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
+        file("plugins/ArcBuilder/modules/builder-tools.yml", projectDir.resolve("src/main/resources/modules/builder-tools.yml").readText()
+            .replaceFirst("enabled: false", "enabled: true")
+            .replaceFirst("default-locale: ru", "default-locale: en")
+            .replaceFirst("require-coreprotect: true", "require-coreprotect: false")
+            .replaceFirst("allowed-worlds: []", "allowed-worlds: [world]"))
+        file("plugins/ArcBuilder/modules/system-build-books.yml", projectDir.resolve("src/test/e2e/fixtures/system-build-books.yml"))
+        file("plugins/ArcBuilder/schematics/e2e.schem", projectDir.resolve("src/test/e2e/fixtures/e2e.schem"))
+    }
 }
