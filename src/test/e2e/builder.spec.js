@@ -26,7 +26,7 @@ async function clientBlocks(player, material, signal) {
   });
 }
 
-test('survival selection previews without world mutation; confirm and undo update both clients', async ({ player, server, createPlayer, signal }) => {
+async function selectReplacement(player, server, signal, materials = 2) {
   await commands(server, player, [
     'minecraft:fill -3 64 -3 4 64 4 stone',
     'minecraft:fill -3 65 -3 4 69 4 air',
@@ -39,7 +39,7 @@ test('survival selection previews without world mutation; confirm and undo updat
   await expect(player).toHaveReceivedMessage('Set arcbuild.replace to true');
   await player.deOp();
   await player.giveItem('echo_shard', 1);
-  await player.giveItem('diamond_block', 2);
+  await player.giveItem('diamond_block', materials);
   await player.bot.equip(player.bot.inventory.items().find(item => item.name === 'echo_shard'), 'hand');
   player.chat('/builder wand');
   await expect(player).toHaveReceivedMessage('Your echo shard is now the builder selector.');
@@ -52,7 +52,14 @@ test('survival selection previews without world mutation; confirm and undo updat
   await expect(player).toHaveReceivedMessage('Position 1 selected.');
   await player.bot.activateBlock(second);
   await expect(player).toHaveReceivedMessage('Position 2 selected.');
+}
 
+function itemCount(player, material) {
+  return player.bot.inventory.items().filter(item => item.name === material).reduce((n, item) => n + item.count, 0);
+}
+
+test('survival selection previews without world mutation; confirm and undo update both clients', async ({ player, server, createPlayer, signal }) => {
+  await selectReplacement(player, server, signal);
   const observer = await createPlayer({ username: 'BuildObserver' });
   await observer.teleport(2.5, 65, 1.5);
   await clientBlocks(observer, 'oak_planks', signal);
@@ -76,4 +83,44 @@ test('survival selection previews without world mutation; confirm and undo updat
   await clientBlocks(player, 'oak_planks', signal);
   await clientBlocks(observer, 'oak_planks', signal);
   await waitUntil(() => player.bot.inventory.items().filter(item => item.name === 'diamond_block').reduce((n, item) => n + item.count, 0) === 2, { signal });
+});
+
+test('cancelled replacement rejects a stale confirmation without consuming or returning materials', async ({ player, server, signal }) => {
+  await selectReplacement(player, server, signal);
+  player.chat('/builder replace oak_planks diamond_block');
+  await expect(player).toHaveReceivedMessage('[▶ Build]');
+  player.chat('/builder cancel');
+  await expect(player).toHaveReceivedMessage('Preview cancelled.');
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('The plan or clipboard expired.');
+  player.chat('/builder undo');
+  await expect(player).toHaveReceivedMessage('There is no completed operation available to undo.');
+  await assertWorld(server, player, 'oak_planks');
+  await clientBlocks(player, 'oak_planks', signal);
+  assert.equal(itemCount(player, 'diamond_block'), 2);
+  assert.equal(itemCount(player, 'oak_planks'), 0);
+});
+
+test('insufficient materials leave the whole replacement untouched; retry commits only once', async ({ player, server, signal }) => {
+  await selectReplacement(player, server, signal, 1);
+  player.chat('/builder replace oak_planks diamond_block');
+  await expect(player).toHaveReceivedMessage('Block replacement 2 blocks');
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('Required items or free inventory space are missing.');
+  await assertWorld(server, player, 'oak_planks');
+  await clientBlocks(player, 'oak_planks', signal);
+  assert.equal(itemCount(player, 'diamond_block'), 1);
+  assert.equal(itemCount(player, 'oak_planks'), 0);
+
+  await player.giveItem('diamond_block', 1);
+  await waitUntil(() => itemCount(player, 'diamond_block') === 2, { signal });
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('completed: 2 blocks.');
+  await waitUntil(() => itemCount(player, 'diamond_block') === 0 && itemCount(player, 'oak_planks') === 2, { signal });
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('The plan or clipboard expired.');
+  await assertWorld(server, player, 'diamond_block');
+  await clientBlocks(player, 'diamond_block', signal);
+  assert.equal(itemCount(player, 'diamond_block'), 0);
+  assert.equal(itemCount(player, 'oak_planks'), 2);
 });

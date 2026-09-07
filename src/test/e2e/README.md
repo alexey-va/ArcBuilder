@@ -15,7 +15,10 @@ startup validation; its contents are never loaded or offered as a building book.
 The tests cover denied command access and a survival player selecting two
 blocks, previewing a replacement without changing world blocks, confirming the build,
 then undoing it. Server block queries, a second client's block updates and
-inventory counts verify the result, including returned materials.
+inventory counts verify the result, including returned materials. Cancellation
+rejects a stale confirmation and creates no undo record. Insufficient materials
+leave both blocks and inventory untouched; supplying the missing item allows
+one commit, and a repeated confirmation cannot duplicate returned materials.
 
 Paid material purchases, protection integrations, build-book placement and
 database recovery remain outside this suite. Existing JVM and MySQL tests
