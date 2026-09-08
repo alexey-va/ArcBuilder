@@ -766,7 +766,9 @@ internal class BuilderToolsRuntime(
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         if (args.firstOrNull()?.equals("systembook", ignoreCase = true) == true) {
-            return BuilderSystemBookIssuer.issue(sender, args.drop(1), systemBuildBookResolver, config.maxScanVolume)
+            return BuilderSystemBookIssuer.issue(sender, args.drop(1), systemBuildBookResolver, config.maxScanVolume) {
+                sender.sendMessage(messages.render("errors.no-permission"))
+            }
         }
         val player = sender as? Player ?: run {
             sender.sendMessage(messages.render("errors.player-only"))

@@ -94,3 +94,6 @@ permissions:
   arcbuild.admin.preview:
     description: View and inspect build previews owned by other players
     default: op
+  arcbuild.admin.systembook:
+    description: Issue reviewed system construction books
+    default: op

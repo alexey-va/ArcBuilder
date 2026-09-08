@@ -100,13 +100,18 @@ rollout complete.
 ## Console issuance for reviewed schematics
 
 `builder systembook <online-player> <catalogue-file.schem>` issues one system
-book through ArcBuilder's own codec. It is console-only and requires an enabled,
+book through ArcBuilder's own codec. It accepts the console or an in-game player with `arcbuild.admin.systembook`
+(default: OP), and requires an enabled,
 SHA-256-matched catalogue entry, a readable schematic within the configured scan
 volume, and an empty storage slot on the current node. It never drops overflow
 or manufactures a registered player blueprint. The catalogue remains the source
 of the title and material policy. The resulting book uses the ordinary preview,
 confirmation, material collection and one-use construction path, including its
 existing unsafe-block exclusions. Issuing a book does not paste blocks.
+
+Administrators can use `/builder systembook <catalogue-file.schem>` to issue
+to themselves, or `/builder systembook <online-player> <catalogue-file.schem>`
+to select a recipient. Command blocks cannot issue books.
 
 ### Reviewed system furniture
 
