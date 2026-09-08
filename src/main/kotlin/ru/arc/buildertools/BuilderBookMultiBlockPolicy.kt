@@ -41,7 +41,9 @@ internal object BuilderBookMultiBlockPolicy {
                     partner == null ||
                     !matchingPair(cell.after, partner.after) ||
                     cell.placement == BuilderBookPlacementResult.SkippedUnsafe ||
-                    partner.placement == BuilderBookPlacementResult.SkippedUnsafe
+                    partner.placement == BuilderBookPlacementResult.SkippedUnsafe ||
+                    (cell.placement is BuilderBookPlacementResult.Change) !=
+                    (partner.placement is BuilderBookPlacementResult.Change)
                 ) {
                     add(cell.position)
                     add(partnerPosition)

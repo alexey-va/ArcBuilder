@@ -107,3 +107,16 @@ or manufactures a registered player blueprint. The catalogue remains the source
 of the title and material policy. The resulting book uses the ordinary preview,
 confirmation, material collection and one-use construction path, including its
 existing unsafe-block exclusions. Issuing a book does not paste blocks.
+
+### Reviewed system furniture
+
+Digest-reviewed system books can place empty vanilla beds, chests, barrels,
+furnaces/smokers/blast furnaces and flower pots. The exception is carried through
+confirmation and the durable construction journal; it never admits schematic
+block-entity NBT or replacement of an existing player container. Other tile
+entities remain excluded. Beds use the existing atomic pair and one-bed cost.
+For player-supplied materials, potted plants consume one flower pot; the plant is included decorative content
+of the reviewed system book. As before, `materials-included` system books supply
+all construction materials, including pots and beds. Player-authored books do not gain this exception.
+Chest loot remains an explicit `container-loot-table` catalogue opt-in and uses
+the existing durable loot-table application/recovery path.

@@ -326,7 +326,8 @@ internal class BuilderToolsRuntime(
             if (!world.worldBorder.isInside(target.location)) return false
             val after = Bukkit.createBlockData(change.afterBlockData)
             val safeSystemContainer = step.lootTableKey != null && safety.isSafeSystemLootContainer(after)
-            if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer) return false
+            if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer &&
+                !(step.systemFurniture && safety.isSafeSystemFurniture(after))) return false
             val replaceable = safety.isReplaceable(target)
             if (!replaceable && !safety.isSafeExisting(target)) return false
             return HookRegistry.landsHook?.canModify(
@@ -1055,6 +1056,7 @@ internal class BuilderToolsRuntime(
                     target,
                     after,
                     allowSystemLootContainer = lootTableKey != null,
+                    allowSystemFurniture = systemDefinition != null,
                 ),
             )
         }.toList()
@@ -1073,6 +1075,7 @@ internal class BuilderToolsRuntime(
                 placementItem = placement.placementItem,
                 refund = placement.refund,
                 lootTableKey = lootTableKey.takeIf { safety.isSafeSystemLootContainer(cell.after) },
+                systemFurniture = systemDefinition != null && safety.isSafeSystemFurniture(cell.after),
             )
         }.take(config.maxChanges + 1).toList()
         requireChanges(placements.map(BuilderBookPlannedChange::change))
@@ -1119,9 +1122,11 @@ internal class BuilderToolsRuntime(
         block: Block,
         after: org.bukkit.block.data.BlockData,
         allowSystemLootContainer: Boolean = false,
+        allowSystemFurniture: Boolean = false,
     ): BuilderBookPlacementResult {
         val safeSystemContainer = allowSystemLootContainer && safety.isSafeSystemLootContainer(after)
-        if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer) {
+        if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer &&
+            !(allowSystemFurniture && safety.isSafeSystemFurniture(after))) {
             return BuilderBookPlacementResult.SkippedUnsafe
         }
         if (block.blockData.asString == after.asString) return BuilderBookPlacementResult.Unchanged
@@ -1141,7 +1146,8 @@ internal class BuilderToolsRuntime(
                 block.blockData.asString,
                 after.asString,
             ),
-            BuilderPlacementCost.itemOrNull(after),
+            if (allowSystemFurniture && after.material.name.startsWith("POTTED_")) ItemStack(Material.FLOWER_POT)
+            else BuilderPlacementCost.itemOrNull(after),
             refund,
         )
     }
@@ -1474,7 +1480,7 @@ internal class BuilderToolsRuntime(
             plan,
             construction?.steps.orEmpty()
                 .asSequence()
-                .filter { it.lootTableKey != null }
+                .filter { it.lootTableKey != null || it.systemFurniture }
                 .mapTo(mutableSetOf()) { it.change.position },
         )
         if (buyMissing && construction != null) throw BuilderUserFailure("errors.shop-not-supported")
@@ -2246,7 +2252,7 @@ internal class BuilderToolsRuntime(
     private fun revalidatePlan(
         player: Player,
         plan: BuilderPlan,
-        systemLootContainerPositions: Set<BuilderBlockPos> = emptySet(),
+        systemBookExceptionPositions: Set<BuilderBlockPos> = emptySet(),
     ) {
         plan.validated(config.maxChanges)
         if (
@@ -2264,7 +2270,8 @@ internal class BuilderToolsRuntime(
                 throw BuilderUserFailure("errors.expired")
             }
             val safeSystemContainer =
-                change.position in systemLootContainerPositions && safety.isSafeSystemLootContainer(after)
+                change.position in systemBookExceptionPositions &&
+                    (safety.isSafeSystemLootContainer(after) || safety.isSafeSystemFurniture(after))
             if (!safety.isSafePlacement(after) && !safeSystemContainer && after.material !in safety.replaceable) {
                 throw BuilderUserFailure("errors.plan-failed")
             }

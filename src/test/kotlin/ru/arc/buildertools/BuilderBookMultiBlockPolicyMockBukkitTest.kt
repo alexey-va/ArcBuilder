@@ -43,6 +43,25 @@ class BuilderBookMultiBlockPolicyMockBukkitTest : FunSpec({
         }
     }
 
+    test("an unchanged bed half cannot leave a standalone changed companion") {
+        MockBukkitTestRuntime.open().use {
+            val footPosition = BuilderBlockPos(worldId, 20, 64, 20)
+            val headPosition = footPosition.copy(z = 19)
+            val foot = (Material.RED_BED.createBlockData() as Bed).apply {
+                facing = BlockFace.NORTH
+                part = Bed.Part.FOOT
+            }
+            val head = (Material.RED_BED.createBlockData() as Bed).apply {
+                facing = BlockFace.NORTH
+                part = Bed.Part.HEAD
+            }
+            BuilderBookMultiBlockPolicy.rejectedPositions(listOf(
+                BuilderBookPlannedCell(footPosition, foot, BuilderBookPlacementResult.Unchanged),
+                BuilderBookPlannedCell(headPosition, head, change(headPosition, head)),
+            )).shouldContainExactlyInAnyOrder(footPosition, headPosition)
+        }
+    }
+
     test("safe complete bed remains in the plan") {
         MockBukkitTestRuntime.open().use {
             val footPosition = BuilderBlockPos(worldId, 20, 64, 20)

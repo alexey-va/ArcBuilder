@@ -500,6 +500,10 @@ internal class BuilderBlockSafety(
     fun isSafeSystemLootContainer(data: BlockData): Boolean =
         data.material == Material.CHEST && isSafeState(data)
 
+    /** Only block data from a digest-reviewed system schematic; never copy block-entity NBT. */
+    fun isSafeSystemFurniture(data: BlockData): Boolean =
+        BuilderSystemFurniturePolicy.isSupported(data.material.name) && isSafeState(data)
+
     private val tileMaterials = mutableMapOf<Material, Boolean>()
 
     fun isSafeMaterial(material: Material): Boolean {

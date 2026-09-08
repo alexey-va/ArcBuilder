@@ -36,11 +36,18 @@ internal data class BuilderConstructionStep(
     val requiredMaterial: BuilderItemAmount?,
     val output: BuilderItemAmount?,
     val lootTableKey: String? = null,
+    val systemFurniture: Boolean = false,
 ) {
     fun validated(): BuilderConstructionStep = apply {
         change.validated()
         requiredMaterial?.validated()
         output?.validated()
+        if (systemFurniture) {
+            val material = change.afterBlockData.substringBefore('[').removePrefix("minecraft:").uppercase()
+            require(change.afterBlockData.startsWith("minecraft:") && BuilderSystemFurniturePolicy.isSupported(material)) {
+                "System furniture step contains an unsupported block"
+            }
+        }
         lootTableKey?.let { key ->
             require(key.length <= 256 && key.matches(BUILDER_LOOT_TABLE_KEY)) {
                 "Builder construction loot-table key is invalid"

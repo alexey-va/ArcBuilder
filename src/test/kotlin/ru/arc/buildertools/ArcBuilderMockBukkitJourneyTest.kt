@@ -86,6 +86,29 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         verify(exactly = 1) { secondClone.rotate(StructureRotation.CLOCKWISE_90) }
     }
 
+    test("reviewed books place empty furniture and preserve player container protection") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("FurnitureBuilder", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 6.5, 64.0, 6.5))
+            val target = journey.world.getBlockAt(6, 64, 6)
+            listOf(Material.RED_BED, Material.BARREL, Material.FURNACE, Material.CHEST, Material.POTTED_POPPY).forEach { material ->
+                val data = material.createBlockData()
+                journey.planBuildBookBlock(player, target, data) shouldBe BuilderBookPlacementResult.SkippedUnsafe
+                val change = journey.planBuildBookBlock(player, target, data, allowSystemFurniture = true)
+                    as BuilderBookPlacementResult.Change
+                change.block.afterBlockData shouldBe data.asString
+                if (material == Material.POTTED_POPPY) change.placementItem?.type shouldBe Material.FLOWER_POT
+            }
+            listOf(Material.SPAWNER, Material.COMMAND_BLOCK, Material.SHULKER_BOX, Material.HOPPER).forEach { material ->
+                journey.planBuildBookBlock(player, target, material.createBlockData(), allowSystemFurniture = true) shouldBe
+                    BuilderBookPlacementResult.SkippedUnsafe
+            }
+            target.type = Material.CHEST
+            journey.planBuildBookBlock(player, target, Material.FURNACE.createBlockData(), allowSystemFurniture = true) shouldBe
+                BuilderBookPlacementResult.SkippedUnsafe
+        }
+    }
+
     test("build-book plan replaces terrain and fluids, carves andesite, and gates system loot chests") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("BookGroundBuilder", GameMode.SURVIVAL)
@@ -1240,7 +1263,8 @@ private class ArcBuilderJourney private constructor(
         block: org.bukkit.block.Block,
         after: BlockData,
         allowSystemLootContainer: Boolean = false,
-    ): BuilderBookPlacementResult = runtime.planBuildBookBlock(player, block, after, allowSystemLootContainer)
+        allowSystemFurniture: Boolean = false,
+    ): BuilderBookPlacementResult = runtime.planBuildBookBlock(player, block, after, allowSystemLootContainer, allowSystemFurniture)
 
     fun rightClickBook(player: Player, action: Action, block: org.bukkit.block.Block?) {
         paper.callEvent(

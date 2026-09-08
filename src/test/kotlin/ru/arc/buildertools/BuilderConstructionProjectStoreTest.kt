@@ -179,6 +179,22 @@ class BuilderConstructionProjectStoreTest : FunSpec({
             ?.lootTableKey shouldBe "minecraft:chests/spawn_bonus_chest"
     }
 
+    test("store restart preserves the reviewed furniture exception and rejects technical blocks") {
+        val root = Files.createTempDirectory("arc-builder-construction-furniture-")
+        val furnitureChange = BuilderBlockChange(
+            BuilderBlockPos(worldId, 12, 64, 12), "minecraft:air", "minecraft:barrel[facing=north,open=false]",
+        )
+        val furnitureStep = BuilderConstructionStep(furnitureChange, null, null, systemFurniture = true)
+        val furniturePlan = plan.copy(changes = listOf(furnitureChange), costs = listOf(book))
+        val project = prepared().copy(plan = furniturePlan, steps = listOf(furnitureStep)).validated()
+        BuilderConstructionProjectStore(root, maxChanges = 10_000).commit(project)
+        BuilderConstructionProjectStore(root, maxChanges = 10_000)
+            .loadOrNull(projectId)?.steps?.single()?.systemFurniture shouldBe true
+        io.kotest.assertions.throwables.shouldThrow<IllegalArgumentException> {
+            furnitureStep.copy(change = furnitureChange.copy(afterBlockData = "minecraft:command_block")).validated()
+        }
+    }
+
     test("legacy project JSON without a title remains compatible while current JSON preserves it") {
         val gson = GsonBuilder().disableHtmlEscaping().create()
         val titled = prepared().copy(
