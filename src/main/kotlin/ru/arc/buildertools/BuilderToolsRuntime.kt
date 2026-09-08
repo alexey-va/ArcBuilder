@@ -269,7 +269,7 @@ internal class BuilderToolsRuntime(
     private val plannedConstructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionPauseRequests = BuilderConstructionPauseRequests()
-    private val constructionInstantRequests = mutableSetOf<UUID>()
+    private val constructionInstantRequests = mutableMapOf<UUID, UUID>()
     private val constructionMenus: BuilderConstructionMenuManager
     private val constructionProjectsMenu: BuilderConstructionProjectsMenuManager
     private val constructionSiteDisplays: BuilderConstructionSiteDisplayManager
@@ -431,7 +431,7 @@ internal class BuilderToolsRuntime(
                 coreProtect?.logChange(project.playerName, mutation.target.location, mutation.before, mutation.after)
             }
             val current = mutations.first()
-            BuilderConstructionFeedback.play(
+            if (project.instantBuildRequestedBy == null) BuilderConstructionFeedback.play(
                 current.target.world,
                 current.target.location,
                 current.before,
@@ -1779,6 +1779,9 @@ internal class BuilderToolsRuntime(
                     ).takeUnless { it == expected }
                 } else {
                     constructionPauseRequests.pauseTarget(expected, System.currentTimeMillis())
+                        ?: constructionInstantRequests[expected.projectId]?.let { requester ->
+                            BuilderInstantConstruction.prepare(expected, requester, System.currentTimeMillis())
+                        }
                         ?: BuilderConstructionProjectController.tick(expected, System.currentTimeMillis(), constructionPort)
                 }
             } catch (failure: Throwable) {
@@ -1818,6 +1821,10 @@ internal class BuilderToolsRuntime(
                         return@writeAsync
                     }
                     constructionProjects[durable.projectId] = durable
+                    if (expected.instantBuildRequestedBy == null && durable.instantBuildRequestedBy != null) {
+                        info(debugLine.line("event" to "construction_instant_prepared", "operation" to durable.projectId,
+                            "admin" to durable.instantBuildRequestedBy, "remaining" to durable.steps.size - durable.cursor))
+                    }
                     if (durable.state == BuilderConstructionProjectState.PAUSED) {
                         val requester = constructionPauseRequests.requester(durable.projectId)
                         constructionPauseRequests.complete(durable.projectId)
@@ -1952,7 +1959,7 @@ internal class BuilderToolsRuntime(
                     constructionResources.forget(durable.projectId)
                     unlockConstruction(durable)
                     Bukkit.getPlayer(durable.playerId)?.takeIf(Player::isOnline)?.let { player ->
-                        emitCommittedOperation(durable.plan, player.gameMode)
+                        if (durable.instantBuildRequestedBy == null) emitCommittedOperation(durable.plan, player.gameMode)
                     }
                     Bukkit.getPlayer(durable.playerId)?.takeIf(Player::isOnline)?.let { player ->
                         send(
@@ -2401,7 +2408,7 @@ internal class BuilderToolsRuntime(
     private fun requestConstructionPaused(player: Player, projectId: UUID, pause: Boolean): Boolean {
         val expected = constructionProjects[projectId]?.takeUnless(BuilderConstructionProjectRecord::terminal)
             ?: return false
-        if (!canControlConstruction(player, expected)) return false
+        if (!canControlConstruction(player, expected) || expected.instantBuildRequestedBy != null) return false
         if (pause) return constructionPauseRequests.request(expected, player.uniqueId)
         if (expected.state != BuilderConstructionProjectState.PAUSED || !constructionWrites.add(projectId)) return false
         val target = runCatching { expected.resumed(System.currentTimeMillis()) }.getOrNull()
@@ -2414,6 +2421,7 @@ internal class BuilderToolsRuntime(
             callback = { durable, failure ->
                 constructionWrites.remove(projectId)
                 if (failure != null || durable == null) {
+                    constructionInstantRequests.remove(projectId)
                     error("Builder construction pause transition failed for $projectId", failure)
                     constructionMenus.refreshProject(projectId)
                     return@writeAsync
@@ -2440,7 +2448,8 @@ internal class BuilderToolsRuntime(
         val project = constructionProjects[projectId]?.takeUnless(BuilderConstructionProjectRecord::terminal)
             ?: return false
         if (project.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) return false
-        constructionInstantRequests += projectId
+        constructionPauseRequests.complete(projectId)
+        constructionInstantRequests[projectId] = player.uniqueId
         val accepted = if (project.state == BuilderConstructionProjectState.PAUSED) {
             requestConstructionPaused(player, projectId, pause = false)
         } else {
@@ -2452,7 +2461,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun continueInstantConstruction(project: BuilderConstructionProjectRecord) {
-        if (project.projectId !in constructionInstantRequests) return
+        if (project.projectId !in constructionInstantRequests && project.instantBuildRequestedBy == null) return
         if (project.terminal || project.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) {
             constructionInstantRequests -= project.projectId
             return

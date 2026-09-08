@@ -131,3 +131,10 @@ and enabled reviewed catalogue IDs. Players can complete a catalogue ID directly
 for self-issuance; console senders must first select an online recipient.
 Catalogue suggestions use the validated in-memory catalog; issuance still
 rechecks the schematic digest before creating the item.
+
+Atelier system houses define their schematic origin at the front-center ground
+block. A ground click maps that origin to the exact clicked block, so floor/ground
+height is preserved and the entrance is in front of the player. Rotation remains
+around that origin. Updating reviewed schematic files and catalogue hashes takes
+effect for existing unopened system books after activation; previously saved
+construction plans keep their own immutable coordinates.

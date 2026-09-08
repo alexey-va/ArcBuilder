@@ -1,0 +1,128 @@
+{
+  "assessment_id": "arcbuilder-admin-instant-20260908",
+  "assumptions": [
+    "Only existing arcbuild.admin.construction holders can activate instant completion; no player or group permissions are added.",
+    "Before: admin button accelerated the ordinary paid per-block state machine. After: remaining blocks are placed without material debit, replacement items or operation-progress rewards. Already settled book and material debits are not refunded; pending receipts settle before switching.",
+    "Illustrative low/base/high operator throughput is 1/3/10 houses per day, bounded to 10000 plan changes per house and 4096 per batch. This is administrative creative issuance, not normal recurring player income.",
+    "vault and tokens mint/burn remain zero in the changed path. Item issuance is separate: before zero unpaid blocks, after up to 10000 unpaid blocks per operator-selected house. No currency conversion or market value is assumed.",
+    "Normal player building costs, one-time book consumption, max changes, protections and ore exclusions stay unchanged. Admin completion emits no construction progression event, so this action cannot directly farm operation-triggered contracts.",
+    "Admins could give resulting blocks to players and indirectly affect supply; this is explicit owner-authorized creative administration equivalent to manual creative placement. Ordinary users cannot activate it. No new drop, container contents or loot table is authored.",
+    "EconomyShopGUI SELL remains current/conditional and the planned SELL-to-contract transition is unchanged. No SHADOW flow is counted as active income.",
+    "Instant intent and cursor are durable before world changes; replay compares exact before/after states and never issues resource outputs. Unknown storage outcomes stop safely."
+  ],
+  "participants": [
+    1,
+    1,
+    1
+  ],
+  "currencies": {
+    "vault": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "admin_instant_direct_vault",
+          "kind": "mint",
+          "source": "BuilderInstantConstruction + BuilderToolsRuntime",
+          "basis": "No direct currency operation in admin instant completion",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              3,
+              10
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              3,
+              10
+            ]
+          }
+        }
+      ]
+    },
+    "tokens": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "admin_instant_direct_tokens",
+          "kind": "mint",
+          "source": "BuilderInstantConstruction + BuilderToolsRuntime",
+          "basis": "No direct currency operation in admin instant completion",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              3,
+              10
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              3,
+              10
+            ]
+          }
+        }
+      ]
+    },
+    "placed_blocks": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "admin_creative_blocks",
+          "kind": "item",
+          "source": "BuilderInstantConstruction",
+          "basis": "Upper bound per house; operator scenario, not measured player income",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              3,
+              10
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "10000",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              3,
+              10
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "prices": [],
+  "version": 1,
+  "title": "Admin-only instant book construction"
+}

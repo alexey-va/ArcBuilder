@@ -193,6 +193,7 @@ internal class BuilderConstructionMenuManager(
         values: Map<String, Component>,
     ): PaperMenuEntry {
         val (path, template) = when {
+            project.instantBuildRequestedBy != null -> "unavailable" to "unavailable"
             !canControl(player, project) -> "readonly" to "unavailable"
             project.state == BuilderConstructionProjectState.PAUSED -> "resume" to "resume"
             BuilderConstructionPausePolicy.canRequestPause(project.state) -> "pause" to "pause"

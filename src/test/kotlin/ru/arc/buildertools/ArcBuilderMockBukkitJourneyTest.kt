@@ -321,6 +321,86 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("admin instant menu completes a waiting book with an empty material inventory") {
+        val definition = SystemBuildBookDefinition(
+            buildingId = "instant-door-test.schem",
+            title = "Atomic door test",
+            schematicSha256 = "e".repeat(64),
+            playerEnabled = true,
+            materialsIncluded = false,
+        )
+        val bottomBlock = mockk<BaseBlock>()
+        val topBlock = mockk<BaseBlock>()
+        mockkStatic(BukkitAdapter::class)
+        try {
+            strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
+                val bottom = Material.OAK_DOOR.createBlockData() as Door
+                bottom.half = Bisected.Half.BOTTOM
+                val top = bottom.clone() as Door
+                top.half = Bisected.Half.TOP
+                every { BukkitAdapter.adapt(bottomBlock) } returns bottom
+                every { BukkitAdapter.adapt(topBlock) } returns top
+                val building = mockk<Building>()
+                every { building.fileName } returns definition.buildingId
+                every { building.volume } returns 2L
+                every { building.getCorner1(any()) } returns BlockVector3.ZERO
+                every { building.getCorner2(any()) } returns BlockVector3.at(0, 1, 0)
+                every { building.getBlock(any(), any()) } answers {
+                    if (firstArg<BlockVector3>().y() == 0) bottomBlock else topBlock
+                }
+                BuildingManager.addBuilding(building)
+
+                val player = journey.builder("InstantBuilder", GameMode.SURVIVAL)
+                player.teleport(player.location.apply { yaw = -180f })
+                player.inventory.setItemInMainHand(
+                    BuildBookItems.create(BuildBookData(definition.buildingId, definition.buildingId)),
+                )
+                val anchor = journey.world.getBlockAt(5, 64, 5)
+                journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, anchor)
+                val site = checkNotNull(BuildingManager.pending(player.uniqueId))
+                val bottomTarget = site.worldLocation(BlockVector3.ZERO).block
+                val topTarget = site.worldLocation(BlockVector3.at(0, 1, 0)).block
+                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
+                val pendingPlan = journey.renderer.plans[player.uniqueId] ?: error(
+                    generateSequence(player::nextComponentMessage)
+                        .joinToString(" | ") { PlainTextComponentSerializer.plainText().serialize(it) },
+                )
+                pendingPlan.changes.size shouldBe 2
+                player.performCommand("builder confirm") shouldBe true
+                val store = BuilderConstructionProjectStore(journey.plugin.dataPath, 10000)
+                journey.await("waiting for missing materials") {
+                    store.loadOrNull(pendingPlan.id)?.state == BuilderConstructionProjectState.WAITING_MATERIALS
+                }
+                bottomTarget.type shouldBe Material.AIR
+                player.addAttachment(journey.plugin, "arcbuild.admin.construction", true)
+                player.recalculatePermissions()
+                player.performCommand("builder projects") shouldBe true
+                fun click(slot: Int, type: org.bukkit.event.inventory.ClickType) = journey.paper.callEvent(
+                    org.bukkit.event.inventory.InventoryClickEvent(player.openInventory,
+                        org.bukkit.event.inventory.InventoryType.SlotType.CONTAINER, slot, type,
+                        org.bukkit.event.inventory.InventoryAction.PICKUP_ALL))
+                click(10, org.bukkit.event.inventory.ClickType.RIGHT)
+                journey.paper.performTicks(2)
+                player.openInventory.topInventory.getItem(22)?.type shouldBe Material.NETHER_STAR
+                click(22, org.bukkit.event.inventory.ClickType.LEFT)
+                journey.await("admin completion through the real menu callback") {
+                    store.loadOrNull(pendingPlan.id)?.state == BuilderConstructionProjectState.COMPLETED
+                }
+                player.inventory.contains(Material.OAK_DOOR) shouldBe false
+
+                bottomTarget.type shouldBe Material.OAK_DOOR
+                topTarget.type shouldBe Material.OAK_DOOR
+                (bottomTarget.blockData as Door).half shouldBe Bisected.Half.BOTTOM
+                (topTarget.blockData as Door).half shouldBe Bisected.Half.TOP
+                journey.awaitSettled(player) {
+                    bottomTarget.type == Material.OAK_DOOR && topTarget.type == Material.OAK_DOOR
+                }
+            }
+        } finally {
+            unmockkStatic(BukkitAdapter::class)
+        }
+    }
+
     test("reviewed system book places a chest with the configured vanilla loot table") {
         val definition = SystemBuildBookDefinition(
             buildingId = "loot-chest-test.schem",

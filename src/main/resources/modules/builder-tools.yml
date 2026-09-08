@@ -1008,7 +1008,7 @@ locales:
         <#8c8c8c>   <#e6fff3>или доступном сундуке рядом.
         <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total> <#e6fff3>блоков.
       completed: "<prefix><#2bba43>Строительный проект завершён: <#d48763><count> <#e6fff3>блоков."
-      instant-started: "<prefix><#2bba43>Стройка ускорена: пауз между блоками больше нет."
+      instant-started: "<prefix><#2bba43>Завершаю стройку без расхода материалов."
       recovery-required: |-
 
         <prefix><#c42323>Стройка остановлена из-за изменения мира или прав.
@@ -1130,9 +1130,12 @@ locales:
           instant:
             name: "<#d48763><bold>Построить мгновенно"
             lore:
-              - "<#e6fff3>Убрать паузы между блоками этой стройки."
-              - "<#969696>Материалы и защита участка всё равно проверяются."
-              - "<#c42323>Только для администраторов."
+              - "<#b8b8b8>"
+              - "<#b8b8b8>Сразу завершить оставшуюся часть постройки."
+              - "<#b8b8b8>Материалы не нужны; предметы за замену не выдаются."
+              - "<#b8b8b8>Защита участка сохраняется. Только для администраторов."
+              - "<#b8b8b8>"
+              - "<#2bba43>[▶] ЛКМ <#b8b8b8>— завершить стройку"
       states:
         prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
         active: "<hover:show_text:'Стройка обрабатывает блоки по одному.'>строится</hover>"
@@ -1874,7 +1877,7 @@ locales:
         <dark_gray>   <gray>Free space in your inventory or an accessible nearby container.
         <dark_gray>   <gray>Progress: <white><count>/<total></white> blocks.
       completed: "<prefix><green>Construction completed: <white><count></white> blocks."
-      instant-started: "<prefix><green>Instant mode enabled: construction will continue without delays between blocks."
+      instant-started: "<prefix><green>Completing construction without consuming materials."
       recovery-required: |-
 
         <prefix><red>Construction stopped because the world or permissions changed.
@@ -1996,9 +1999,12 @@ locales:
           instant:
             name: "<#d48763><bold>Build instantly"
             lore:
-              - "<#e6fff3>Remove delays between blocks for this project."
-              - "<gray>Materials and land protection are still checked."
-              - "<red>Administrators only."
+              - "<#b8b8b8>"
+              - "<#b8b8b8>Complete the remaining structure immediately."
+              - "<#b8b8b8>No materials consumed or replacement items returned."
+              - "<#b8b8b8>Land protection still applies. Administrators only."
+              - "<#b8b8b8>"
+              - "<#2bba43>[▶] Left click <#b8b8b8>— finish construction"
       states:
         prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"
         active: "<hover:show_text:'The project is processing one block at a time.'>building</hover>"

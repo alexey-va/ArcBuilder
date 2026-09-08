@@ -483,3 +483,22 @@ Use this checklist instead of rediscovering the runtime:
 
 Deployment is owned by the sibling operations repository and remains a
 separate fact from a successful build.
+
+## Administrative instant construction
+
+`BuilderInstantConstruction` finishes existing projects for holders of
+`arcbuild.admin.construction`. It persists an additive nullable administrator ID
+on the existing WORLD_PREPARED record before applying up to 4096 plan steps per
+batch (an atomic paired block can also apply its companion). Most houses finish
+in one batch. This is creative administration: remaining material debits and
+unissued replacement outputs are waived, and no operation-progression event is
+emitted. Existing in-flight resource receipts settle before switching modes.
+The plan, original costs and steps remain immutable audit data.
+
+The existing DurableRecordJournal, construction region locks, protection checks,
+world/metadata adapter, and completion finalizer remain the owners. On restart,
+instant WORLD_PREPARED is replayed by exact before/after state, with no resource
+exchange. Cursor advancement is committed after the batch. Already-applied
+steps and metadata repair are idempotent; unexpected world drift stops for
+recovery. A metadata-only repair follows the existing ordinary construction
+rule. Instant runs do not expose a misleading pause action.

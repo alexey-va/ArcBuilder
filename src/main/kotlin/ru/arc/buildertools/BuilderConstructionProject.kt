@@ -78,6 +78,7 @@ internal data class BuilderConstructionProjectRecord(
     val applicationStartedAtMillis: Long? = null,
     val completedAtMillis: Long? = null,
     val completionFinalizedAtMillis: Long? = null,
+    val instantBuildRequestedBy: UUID? = null,
 ) {
     val terminal: Boolean get() = state.terminal
 
@@ -108,6 +109,12 @@ internal data class BuilderConstructionProjectRecord(
             "Builder construction project cannot cross worlds"
         }
         steps.forEach(BuilderConstructionStep::validated)
+        if (instantBuildRequestedBy != null) {
+            require(state in setOf(BuilderConstructionProjectState.WORLD_PREPARED,
+                BuilderConstructionProjectState.COMPLETED, BuilderConstructionProjectState.RECOVERY_REQUIRED,
+                BuilderConstructionProjectState.CANCELLED)) { "Instant construction has an invalid state" }
+            require(pendingResourceMutation == null && pendingOutput == null) { "Instant construction cannot own an item receipt" }
+        }
         bookCost.validated()
         require(bookCost.amount == 1) { "Builder construction project consumes exactly one book" }
         require(sameExchange(plan.costs, listOf(bookCost) + steps.mapNotNull(BuilderConstructionStep::requiredMaterial))) {
@@ -399,6 +406,10 @@ internal object BuilderConstructionProjectTransitionRules {
         require(after.completionFinalizedAtMillis == before.completionFinalizedAtMillis) {
             "Builder construction project was finalized before completion"
         }
+        if (before.instantBuildRequestedBy != null || after.instantBuildRequestedBy != null) {
+            BuilderInstantConstruction.validateTransition(before, after)
+            return
+        }
         val sameCursor = after.cursor == before.cursor
         val advancedOne = after.cursor == before.cursor + 1
         val valid = when (before.state) {
@@ -619,7 +630,7 @@ internal object BuilderConstructionRecoveryPolicy {
             record.recoveryRequired(nowMillis)
         record.state == BuilderConstructionProjectState.INPUT_PREPARED && record.pendingResourceMutation == null ->
             record.recoveryRequired(nowMillis)
-        record.state == BuilderConstructionProjectState.WORLD_PREPARED &&
+        record.state == BuilderConstructionProjectState.WORLD_PREPARED && record.instantBuildRequestedBy == null &&
             record.steps[record.cursor].requiredMaterial != null && record.pendingResourceMutation == null ->
             record.recoveryRequired(nowMillis)
         record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT && record.pendingResourceMutation == null ->
@@ -652,7 +663,7 @@ internal object BuilderConstructionTransitionFailurePolicy {
     fun requiresRecovery(
         expected: BuilderConstructionProjectRecord,
         target: BuilderConstructionProjectRecord,
-    ): Boolean = when (expected.state) {
+    ): Boolean = if (expected.instantBuildRequestedBy != null) false else when (expected.state) {
         BuilderConstructionProjectState.PREPARED ->
             target.state == BuilderConstructionProjectState.ACTIVE
         BuilderConstructionProjectState.INPUT_PREPARED ->
@@ -679,6 +690,9 @@ internal object BuilderConstructionProjectController {
         port: BuilderConstructionProjectPort,
     ): BuilderConstructionProjectRecord? {
         val current = record.validated()
+        if (current.instantBuildRequestedBy != null && current.state == BuilderConstructionProjectState.WORLD_PREPARED) {
+            return BuilderInstantConstruction.applyBatch(current, nowMillis, port)
+        }
         return when (current.state) {
             BuilderConstructionProjectState.RECOVERY_REQUIRED,
             BuilderConstructionProjectState.COMPLETED,
