@@ -41,6 +41,8 @@ internal class SystemBuildBookCatalog private constructor(
 ) {
     private val definitions = definitions.associateBy(SystemBuildBookDefinition::buildingId)
 
+    val enabledBuildingIds: List<String> = definitions.filter { it.playerEnabled }.map { it.buildingId }.sorted()
+
     init {
         require(definitions.size in 1..256) { "System build-book catalog size is invalid" }
         require(this.definitions.size == definitions.size) { "System build-book catalog contains duplicate ids" }

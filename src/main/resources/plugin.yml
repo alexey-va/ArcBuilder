@@ -19,7 +19,7 @@ softdepend:
 commands:
   builder:
     description: Survival-friendly builder tools
-    usage: /builder [help|wand|fill|replace|disconnect|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status|reload]
+    usage: /builder [help|wand|fill|replace|disconnect|copy|book|paste|deconstruct|crown|confirm|cancel|undo|status|systembook|reload]
 permissions:
   arcbuild.use:
     description: Use survival-friendly ArcBuilder tools

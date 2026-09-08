@@ -125,3 +125,9 @@ of the reviewed system book. As before, `materials-included` system books supply
 all construction materials, including pots and beds. Player-authored books do not gain this exception.
 Chest loot remains an explicit `container-loot-table` catalogue opt-in and uses
 the existing durable loot-table application/recovery path.
+
+Administrative `systembook` tab completion offers the command, online recipients,
+and enabled reviewed catalogue IDs. Players can complete a catalogue ID directly
+for self-issuance; console senders must first select an online recipient.
+Catalogue suggestions use the validated in-memory catalog; issuance still
+rechecks the schematic digest before creating the item.

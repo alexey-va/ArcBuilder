@@ -35,6 +35,7 @@ class SystemBuildBookCatalogTest : FunSpec({
         )
         val data = BuildBookData(buildingId = "viking.schem", title = "viking.schem")
 
+        catalog.enabledBuildingIds shouldBe listOf("viking.schem")
         val definition = checkNotNull(catalog.resolve(data))
         definition.title shouldBe "Стартовый дом"
         definition.materialsIncluded shouldBe true
@@ -147,6 +148,7 @@ class SystemBuildBookCatalogTest : FunSpec({
             ),
             root,
         )
+        disabled.enabledBuildingIds shouldBe emptyList()
         disabled.resolve(BuildBookData(buildingId = "viking.schem", title = "Viking")) shouldBe null
     }
 })

@@ -27,6 +27,22 @@ import ru.ruscrafting.builder.paper.ArcBuilderPlugin
 import java.util.Locale
 
 class BuilderCommandBoundaryMockBukkitTest : FunSpec({
+    test("system book completions work for admin-only players and console through command boundary") {
+        withCommandFixture { fixture ->
+            val admin = fixture.player("GrocerMC")
+            fixture.grant(admin, BuilderSystemBookIssuer.PERMISSION)
+            fun complete(sender: CommandSender, vararg args: String) =
+                fixture.runtime.onTabComplete(sender, fixture.command, "builder", args)
+            complete(admin, "sys") shouldBe listOf("systembook")
+            complete(admin, "systembook", "ATELIER") shouldBe listOf("atelier-house.schem")
+            complete(admin, "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem")
+            complete(Bukkit.getConsoleSender(), "sys") shouldBe listOf("systembook")
+            complete(Bukkit.getConsoleSender(), "systembook", "Gro") shouldBe listOf("GrocerMC")
+            complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem")
+            complete(fixture.player("NoBooks"), "sys") shouldBe emptyList()
+        }
+    }
+
     test("console sender receives player-only behavior without throwing") {
         withCommandFixture { fixture ->
             fixture.execute(Bukkit.getConsoleSender(), "fill", "stone") shouldBe true
@@ -167,7 +183,7 @@ private class CommandFixture(
     val paper: MockBukkitTestRuntime,
     val plugin: ArcBuilderPlugin,
     val runtime: BuilderToolsRuntime,
-    private val command: Command,
+    val command: Command,
     val allowed: World,
     val blocked: World,
     private val messages: CommandMessageRecorder,
@@ -319,6 +335,7 @@ private fun withCommandFixture(block: (CommandFixture) -> Unit) {
                     draftStorage = UnusedCommandDraftStorage,
                     bookSchematicVerifier = BuilderBookSchematicVerifier { true },
                     systemBuildBookResolver = { null },
+                    systemBuildBookIds = listOf("atelier-house.schem"),
                     sendPlayerMessage = messages::record,
                 )
                 val command = checkNotNull(plugin.getCommand("builder"))

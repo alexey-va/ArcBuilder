@@ -107,12 +107,15 @@ internal class BuilderToolsRuntime(
     draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
     bookSchematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
     private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
-    private val systemBuildBookResolver: (BuildBookData) -> SystemBuildBookDefinition? =
-        loadSystemBuildBookResolver(plugin, config),
+    systemBuildBookResolver: ((BuildBookData) -> SystemBuildBookDefinition?)? = null,
+    systemBuildBookIds: List<String>? = null,
     private val lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
     private val lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
     private val sendPlayerMessage: (Player, Component) -> Unit = { player, message -> player.sendMessage(message) },
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
+    private val systemBuildBookCatalog = if (systemBuildBookResolver == null) loadSystemBuildBookCatalog(plugin, config) else null
+    private val systemBuildBookResolver = systemBuildBookResolver ?: requireNotNull(systemBuildBookCatalog)::resolve
+    private val systemBuildBookIds = systemBuildBookIds ?: systemBuildBookCatalog?.enabledBuildingIds.orEmpty()
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
     private val safety = BuilderBlockSafety(plugin, config.replaceableMaterials)
@@ -794,10 +797,14 @@ internal class BuilderToolsRuntime(
         alias: String,
         args: Array<out String>,
     ): List<String> {
-        if (sender !is Player || !hasUsePermission(sender)) return emptyList()
+        val systemSuggestions = BuilderSystemBookIssuer.tabComplete(sender, args, { systemBuildBookIds }) {
+            Bukkit.getOnlinePlayers().map(Player::getName)
+        }
+        if (args.size > 1 && args[0].equals("systembook", ignoreCase = true)) return systemSuggestions
+        if (sender !is Player || !hasUsePermission(sender)) return systemSuggestions
         if (args.size == 1) {
             return filterPrefix(
-                BuilderRootCommand.entries.filter { rootCommandAvailable(sender, it) }.map(BuilderRootCommand::literal),
+                BuilderRootCommand.entries.filter { rootCommandAvailable(sender, it) }.map(BuilderRootCommand::literal) + systemSuggestions,
                 args[0],
             )
         }
@@ -3094,12 +3101,12 @@ internal class BuilderToolsRuntime(
     }
 }
 
-private fun loadSystemBuildBookResolver(
+private fun loadSystemBuildBookCatalog(
     plugin: JavaPlugin,
     config: BuilderToolsConfig,
-): (BuildBookData) -> SystemBuildBookDefinition? {
+): SystemBuildBookCatalog {
     val path = plugin.dataPath.resolve("modules/system-build-books.yml")
     require(Files.isRegularFile(path)) { "System build-book catalog is missing" }
     val catalog = SystemBuildBookCatalog.load(path, BuilderStoragePaths.schematicsRoot(config.schematicsRoot))
-    return catalog::resolve
+    return catalog
 }

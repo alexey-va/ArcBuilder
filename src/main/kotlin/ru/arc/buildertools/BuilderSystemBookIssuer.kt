@@ -45,6 +45,23 @@ internal object BuilderSystemBookIssuer {
         return true
     }
 
+    fun tabComplete(
+        sender: CommandSender,
+        args: Array<out String>,
+        buildingIds: () -> List<String>,
+        onlinePlayers: () -> List<String>,
+    ): List<String> {
+        if (!canIssue(sender) || args.isEmpty()) return emptyList()
+        val suggestions = when {
+            args.size == 1 -> listOf("systembook")
+            !args[0].equals("systembook", ignoreCase = true) -> emptyList()
+            args.size == 2 -> onlinePlayers() + if (sender is Player) buildingIds() else emptyList()
+            args.size == 3 && onlinePlayers().any { it == args[1] } -> buildingIds()
+            else -> emptyList()
+        }
+        return suggestions.filter { it.startsWith(args.last(), ignoreCase = true) }.distinct().sorted()
+    }
+
     internal const val PERMISSION = "arcbuild.admin.systembook"
 
     internal fun canIssue(sender: CommandSender): Boolean =

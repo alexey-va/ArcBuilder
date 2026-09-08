@@ -11,6 +11,27 @@ import org.bukkit.entity.Player
 import ru.arc.autobuild.SystemBuildBookDefinition
 
 class BuilderSystemBookIssuerTest : FunSpec({
+    test("completion denies unauthorized senders before reading catalogue or players") {
+        for (sender in listOf(mockk<Player>(relaxed = true), mockk<CommandSender>(relaxed = true))) {
+            BuilderSystemBookIssuer.tabComplete(sender, arrayOf("systembook", ""),
+                { error("must not read catalogue") }, { error("must not read players") }) shouldBe emptyList()
+        }
+    }
+    test("completion respects argument positions prefix and console recipient requirement") {
+        val admin = mockk<Player>()
+        every { admin.hasPermission(BuilderSystemBookIssuer.PERMISSION) } returns true
+        val console = mockk<ConsoleCommandSender>()
+        fun complete(sender: CommandSender, vararg args: String) = BuilderSystemBookIssuer.tabComplete(
+            sender, args, { listOf("birch.schem", "forest.schem") }, { listOf("GrocerMC") })
+        complete(admin, "SY") shouldBe listOf("systembook")
+        complete(admin, "SYSTEMBOOK", "BIR") shouldBe listOf("birch.schem")
+        complete(admin, "systembook", "") shouldBe listOf("GrocerMC", "birch.schem", "forest.schem")
+        complete(console, "systembook", "") shouldBe listOf("GrocerMC")
+        complete(console, "systembook", "GrocerMC", "FOR") shouldBe listOf("forest.schem")
+        complete(admin, "systembook", "birch.schem", "") shouldBe emptyList()
+        complete(admin, "systembook", "GrocerMC", "forest.schem", "") shouldBe emptyList()
+        complete(admin, "book", "") shouldBe emptyList()
+    }
     test("players without issuance permission cannot resolve or issue a book") {
         val sender = mockk<Player>(relaxed = true)
         var denied = false
