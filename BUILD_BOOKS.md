@@ -96,3 +96,14 @@ atomically, update the CMI kit through its supported runtime content API, then
 restart survival once. Read back exact config/JAR/schematic hashes, plugin
 readiness, registry recovery, and recent WARN/ERROR logs before declaring the
 rollout complete.
+
+## Console issuance for reviewed schematics
+
+`builder systembook <online-player> <catalogue-file.schem>` issues one system
+book through ArcBuilder's own codec. It is console-only and requires an enabled,
+SHA-256-matched catalogue entry, a readable schematic within the configured scan
+volume, and an empty storage slot on the current node. It never drops overflow
+or manufactures a registered player blueprint. The catalogue remains the source
+of the title and material policy. The resulting book uses the ordinary preview,
+confirmation, material collection and one-use construction path, including its
+existing unsafe-block exclusions. Issuing a book does not paste blocks.
