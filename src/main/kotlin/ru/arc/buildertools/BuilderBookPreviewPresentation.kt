@@ -548,11 +548,9 @@ internal class BuilderBookPreviewPresentation(
     private fun replacePanel(site: ConstructionSite) {
         removePanel(site.player.uniqueId)
         if (!site.player.isOnline || site.player.world.uid != site.world.uid) return
-        val positions = site.relativePositionsBottomUp().map { relative ->
-            val block = site.worldLocation(relative).block
-            BuilderBlockPos(site.world.uid, block.x, block.y, block.z)
-        }.toList()
-        if (positions.isEmpty()) return
+        val positions = listOf(site.adjustedCenter.let { anchor ->
+            BuilderBlockPos(site.world.uid, anchor.blockX, anchor.blockY, anchor.blockZ)
+        })
         val face = BuilderConstructionSiteDisplayLayout.nearestFace(
             positions,
             site.player.location.x,

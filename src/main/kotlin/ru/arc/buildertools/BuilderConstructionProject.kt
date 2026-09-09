@@ -66,6 +66,7 @@ internal data class BuilderConstructionProjectRecord(
     val playerName: String,
     val projectTitle: String? = null,
     val sitePanelFace: BuilderConstructionSitePanelFace? = null,
+    val siteAnchor: BuilderBlockPos? = null,
     val plan: BuilderPlan,
     val steps: List<BuilderConstructionStep>,
     val bookCost: BuilderItemAmount,
@@ -107,6 +108,10 @@ internal data class BuilderConstructionProjectRecord(
         }
         require(steps.map { it.change.position.worldId }.toSet().size == 1) {
             "Builder construction project cannot cross worlds"
+        }
+        siteAnchor?.let { anchor ->
+            anchor.validated()
+            require(anchor.worldId == steps.first().change.position.worldId) { "Construction anchor crosses the project world" }
         }
         steps.forEach(BuilderConstructionStep::validated)
         if (instantBuildRequestedBy != null) {
@@ -483,6 +488,7 @@ internal object BuilderConstructionProjectTransitionRules {
         playerName,
         projectTitle,
         sitePanelFace,
+        siteAnchor,
         plan,
         steps,
         bookCost,

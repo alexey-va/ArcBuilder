@@ -502,3 +502,10 @@ exchange. Cursor advancement is committed after the batch. Already-applied
 steps and metadata repair are idempotent; unexpected world drift stops for
 recovery. A metadata-only repair follows the existing ordinary construction
 rule. Instant runs do not expose a misleading pause action.
+
+Construction and book-preview control panels sit beside the effective book
+origin, on the side nearest the player, at the configured height above that
+anchor. New projects persist `siteAnchor` together with `sitePanelFace`, so
+restart preserves placement even when the clicked origin differs from the
+changed-block bounds. Legacy projects lacking an anchor retain their former
+bounds-based placement. The area outline still encloses the full plan.

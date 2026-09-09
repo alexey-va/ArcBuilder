@@ -1115,6 +1115,9 @@ internal class BuilderToolsRuntime(
                 playerId = player.uniqueId,
                 playerName = player.name,
                 projectTitle = data.title,
+                siteAnchor = site.adjustedCenter.let { anchor ->
+                    BuilderBlockPos(site.world.uid, anchor.blockX, anchor.blockY, anchor.blockZ)
+                },
                 plan = plan,
                 steps = construction.steps,
                 bookCost = construction.bookCost,

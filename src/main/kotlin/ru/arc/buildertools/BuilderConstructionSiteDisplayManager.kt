@@ -98,9 +98,8 @@ internal object BuilderConstructionSiteDisplayLayout {
         require(positions.isNotEmpty())
         val worldId = positions.first().worldId
         require(positions.all { it.worldId == worldId })
-        val bounds = bounds(positions)
         val face = project.sitePanelFace ?: settings.panelFace
-        val panel = panelPlacement(positions, face, settings.panelHeightOffset, settings.panelFrontOffset)
+        val panel = panelPlacement(project.siteAnchor?.let(::listOf) ?: positions, face, settings.panelHeightOffset, settings.panelFrontOffset)
         return BuilderConstructionSiteDisplayModel(
             worldId = worldId,
             edges = BuilderDisplayGeometry.bounds(positions, settings.outlineThickness),
@@ -115,7 +114,7 @@ internal object BuilderConstructionSiteDisplayLayout {
         project: BuilderConstructionProjectRecord,
         viewerX: Double,
         viewerZ: Double,
-    ): BuilderConstructionSitePanelFace = nearestFace(project.steps.map { it.change.position }, viewerX, viewerZ)
+    ): BuilderConstructionSitePanelFace = nearestFace(project.siteAnchor?.let(::listOf) ?: project.steps.map { it.change.position }, viewerX, viewerZ)
 
     fun nearestFace(
         positions: List<BuilderBlockPos>,

@@ -35,6 +35,24 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         )
 
         val model = BuilderConstructionSiteDisplayLayout.create(project, settings)
+        val anchored = project.copy(siteAnchor = BuilderBlockPos(worldId, 100, 64, 200))
+        val restored = com.google.gson.Gson().fromJson(com.google.gson.Gson().toJson(anchored), BuilderConstructionProjectRecord::class.java).validated()
+        restored.siteAnchor shouldBe anchored.siteAnchor
+        val front = BuilderConstructionSiteDisplayLayout.nearestFace(restored, 100.5, 205.0)
+        front shouldBe BuilderConstructionSitePanelFace.MAX_Z
+        val byOrigin = BuilderConstructionSiteDisplayLayout.create(restored.copy(sitePanelFace = front), settings)
+        byOrigin.edges shouldBe model.edges
+        byOrigin.panelX shouldBe (100.5 plusOrMinus .00001)
+        byOrigin.panelY shouldBe (66.5 plusOrMinus .00001)
+        byOrigin.panelZ shouldBe (201.75 plusOrMinus .00001)
+        for (face in BuilderConstructionSitePanelFace.entries) {
+            val placed = BuilderConstructionSiteDisplayLayout.create(restored.copy(sitePanelFace = face), settings)
+            kotlin.math.abs(placed.panelX - 100.5).let { require(it <= 1.25) }
+            kotlin.math.abs(placed.panelZ - 200.5).let { require(it <= 1.25) }
+            placed.panelY shouldBe (66.5 plusOrMinus .00001)
+            placed.panelYaw shouldBe face.yaw
+        }
+
 
         model.worldId shouldBe worldId
         model.edges shouldHaveSize 12
