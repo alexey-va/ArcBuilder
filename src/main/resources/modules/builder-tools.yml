@@ -202,6 +202,8 @@ preview:
   # Small plans show every non-air block; large plans show this many blocks nearest to the moving player.
   max-plan-displays: 4096
   # 1.0 renders every preview block at the exact size of a real Minecraft block.
+  # Hide exact world matches and separate preview faces from world surfaces.
+  anti-z-fighting: true
   block-display-scale: 1.0
   plan-display-range: 64
   guidance-period-ticks: 20

@@ -81,7 +81,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         }
     }
 
-    test("closing build confirmation keeps the final review stage for reopening") {
+    test("closing build confirmation restores the world plaque and placement stage") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -112,13 +112,13 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
 
                     paper.callEvent(InventoryCloseEvent(player.openInventory))
 
-                    host.restoreCalls shouldBe 0
+                    host.restoreCalls shouldBe 1
 
                     presentation.openPlacementForTest(player, site)
                     val reopened = player.openInventory.topInventory
                     reopened.getItem(25)?.type shouldBe Material.LIME_CONCRETE
-                    plain(reopened.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Начать строительство"
-                    host.restoreCalls shouldBe 0
+                    plain(reopened.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Проверить и продолжить"
+                    host.restoreCalls shouldBe 1
                 }
             } finally {
                 ConfigManager.clear()

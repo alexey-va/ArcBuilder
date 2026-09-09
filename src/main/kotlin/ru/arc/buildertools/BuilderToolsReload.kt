@@ -295,6 +295,7 @@ internal object BuilderToolsReloadPreflight {
         "preview.outline-spacing" to YamlValueType.DOUBLE,
         "preview.max-selection-particles" to YamlValueType.INT,
         "preview.max-plan-displays" to YamlValueType.INT,
+        "preview.anti-z-fighting" to YamlValueType.BOOLEAN,
         "preview.block-display-scale" to YamlValueType.DOUBLE,
         "preview.plan-display-range" to YamlValueType.DOUBLE,
         "preview.guidance-period-ticks" to YamlValueType.LONG,

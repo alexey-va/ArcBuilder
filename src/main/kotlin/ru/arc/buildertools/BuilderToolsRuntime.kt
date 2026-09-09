@@ -97,6 +97,7 @@ internal class BuilderToolsRuntime(
         plugin,
         config.previewMaxPlanDisplays,
         config.previewBlockDisplayScale,
+        config.previewAntiZFighting,
         config.previewPlanDisplayRange,
         config.previewGuidancePeriodTicks,
         config.messages(),

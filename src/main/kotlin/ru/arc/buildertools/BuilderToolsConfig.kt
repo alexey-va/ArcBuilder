@@ -114,6 +114,7 @@ class BuilderToolsConfig(
     val previewSpacing: Double get() = config.double("preview.outline-spacing", 0.75)
     val previewMaxSelectionParticles: Int get() = config.integer("preview.max-selection-particles", 512)
     val previewMaxPlanDisplays: Int get() = config.integer("preview.max-plan-displays", 4096)
+    val previewAntiZFighting: Boolean get() = config.boolean("preview.anti-z-fighting", true)
     val previewBlockDisplayScale: Float get() = config.double("preview.block-display-scale", 1.0).toFloat()
     val previewPlanDisplayRange: Double get() = config.double("preview.plan-display-range", 64.0)
     val previewGuidancePeriodTicks: Long get() = config.long("preview.guidance-period-ticks", 20L)

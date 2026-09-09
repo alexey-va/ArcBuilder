@@ -192,6 +192,9 @@ internal class BuilderBookPreviewPresentation(
         val inventory = confirmationInventories[playerId] ?: return
         if (event.view.topInventory !== inventory) return
         confirmationInventories.remove(playerId)
+        val snapshot = snapshots.remove(playerId) ?: return
+        if (closed || !player.isOnline) return
+        host.restore(player, snapshot)?.let { placementSites[playerId] = it }
     }
 
     private fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment) {

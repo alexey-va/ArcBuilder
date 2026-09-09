@@ -76,6 +76,7 @@ internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
     private val maxPlanDisplays: Int,
     blockDisplayScale: Float,
+    private val antiZFighting: Boolean,
     private val planDisplayRange: Double,
     private val guidancePeriodTicks: Long,
     private val messages: LocalizedMiniMessage,
@@ -170,6 +171,9 @@ internal class BuilderBlockDisplayRenderer(
             visible.forEach { change ->
                 val after = Bukkit.createBlockData(change.afterBlockData)
                 val removal = after.material.isAir
+                val position = change.position
+                val blockTransform = previewTransform(player.world, position.x, position.y, position.z, after, removal)
+                    ?: return@forEach
                 add(
                     DisplaySpec(
                         x = change.position.x + blockTransform.offset.toDouble(),
@@ -280,6 +284,9 @@ internal class BuilderBlockDisplayRenderer(
         }
         val specs = buildList {
             visible.forEach { block ->
+                val location = block.location
+                val blockTransform = previewTransform(site.world, location.blockX, location.blockY, location.blockZ, block.blockData)
+                    ?: return@forEach
                 add(
                     DisplaySpec(
                         block.location.blockX + blockTransform.offset.toDouble(),
@@ -314,6 +321,24 @@ internal class BuilderBlockDisplayRenderer(
             )
         }
         replace(site.player, Layer.BOOK, specs)
+    }
+
+    private fun previewTransform(
+        world: org.bukkit.World,
+        x: Int,
+        y: Int,
+        z: Int,
+        preview: BlockData,
+        removal: Boolean = false,
+    ): BuilderDisplayBlockTransform? {
+        if (!antiZFighting) return blockTransform
+        if (y !in world.minHeight until world.maxHeight || !world.isChunkLoaded(x shr 4, z shr 4)) return null
+        val existing = world.getBlockAt(x, y, z).blockData
+        return BuilderPreviewSurface.transform(
+            blockTransform,
+            matchesWorld = !removal && existing == preview,
+            occupied = !existing.material.isAir,
+        )
     }
 
     private fun bookModel(site: ConstructionSite): BookModel {
