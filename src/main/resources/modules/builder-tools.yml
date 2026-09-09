@@ -439,7 +439,7 @@ locales:
       complete: |-
         <#8c8c8c>   Область <#d48763><x>×<y>×<z> <#8c8c8c>— <#e6fff3><volume> блоков
         <#8c8c8c>   <click:run_command:'/builder copy'><#92bed8><hover:show_text:'Сохраняет поддерживаемые блоки области как временный чертёж относительно вашей позиции. Мир не меняется; затем чертёж можно вставить или превратить в книгу.'>[▶ Скопировать]</hover></click>  <click:suggest_command:'/builder fill '><#92bed8><hover:show_text:'Подставляет /builder fill в строку ввода: допишите название блока и отправьте команду. Сначала появится превью; заполнение начнётся только после подтверждения.'>[▶ Заполнить]</hover></click>
-        <#8c8c8c>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Подставляет /builder replace в строку ввода: укажите сначала заменяемый, затем новый блок. Подходящие блоки изменятся только после превью и подтверждения.'>[▶ Заменить]</hover></click><bold>     </bold><click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Разрывает текущие соединения обычных заборов внутри области, чтобы они не цеплялись за соседние блоки. Сначала появится превью; соседнее обновление позже может соединить забор снова.'>[▶ Разъединить]</hover></click>
+        <#8c8c8c>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Подставляет /builder replace в строку ввода: укажите сначала заменяемый, затем новый блок. Подходящие блоки изменятся только после превью и подтверждения.'>[▶ Заменить]</hover></click><bold>     </bold><click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Разрывает текущие соединения заборов и оград внутри области, чтобы они не цеплялись за соседние блоки. Сначала появится превью; соседнее обновление позже может соединить их снова.'>[▶ Разъединить]</hover></click>
         <#8c8c8c>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Создаёт план разборки поддерживаемых блоков с обычными дропами. Подходящие инструменты берутся из инвентаря по очереди и не расходуются ниже 1 единицы прочности; ничего не ломается до подтверждения.'>[▶ Демонтаж]</hover></click>      <click:run_command:'/builder clear'><#969696><hover:show_text:'Удаляет обе точки и скрывает контур выделения. Временный скопированный чертёж и блоки мира не изменяются.'>[✖ Сбросить]</hover></click>
       cleared: |-
 
@@ -1213,7 +1213,7 @@ locales:
     kinds:
       fill: "<hover:show_text:'Заполняет пустые и заменяемые места выбранным блоком.'>Заполнение</hover>"
       replace: "<hover:show_text:'Меняет в выделении только указанный старый блок на новый.'>Замена блоков</hover>"
-      fence_disconnect: "<hover:show_text:'Убирает текущие соединения заборов; последующее обновление соседей может соединить их снова.'>Разъединение заборов</hover>"
+      fence_disconnect: "<hover:show_text:'Убирает текущие соединения заборов и оград; последующее обновление соседей может соединить их снова.'>Разъединение заборов и оград</hover>"
       paste: "<hover:show_text:'Размещает сохранённый чертёж относительно вашей текущей позиции.'>Вставка чертежа</hover>"
       build_book: "<hover:show_text:'Запускает постоянный проект по одноразовой книге и принимает материалы постепенно.'>Строительство по книге</hover>"
       deconstruct: "<hover:show_text:'Снимает безопасные блоки выделения и возвращает полученные предметы.'>Демонтаж</hover>"
@@ -1352,7 +1352,7 @@ locales:
       complete: |-
         <dark_gray>   <gray>Area: <white><x>×<y>×<z></white> — <volume> blocks
         <dark_gray>   <click:run_command:'/builder copy'><#92bed8><hover:show_text:'Saves supported blocks in this area as a temporary blueprint relative to your position. The world does not change; you can then paste it or turn it into a book.'>[▶ Copy]</hover></click>         <bold>  </bold><click:suggest_command:'/builder fill '><#92bed8><hover:show_text:'Inserts /builder fill into chat input: add the block name and send the command. A preview appears first; filling starts only after confirmation.'>[▶ Fill]</hover></click>
-        <dark_gray>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Inserts /builder replace into chat input: enter the old block first and the new block second. Matching blocks change only after preview and confirmation.'>[▶ Replace]</hover></click>    <bold>   </bold><click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Clears current connections on ordinary fences in the area so they stop attaching to neighboring blocks. A preview appears first; a later neighbor update may reconnect a fence.'>[▶ Disconnect]</hover></click>
+        <dark_gray>   <click:suggest_command:'/builder replace '><#92bed8><hover:show_text:'Inserts /builder replace into chat input: enter the old block first and the new block second. Matching blocks change only after preview and confirmation.'>[▶ Replace]</hover></click>    <bold>   </bold><click:run_command:'/builder disconnect'><#92bed8><hover:show_text:'Clears current connections on fences and walls in the area so they stop attaching to neighboring blocks. A preview appears first; a later neighbor update may reconnect them.'>[▶ Disconnect]</hover></click>
         <dark_gray>   <click:run_command:'/builder deconstruct'><#92bed8><hover:show_text:'Creates a deconstruction plan with normal drops. Suitable tools are taken from inventory in order and never reduced below 1 durability; nothing breaks before confirmation.'>[▶ Deconstruct]</hover></click>  <click:run_command:'/builder clear'><#969696><hover:show_text:'Removes both selection points and hides the outline. The temporary copied blueprint and world blocks remain unchanged.'>[✖ Reset]</hover></click>
       cleared: |-
 
@@ -2100,7 +2100,7 @@ locales:
     kinds:
       fill: "<hover:show_text:'Fills empty and replaceable positions with the selected block.'>Fill</hover>"
       replace: "<hover:show_text:'Changes only the selected source block into the target block.'>Block replacement</hover>"
-      fence_disconnect: "<hover:show_text:'Clears current fence connections; later neighbor updates may reconnect them.'>Fence disconnection</hover>"
+      fence_disconnect: "<hover:show_text:'Clears current fence and wall connections; later neighbor updates may reconnect them.'>Fence and wall disconnection</hover>"
       paste: "<hover:show_text:'Places the saved blueprint relative to your current position.'>Blueprint paste</hover>"
       build_book: "<hover:show_text:'Starts a persistent single-use book project that accepts materials gradually.'>Book construction</hover>"
       deconstruct: "<hover:show_text:'Removes safe selected blocks and returns their items.'>Deconstruction</hover>"

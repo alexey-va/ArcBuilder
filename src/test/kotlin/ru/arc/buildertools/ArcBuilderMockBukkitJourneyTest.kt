@@ -222,6 +222,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             materialsIncluded = true,
         )
         val schematicAir = mockk<BaseBlock>()
+        every { schematicAir.blockType.id } returns "minecraft:air"
         mockkStatic(BukkitAdapter::class)
         try {
             strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
@@ -229,6 +230,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val building = mockk<Building>()
                 every { building.fileName } returns definition.buildingId
                 every { building.volume } returns 1L
+                every { building.blockCount } returns 1
                 every { building.getCorner1(any()) } returns BlockVector3.ZERO
                 every { building.getCorner2(any()) } returns BlockVector3.ZERO
                 every { building.getBlock(any(), any()) } returns schematicAir
@@ -267,7 +269,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             materialsIncluded = true,
         )
         val bottomBlock = mockk<BaseBlock>()
+        every { bottomBlock.blockType.id } returns "minecraft:oak_door"
         val topBlock = mockk<BaseBlock>()
+        every { topBlock.blockType.id } returns "minecraft:oak_door"
         mockkStatic(BukkitAdapter::class)
         try {
             strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
@@ -280,6 +284,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val building = mockk<Building>()
                 every { building.fileName } returns definition.buildingId
                 every { building.volume } returns 2L
+                every { building.blockCount } returns 2
                 every { building.getCorner1(any()) } returns BlockVector3.ZERO
                 every { building.getCorner2(any()) } returns BlockVector3.at(0, 1, 0)
                 every { building.getBlock(any(), any()) } answers {
@@ -330,7 +335,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             materialsIncluded = false,
         )
         val bottomBlock = mockk<BaseBlock>()
+        every { bottomBlock.blockType.id } returns "minecraft:oak_door"
         val topBlock = mockk<BaseBlock>()
+        every { topBlock.blockType.id } returns "minecraft:oak_door"
         mockkStatic(BukkitAdapter::class)
         try {
             strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
@@ -343,6 +350,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val building = mockk<Building>()
                 every { building.fileName } returns definition.buildingId
                 every { building.volume } returns 2L
+                every { building.blockCount } returns 2
                 every { building.getCorner1(any()) } returns BlockVector3.ZERO
                 every { building.getCorner2(any()) } returns BlockVector3.at(0, 1, 0)
                 every { building.getBlock(any(), any()) } answers {
@@ -411,6 +419,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             containerLootTableKey = "minecraft:chests/spawn_bonus_chest",
         )
         val schematicChest = mockk<BaseBlock>()
+        every { schematicChest.blockType.id } returns "minecraft:chest"
         val lootTable = mockk<LootTable>()
         every { lootTable.key } returns NamespacedKey.minecraft("chests/spawn_bonus_chest")
         var appliedLootKey: NamespacedKey? = null
@@ -436,6 +445,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val building = mockk<Building>()
                 every { building.fileName } returns definition.buildingId
                 every { building.volume } returns 1L
+                every { building.blockCount } returns 1
                 every { building.getCorner1(any()) } returns BlockVector3.ZERO
                 every { building.getCorner2(any()) } returns BlockVector3.ZERO
                 every { building.getBlock(any(), any()) } returns schematicChest
@@ -1213,6 +1223,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             materialsIncluded = true,
         )
         val schematicBlock = mockk<BaseBlock>()
+        every { schematicBlock.blockType.id } returns "minecraft:stone"
         mockkStatic(BukkitAdapter::class)
         try {
             strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
@@ -1220,6 +1231,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val building = mockk<Building>()
                 every { building.fileName } returns "viking.schem"
                 every { building.volume } returns 1L
+                every { building.blockCount } returns 1
                 every { building.getCorner1(any()) } returns BlockVector3.ZERO
                 every { building.getCorner2(any()) } returns BlockVector3.ZERO
                 every { building.getBlock(any(), any()) } returns schematicBlock

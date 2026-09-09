@@ -1,9 +1,11 @@
 package ru.arc.buildertools
 
+import org.bukkit.block.BlockFace
 import org.bukkit.block.data.MultipleFacing
+import org.bukkit.block.data.type.Wall
 import org.bukkit.entity.Player
 
-/** Builds a one-shot plan that clears every connected side of vanilla fences in the selection. */
+/** Builds a one-shot plan that clears every connected side of vanilla fences and walls in the selection. */
 internal class BuilderFenceConnectionController(
     private val maximumChanges: Int,
     private val host: BuilderPlanningHost,
@@ -22,11 +24,24 @@ internal class BuilderFenceConnectionController(
 
         selection.positionsBottomUp().forEach { position ->
             val block = world.getBlockAt(position.x, position.y, position.z)
-            if (!block.type.name.endsWith("_FENCE")) return@forEach
-            val before = block.blockData as? MultipleFacing ?: return@forEach
-            if (before.faces.isEmpty()) return@forEach
-            val after = before.clone() as MultipleFacing
-            before.faces.forEach { face -> after.setFace(face, false) }
+            val before = block.blockData
+            val after = when {
+                before is Wall -> {
+                    val faces = listOf(BlockFace.NORTH, BlockFace.EAST, BlockFace.SOUTH, BlockFace.WEST)
+                    if (faces.all { before.getHeight(it) == Wall.Height.NONE } && before.isUp) return@forEach
+                    (before.clone() as Wall).also { wall ->
+                        faces.forEach { wall.setHeight(it, Wall.Height.NONE) }
+                        wall.isUp = true
+                    }
+                }
+                block.type.name.endsWith("_FENCE") && before is MultipleFacing -> {
+                    if (before.faces.isEmpty()) return@forEach
+                    (before.clone() as MultipleFacing).also { fence ->
+                        before.faces.forEach { face -> fence.setFace(face, false) }
+                    }
+                }
+                else -> return@forEach
+            }
             host.ensureMutable(player, block)
             changes += BuilderBlockChange(position, before.asString, after.asString)
             if (changes.size > maximumChanges) host.fail("errors.selection-too-large")
