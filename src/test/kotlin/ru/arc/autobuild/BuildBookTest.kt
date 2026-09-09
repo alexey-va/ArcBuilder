@@ -25,6 +25,32 @@ import java.util.UUID
 
 class BuildBookTest : TestBase() {
     @Test
+    fun `selector choice survives serialization and consumes only one matching book`() {
+        val data = BuildBookData("viking.schem", "Викинг", selectableBuildingIds = listOf("viking.schem", "cottage.schem")).validated()
+        val stack = BuildBookItems.create(data).also { it.amount = 2 }
+        val selected = data.copy(buildingId = "cottage.schem", title = "Коттедж").validated()
+        val updated = BuildBookCodec.update(stack, selected)
+        assertEquals(2, updated.amount)
+        assertEquals(selected, BuildBookCodec.read(ItemStack.deserializeBytes(updated.serializeAsBytes())))
+        assertEquals(data, BuildBookCodec.read(stack))
+        val player = server.addPlayer("SelectorOwner")
+        player.inventory.setItem(0, updated)
+        val cost = BuilderItemCodec.aggregate(listOf(updated.clone().also { it.amount = 1 }))
+        assertTrue(BuilderInventory.removeCosts(player.inventory, cost))
+        assertEquals(1, player.inventory.getItem(0)!!.amount)
+        assertEquals(selected, BuildBookCodec.read(player.inventory.getItem(0)!!))
+    }
+
+    @Test
+    fun `selector rejects foreign choices duplicates and player blueprints`() {
+        val data = BuildBookData("viking.schem", "Викинг", selectableBuildingIds = listOf("viking.schem", "cottage.schem"))
+        assertThrows(IllegalArgumentException::class.java) { data.copy(buildingId = "other.schem").validated() }
+        assertThrows(IllegalArgumentException::class.java) { data.copy(selectableBuildingIds = listOf("viking.schem", "viking.schem")).validated() }
+        assertThrows(IllegalArgumentException::class.java) { data.copy(playerCreated = true, creatorId = UUID.randomUUID()).validated() }
+        assertThrows(IllegalArgumentException::class.java) { data.copy(selectableBuildingIds = (0..27).map { "$it.schem" }).validated() }
+    }
+
+    @Test
     fun `cardinal rotation and local offsets share one transform`() {
         val transform = BuildBookTransform(rotation = 90, offsetX = 2, offsetY = -1, offsetZ = 3).validated()
 

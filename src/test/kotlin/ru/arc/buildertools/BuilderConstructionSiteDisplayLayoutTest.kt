@@ -135,6 +135,11 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
 
         verify(exactly = 1) { display.billboard = Display.Billboard.FIXED }
         verify(exactly = 1) { display.setRotation(90f, 0f) }
+        verify(exactly = 1) {
+            display.transformation = match {
+                it.scale == org.joml.Vector3f(2f) && it.translation.z > 0f
+            }
+        }
     }
 })
 

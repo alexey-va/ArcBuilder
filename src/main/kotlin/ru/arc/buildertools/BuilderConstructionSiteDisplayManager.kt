@@ -83,9 +83,14 @@ internal data class BuilderSitePanelPlacement(
 )
 
 internal object BuilderConstructionSitePanelOrientation {
+    const val SCALE = 2f
+
     fun apply(display: TextDisplay, yaw: Float) {
         display.billboard = Display.Billboard.FIXED
         display.setRotation(yaw, 0f)
+        display.transformation = Transformation(
+            Vector3f(0f, 0f, .02f), Quaternionf(), Vector3f(SCALE), Quaternionf(),
+        )
     }
 }
 
@@ -187,7 +192,7 @@ internal class BuilderConstructionSiteDisplayManager(
     private data class Scene(
         val model: BuilderConstructionSiteDisplayModel,
         val entities: List<Entity>,
-        val panel: TextDisplay?,
+        val panels: List<TextDisplay>,
     )
 
     private val projectKey = NamespacedKey(plugin, "construction_site_project")
@@ -257,7 +262,7 @@ internal class BuilderConstructionSiteDisplayManager(
         val existing = scenes[project.projectId]
             ?.takeIf { it.model == model && it.entities.all(Entity::isValid) }
         if (existing != null) {
-            existing.panel?.text(panelText(project))
+            existing.panels.forEach { it.text(panelText(project)) }
             return
         }
         remove(project.projectId)
@@ -278,33 +283,36 @@ internal class BuilderConstructionSiteDisplayManager(
                     }
                 }
             }
-            var panel: TextDisplay? = null
+            val panels = mutableListOf<TextDisplay>()
             if (settings.panelEnabled) {
                 val location = Location(world, model.panelX, model.panelY, model.panelZ)
-                panel = world.spawn(location, TextDisplay::class.java) { display ->
-                    configure(display, project.projectId)
-                    display.text(panelText(project))
-                    BuilderConstructionSitePanelOrientation.apply(display, model.panelYaw)
-                    display.lineWidth = settings.panelLineWidth
-                    display.backgroundColor = settings.panelBackgroundColor
-                    display.isShadowed = true
-                    display.isSeeThrough = false
-                    display.alignment = TextDisplay.TextAlignment.CENTER
-                    display.displayWidth = settings.panelInteractionWidth
-                    display.displayHeight = settings.panelInteractionHeight
+                for (yaw in listOf(model.panelYaw, model.panelYaw + 180f)) {
+                    val panel = world.spawn(location, TextDisplay::class.java) { display ->
+                        configure(display, project.projectId)
+                        display.text(panelText(project))
+                        BuilderConstructionSitePanelOrientation.apply(display, yaw)
+                        display.lineWidth = settings.panelLineWidth
+                        display.backgroundColor = settings.panelBackgroundColor
+                        display.isShadowed = true
+                        display.isSeeThrough = false
+                        display.alignment = TextDisplay.TextAlignment.CENTER
+                        display.displayWidth = settings.panelInteractionWidth * BuilderConstructionSitePanelOrientation.SCALE
+                        display.displayHeight = settings.panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE
+                    }
+                    spawned += panel
+                    panels += panel
                 }
-                spawned += panel
                 spawned += world.spawn(
-                    location.clone().subtract(0.0, settings.panelInteractionHeight / 2.0, 0.0),
+                    location.clone().subtract(0.0, settings.panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE / 2.0, 0.0),
                     Interaction::class.java,
                 ) { interaction ->
                     configureEntity(interaction, project.projectId)
-                    interaction.interactionWidth = settings.panelInteractionWidth
-                    interaction.interactionHeight = settings.panelInteractionHeight
+                    interaction.interactionWidth = settings.panelInteractionWidth * BuilderConstructionSitePanelOrientation.SCALE
+                    interaction.interactionHeight = settings.panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE
                     interaction.isResponsive = true
                 }
             }
-            scenes[project.projectId] = Scene(model, spawned.toList(), panel)
+            scenes[project.projectId] = Scene(model, spawned.toList(), panels.toList())
         } catch (failure: Throwable) {
             spawned.forEach(Entity::remove)
             throw failure

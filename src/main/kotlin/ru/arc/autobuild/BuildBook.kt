@@ -139,10 +139,16 @@ data class BuildBookData(
     val cooldownSeconds: Long? = null,
     val playerMaterials: List<BuildBookMaterialRequirement> = emptyList(),
     val systemMaterialsIncluded: Boolean? = null,
+    val selectableBuildingIds: List<String> = emptyList(),
 ) {
     fun validated(): BuildBookData = apply {
         require(BUILDING_ID.matches(buildingId)) { "Build-book building id is invalid" }
         require(title.isNotBlank() && title.length <= 48 && title.none(Char::isISOControl)) { "Build-book title is invalid" }
+        require(selectableBuildingIds.isEmpty() || (
+            !playerCreated && selectableBuildingIds.size in 2..27 &&
+                selectableBuildingIds.distinct().size == selectableBuildingIds.size &&
+                buildingId in selectableBuildingIds && selectableBuildingIds.all(BUILDING_ID::matches)
+            )) { "Build-book selector options are invalid" }
         transform.validated()
         require(sourceRotation in BuildBookTransform.CARDINAL_ROTATIONS) {
             "Build-book source rotation must be cardinal"
@@ -317,7 +323,7 @@ internal object BuildBookVariantModels {
 }
 
 object BuildBookCodec {
-    private const val SCHEMA_VERSION = 5
+    private const val SCHEMA_VERSION = 6
     // Durable books already issued by ARC use the `arc` namespace. Keep it
     // stable after extraction so moving the feature cannot invalidate items.
     @Suppress("DEPRECATION")
@@ -343,6 +349,7 @@ object BuildBookCodec {
     private val blockCountKey get() = key("build_book_block_count")
     private val cooldownKey get() = key("build_book_cooldown_seconds")
     private val playerMaterialsKey get() = key("build_book_player_materials")
+    private val selectorKey get() = key("build_book_selector_options")
     private val systemMaterialsIncludedKey get() = key("build_book_system_materials_included")
 
     fun read(item: ItemStack): BuildBookData? {
@@ -380,6 +387,7 @@ object BuildBookCodec {
                     playerMaterials = BuildBookMaterialRequirements.decode(
                         pdc.get(playerMaterialsKey, PersistentDataType.STRING),
                     ),
+                    selectableBuildingIds = pdc.get(selectorKey, PersistentDataType.STRING)?.split(',') ?: emptyList(),
                     systemMaterialsIncluded = pdc.get(systemMaterialsIncludedKey, PersistentDataType.BYTE)?.let { it != 0.toByte() },
                 ).validated()
             }.getOrNull()
@@ -394,6 +402,7 @@ object BuildBookCodec {
             pdc.set(schemaKey, PersistentDataType.INTEGER, SCHEMA_VERSION)
             pdc.set(buildingKey, PersistentDataType.STRING, checked.buildingId)
             pdc.set(titleKey, PersistentDataType.STRING, checked.title)
+            pdc.setOrRemove(selectorKey, PersistentDataType.STRING, checked.selectableBuildingIds.takeIf { it.isNotEmpty() }?.joinToString(","))
             pdc.set(rotationKey, PersistentDataType.INTEGER, checked.transform.rotation)
             pdc.set(offsetXKey, PersistentDataType.INTEGER, checked.transform.offsetX)
             pdc.set(offsetYKey, PersistentDataType.INTEGER, checked.transform.offsetY)
@@ -526,7 +535,12 @@ object BuildBookItems {
             tag("instance", Component.text(data.instanceId?.toString()?.take(8) ?: "после активации"))
         }.mapNotNull(::strip)
         val footer = config.componentList("build-book.footer").mapNotNull(::strip)
-        meta.lore(commonLore + playerMaterialLore(config, data) + footer)
+        val selectorLore = if (data.selectableBuildingIds.isEmpty()) emptyList() else
+            config.componentList("build-book.selector-lore") {
+                tag("name", Component.text(data.title))
+                tag("count", Component.text(data.selectableBuildingIds.size))
+            }.mapNotNull(::strip)
+        meta.lore(commonLore + playerMaterialLore(config, data) + selectorLore + footer)
         @Suppress("DEPRECATION")
         meta.setCustomModelData(modelId.takeIf { it > 0 })
         meta.tooltipStyle = BuildBookSettings.tooltipStyle

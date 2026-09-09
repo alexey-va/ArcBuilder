@@ -22,6 +22,8 @@ import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.plugin.java.JavaPlugin
+import ru.arc.autobuild.BuildBookData
+import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.BuildBookPreviewAdjustment
 import ru.arc.autobuild.BuildBookPreviewBridge
@@ -32,6 +34,7 @@ import ru.arc.config.ConfigManager
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.menu.MenuContract
 import ru.arc.menu.MenuElementId
+import ru.arc.menu.MenuRegionId
 import ru.arc.menu.MenuId
 import ru.arc.paper.menu.PaperMenuConfiguration
 import ru.arc.paper.menu.PaperMenuConfigurationParser
@@ -119,6 +122,53 @@ internal class BuilderBookPreviewPresentation(
 
     init {
         Bukkit.getPluginManager().registerEvents(this, plugin)
+    }
+
+    fun openSelector(
+        player: Player,
+        data: BuildBookData,
+        choices: List<SystemBuildBookDefinition>,
+        onSelect: (String) -> Unit,
+        onEdit: () -> Unit,
+    ) {
+        if (closed) return
+        val locale = locale(player)
+        fun control(template: String, action: (PaperMenuClickContext) -> Unit) = PaperMenuEntry(
+            item = menuItems.create(
+                menuConfiguration.templates.getValue(template),
+                messages.render("book.selector.$template", locale),
+                emptyList(),
+            ),
+            onClick = action,
+        )
+        menus.open(player, SELECTOR_MENU) {
+            PaperMenuContent(
+                title = messages.render("book.selector.title", locale),
+                elements = mapOf(
+                    PREVIOUS to control("selector-previous") { it.session.previousPage() },
+                    NEXT to control("selector-next") { it.session.nextPage() },
+                    CANCEL to control("selector-close") { it.player.closeInventory() },
+                    EDIT to control("selector-edit") { onEdit() },
+                ),
+                regions = mapOf(CHOICES to choices.map { definition ->
+                    val selected = data.buildingId == definition.buildingId
+                    val values = mapOf(
+                        "name" to messages.literal(definition.title),
+                        "materials" to messages.render(
+                            if (definition.materialsIncluded) "book.selector.materials-included" else "book.selector.materials-required", locale,
+                        ),
+                    )
+                    PaperMenuEntry(
+                        item = menuItems.create(
+                            menuConfiguration.templates.getValue(if (selected) "selector-selected" else "selector-choice"),
+                            messages.render(if (selected) "book.selector.selected-name" else "book.selector.name", locale, values),
+                            messages.renderLines("book.selector.lore", locale, values),
+                        ),
+                        onClick = { onSelect(definition.buildingId) },
+                    )
+                }),
+            )
+        }
     }
 
     override fun open(site: ConstructionSite) {
@@ -568,36 +618,38 @@ internal class BuilderBookPreviewPresentation(
         val location = Location(site.world, panel.x, panel.y, panel.z)
         val entities = mutableListOf<Entity>()
         try {
-            val display = site.world.spawn(location, TextDisplay::class.java) { entity ->
-                configure(entity, site.player)
-                entity.text(
-                    messages.render(
-                        "book.preview-panel",
-                        locale(site.player),
-                        mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24))),
-                    ),
-                )
-                BuilderConstructionSitePanelOrientation.apply(entity, panel.yaw)
-                entity.lineWidth = panelLineWidth
-                entity.backgroundColor = panelBackgroundColor
-                entity.isShadowed = true
-                entity.isSeeThrough = false
-                entity.alignment = TextDisplay.TextAlignment.CENTER
-                entity.displayWidth = panelInteractionWidth
-                entity.displayHeight = panelInteractionHeight
-                entity.isGlowing = true
-                entity.glowColorOverride = panelGlowColor
-                entity.brightness = Display.Brightness(15, 15)
-                entity.viewRange = (viewRange / 64.0).toFloat()
+            for (yaw in listOf(panel.yaw, panel.yaw + 180f)) {
+                val display = site.world.spawn(location, TextDisplay::class.java) { entity ->
+                    configure(entity, site.player)
+                    entity.text(
+                        messages.render(
+                            "book.preview-panel",
+                            locale(site.player),
+                            mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24))),
+                        ),
+                    )
+                    BuilderConstructionSitePanelOrientation.apply(entity, yaw)
+                    entity.lineWidth = panelLineWidth
+                    entity.backgroundColor = panelBackgroundColor
+                    entity.isShadowed = true
+                    entity.isSeeThrough = false
+                    entity.alignment = TextDisplay.TextAlignment.CENTER
+                    entity.displayWidth = panelInteractionWidth * BuilderConstructionSitePanelOrientation.SCALE
+                    entity.displayHeight = panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE
+                    entity.isGlowing = true
+                    entity.glowColorOverride = panelGlowColor
+                    entity.brightness = Display.Brightness(15, 15)
+                    entity.viewRange = (viewRange / 64.0).toFloat()
+                }
+                entities += display
             }
-            entities += display
             val interaction = site.world.spawn(
-                location.clone().subtract(0.0, panelInteractionHeight / 2.0, 0.0),
+                location.clone().subtract(0.0, panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE / 2.0, 0.0),
                 Interaction::class.java,
             ) { entity ->
                 configure(entity, site.player)
-                entity.interactionWidth = panelInteractionWidth
-                entity.interactionHeight = panelInteractionHeight
+                entity.interactionWidth = panelInteractionWidth * BuilderConstructionSitePanelOrientation.SCALE
+                entity.interactionHeight = panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE
                 entity.isResponsive = true
             }
             entities += interaction
@@ -642,6 +694,7 @@ internal class BuilderBookPreviewPresentation(
             PLACEMENT_MENU to PLACEMENT_CONTRACT,
             CONFIRMATION_MENU to CONFIRMATION_CONTRACT,
             INSPECTION_MENU to INSPECTION_CONTRACT,
+            SELECTOR_MENU to SELECTOR_CONTRACT,
         ),
         requiredTemplates = setOf("blocked"),
     )
@@ -659,6 +712,11 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private companion object {
+        val SELECTOR_MENU = MenuId.of("book-selector")
+        val CHOICES = MenuRegionId.of("choices")
+        val PREVIOUS = MenuElementId.of("previous")
+        val NEXT = MenuElementId.of("next")
+        val EDIT = MenuElementId.of("edit")
         val PLACEMENT_MENU = MenuId.of("book-preview-placement")
         val CONFIRMATION_MENU = MenuId.of("book-preview-confirmation")
         val INSPECTION_MENU = MenuId.of("book-preview-inspection")
@@ -684,6 +742,10 @@ internal class BuilderBookPreviewPresentation(
         val CONFIRMATION_CONTRACT = MenuContract(
             requiredElements = setOf(OVERVIEW, START, BACK, CANCEL),
             optionalElements = setOf(MATERIALS),
+        )
+        val SELECTOR_CONTRACT = MenuContract(
+            requiredElements = setOf(PREVIOUS, NEXT, CANCEL, EDIT),
+            requiredRegions = setOf(CHOICES),
         )
         val INSPECTION_CONTRACT = MenuContract(requiredElements = setOf(INSPECTION_OVERVIEW))
     }

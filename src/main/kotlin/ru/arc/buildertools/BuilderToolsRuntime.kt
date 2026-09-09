@@ -2848,7 +2848,11 @@ internal class BuilderToolsRuntime(
             val (effectiveItem, effectiveData) = canonicalBook(player, item, data)
             if (player.isSneaking) {
                 discardPreparedBookPlan(player.uniqueId)
-                BuildBookEditorGui.open(player, ::prepareBookCopy)
+                if (effectiveData.selectableBuildingIds.isNotEmpty()) {
+                    openBookSelector(player, effectiveItem, effectiveData)
+                } else {
+                    BuildBookEditorGui.open(player, ::prepareBookCopy)
+                }
                 return
             }
             val current = BuildingManager.pending(player.uniqueId)
@@ -2915,6 +2919,51 @@ internal class BuilderToolsRuntime(
             error("Builder-book interaction failed for ${player.name}", failure)
             send(player, "book.failed")
         }
+    }
+
+    private fun openBookSelector(player: Player, item: ItemStack, data: BuildBookData) {
+        val expected = item.clone()
+        val slot = player.inventory.heldItemSlot
+        val choices = data.selectableBuildingIds.map { id ->
+            systemBuildBookResolver(data.copy(buildingId = id)) ?: throw BuilderUserFailure("book.invalid")
+        }
+        fun verifyHeldBook() {
+            ensureAvailable(player)
+            if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
+            if (player.inventory.heldItemSlot != slot || player.inventory.getItem(slot) != expected) {
+                throw BuilderUserFailure("book.missing")
+            }
+        }
+        bookPreviewPresentation.openSelector(player, data, choices, onSelect = { selected ->
+            try {
+                verifyHeldBook()
+                val candidate = data.copy(buildingId = selected, transform = ru.arc.autobuild.BuildBookTransform())
+                val definition = systemBuildBookResolver(candidate) ?: throw BuilderUserFailure("book.invalid")
+                val updated = BuildBookCodec.update(expected, candidate.copy(
+                    title = definition.title,
+                    systemMaterialsIncluded = definition.materialsIncluded,
+                    blockCount = null,
+                    playerMaterials = emptyList(),
+                ).validated())
+                discardPreparedBookPlan(player.uniqueId)
+                BuildingManager.closePreview(player.uniqueId)
+                bookPreviewPresentation.clearPlayer(player.uniqueId)
+                player.inventory.setItem(slot, updated)
+                player.closeInventory()
+                send(player, "book.selector.saved", mapOf("name" to messages.literal(definition.title)))
+            } catch (failure: BuilderUserFailure) {
+                player.closeInventory()
+                send(player, failure.path, failure.values)
+            }
+        }, onEdit = {
+            try {
+                verifyHeldBook()
+                BuildBookEditorGui.open(player, ::prepareBookCopy)
+            } catch (failure: BuilderUserFailure) {
+                player.closeInventory()
+                send(player, failure.path, failure.values)
+            }
+        })
     }
 
     private fun canonicalBook(player: Player, item: ItemStack, data: BuildBookData): Pair<ItemStack, BuildBookData> {

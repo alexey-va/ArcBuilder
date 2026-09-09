@@ -21,6 +21,7 @@ import ru.arc.autobuild.BuildBookPreviewAdjustment
 import ru.arc.autobuild.BuildBookPreviewMove
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.ConstructionSiteSnapshot
+import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.config.ConfigManager
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
@@ -296,6 +297,64 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     click(paper, player, 25).isCancelled.shouldBeTrue()
                     host.confirmCalls shouldBe 1
                     host.completedConfirmations shouldBe listOf(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION)
+                }
+            } finally {
+                ConfigManager.clear()
+            }
+        }
+    }
+
+    test("system-book selector marks the current choice and forwards selection without confirming construction") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val player = paper.addPlayer("SelectorOwner").also {
+                    it.gameMode = GameMode.CREATIVE
+                    it.setLocale(Locale.forLanguageTag("ru-RU"))
+                }
+                val choices = listOf("birch.schem", "oak.schem", "spruce.schem", "stone.schem").mapIndexed { index, id ->
+                    SystemBuildBookDefinition(
+                        buildingId = id,
+                        title = "Дом ${index + 1}",
+                        schematicSha256 = "${index + 1}".repeat(64),
+                        playerEnabled = true,
+                        materialsIncluded = false,
+                    ).validated()
+                }
+                val book = BuildBookData(
+                    buildingId = "spruce.schem",
+                    title = "Дом 3",
+                    selectableBuildingIds = choices.map(SystemBuildBookDefinition::buildingId),
+                ).validated()
+                val site = mockk<ConstructionSite>(relaxed = true)
+                val host = PreviewHost(
+                    site,
+                    BuilderBookPreviewConfirmation(
+                        kind = BuilderBookPreviewConfirmationKind.CONSTRUCTION,
+                        blockCount = 1,
+                        title = book.title,
+                        cooldownRemaining = Duration.ZERO,
+                        requiredMaterials = emptyList(),
+                    ),
+                )
+                val selected = mutableListOf<String>()
+
+                previewPresentation(plugin, config, host).use { presentation ->
+                    presentation.openSelector(player, book, choices, selected::add) { error("selector edit should not be called") }
+
+                    val selector = player.openInventory.topInventory
+                    selector.size shouldBe 36
+                    selector.getItem(10)?.type shouldBe Material.OAK_DOOR
+                    selector.getItem(12)?.type shouldBe Material.OAK_DOOR
+                    selector.getItem(14)?.type shouldBe Material.LIME_DYE
+                    selector.getItem(16)?.type shouldBe Material.OAK_DOOR
+
+                    click(paper, player, 16).isCancelled.shouldBeTrue()
+                    selected shouldBe listOf("stone.schem")
+                    host.confirmCalls shouldBe 0
                 }
             } finally {
                 ConfigManager.clear()

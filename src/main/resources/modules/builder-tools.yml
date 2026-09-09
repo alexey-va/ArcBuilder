@@ -138,6 +138,21 @@ construction:
 paper-menus:
   preview:
     layouts:
+      book-selector:
+        schema-version: 1
+        rows: 4
+        background: { template: background }
+        elements:
+          previous: { slot: 27, template: selector-previous }
+          edit: { slot: 29, template: selector-edit }
+          cancel: { slot: 31, template: selector-close }
+          next: { slot: 35, template: selector-next }
+        regions:
+          choices: { slots: [10, 12, 14, 16] }
+        pagination:
+          region: choices
+          previous: previous
+          next: next
       book-preview-placement:
         schema-version: 1
         rows: 5
@@ -175,6 +190,12 @@ paper-menus:
         external-item: itemsadder:arc/background
         fallback-material: GRAY_STAINED_GLASS_PANE
         hide-tooltip: true
+      selector-choice: { material: OAK_DOOR }
+      selector-selected: { material: LIME_DYE }
+      selector-previous: { material: ARROW }
+      selector-next: { material: ARROW }
+      selector-close: { material: BARRIER }
+      selector-edit: { material: COMPASS }
       arrow: { material: ARROW }
       rotate: { material: COMPASS }
       mirror: { material: AMETHYST_SHARD }
@@ -690,8 +711,26 @@ locales:
         <#8c8c8c>   <#2bba43>Зелёный куб<#e6fff3> показывает выбранный блок.
         <#8c8c8c>   Превью и табличка исчезнут сами через 3 минуты.
         <#8c8c8c>   <click:run_command:'/builder cancel'><#c42323>[✖ Убрать превью]</click>
+      selector:
+        title: "Выбор дома"
+        name: "<white><name>"
+        selected-name: "<#2bba43>✔ <name>"
+        lore:
+          - ""
+          - "<#b8b8b8>Сохранить этот проект в книге."
+          - "<#b8b8b8>Одна книга строит один выбранный дом."
+          - "<materials>"
+          - ""
+          - "<#92bed8>[▶] ЛКМ <#b8b8b8>— выбрать"
+        materials-included: "<#b8b8b8>Материалы: <#2bba43>включены"
+        materials-required: "<#b8b8b8>Материалы: <#ffb142>нужно собрать"
+        selector-previous: "<white>Назад"
+        selector-next: "<white>Далее"
+        selector-close: "<white>Закрыть"
+        selector-edit: "<#ffb142>Поворот и смещение"
+        saved: "<prefix><#b8b8b8>В книге выбран <#ffb142><name><#b8b8b8>. ПКМ по блоку — разместить превью."
       preview-panel: |-
-        <#ffb142><bold>Настроить постройку</bold>
+        <prefix><#ffb142><bold>Настроить постройку</bold> <prefix>
         <#e6fff3><name>
         <#92bed8>ПКМ — открыть меню
       preview:
@@ -1067,7 +1106,7 @@ locales:
       site:
         unknown-name: "Строительный проект"
         panel: |-
-          <#ffb142><bold>СТРОЙПЛОЩАДКА</bold>
+          <prefix><#ffb142><bold>СТРОЙПЛОЩАДКА</bold> <prefix>
           <#e6fff3><name>
           <#2bba43><count>/<#d48763><total> <#8c8c8c>— <#e6fff3><percent>%
           <#92bed8>ПКМ — открыть управление
@@ -1578,8 +1617,26 @@ locales:
         <dark_gray>   <green>The green cube<white> marks the selected block.
         <dark_gray>   The preview and sign disappear automatically after 3 minutes.
         <dark_gray>   <click:run_command:'/builder cancel'><red>[✖ Remove preview]</click>
+      selector:
+        title: "Choose a house"
+        name: "<white><name>"
+        selected-name: "<#2bba43>✔ <name>"
+        lore:
+          - ""
+          - "<#b8b8b8>Save this design in the book."
+          - "<#b8b8b8>One book builds one selected house."
+          - "<materials>"
+          - ""
+          - "<#92bed8>[▶] Left-click <#b8b8b8>— select"
+        materials-included: "<#b8b8b8>Materials: <#2bba43>included"
+        materials-required: "<#b8b8b8>Materials: <#ffb142>bring your own"
+        selector-previous: "<white>Previous"
+        selector-next: "<white>Next"
+        selector-close: "<white>Close"
+        selector-edit: "<#ffb142>Rotation and offset"
+        saved: "<prefix><#ffb142><name><#b8b8b8> selected in the book. Right-click a block to place the preview."
       preview-panel: |-
-        <gold><bold>Adjust the build</bold>
+        <prefix><gold><bold>Adjust the build</bold> <prefix>
         <white><name>
         <aqua>Right-click — open controls
       preview:
@@ -1936,7 +1993,7 @@ locales:
       site:
         unknown-name: "Construction project"
         panel: |-
-          <#ffb142><bold>CONSTRUCTION SITE</bold>
+          <prefix><#ffb142><bold>CONSTRUCTION SITE</bold> <prefix>
           <#e6fff3><name>
           <#2bba43><count>/<#d48763><total> <#8c8c8c>— <#e6fff3><percent>%
           <#92bed8>Right-click to open controls

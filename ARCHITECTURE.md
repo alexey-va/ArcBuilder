@@ -509,3 +509,21 @@ anchor. New projects persist `siteAnchor` together with `sitePanelFace`, so
 restart preserves placement even when the clicked origin differs from the
 changed-block bounds. Legacy projects lacking an anchor retain their former
 bounds-based placement. The area outline still encloses the full plan.
+
+## System-book house selector
+
+Schema 6 books may persist a bounded list of reviewed system catalogue IDs;
+`buildingId` is the current selection. Older single-house books remain readable.
+`/builder systembook <player> <default.schem> [alternative.schem,...]` verifies
+all options and issues one book with the requested default. Shift-right-click
+opens the house selector; its settings button preserves access to rotation and
+offsets. Selection validates the exact held stack, resets placement offsets,
+closes the previous preview and prepared book plan, and rewrites the same stack.
+Each construction consumes one book using the existing durable book-cost flow.
+Material and chest-loot policies continue to come from the selected catalogue
+entry. Player-created registered books cannot carry selector options.
+
+Preview and construction plaques have two fixed opposing text faces, each at
+2x scale with a small separation to prevent coincident surfaces. Their hitbox
+and culling bounds scale with the text; both faces share updates and cleanup.
+Plaque titles use the localized ArcBuilder prefix on both sides.

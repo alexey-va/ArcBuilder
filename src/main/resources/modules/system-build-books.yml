@@ -46,3 +46,18 @@ books:
     title: Большой дом викинга
     sha256: 9237fe9b7849f0da03b4bc7fdb3c27327f0c60b23e04fac69e3ec0cde94a3848
     player-enabled: true
+  - building-id: atelier-forest-cabin.schem
+    title: Лесной сруб
+    sha256: ce10995084e8bef7335bf6e7cbed39e78dcccdcb61dd27967ebbf1623ba8b1c9
+    player-enabled: true
+    materials-included: false
+  - building-id: atelier-stone-cottage.schem
+    title: Каменный домик
+    sha256: 51f41c4c066bb57d0cd82a8ccdec062ce9e15e6561e1251dfd7f9e2fbd889770
+    player-enabled: true
+    materials-included: false
+  - building-id: atelier-birch-cottage.schem
+    title: Берёзовый коттедж
+    sha256: 79d426a8e05910216d76d133e90bb1174e25a18fc0fb479668d8937f12058b95
+    player-enabled: true
+    materials-included: false

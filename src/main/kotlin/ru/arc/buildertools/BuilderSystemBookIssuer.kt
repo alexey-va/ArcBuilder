@@ -23,8 +23,8 @@ internal object BuilderSystemBookIssuer {
             return true
         }
         val issueArgs = if (sender is Player && args.size == 1) listOf(sender.name, args[0]) else args
-        if (issueArgs.size != 2) {
-            sender.sendMessage("Usage: builder systembook <online-player> <catalogue-file.schem>")
+        if (issueArgs.size !in 2..3) {
+            sender.sendMessage("Usage: builder systembook <online-player> <default.schem> [alternative.schem,...]")
             return true
         }
         try {
@@ -32,11 +32,17 @@ internal object BuilderSystemBookIssuer {
             val definition = requireNotNull(resolve(BuildBookData(issueArgs[1], "System book").validated())) {
                 "Catalogue entry is disabled, missing, or its schematic digest changed"
             }
+            val options = if (issueArgs.size == 3) (listOf(definition.buildingId) + issueArgs[2].split(',')).distinct() else emptyList()
+            val bookData = data(definition).copy(selectableBuildingIds = options).validated()
+            options.forEach { id ->
+                requireNotNull(resolve(BuildBookData(id, "System book").validated())) { "Selector entry is unavailable: $id" }
+                require(Building(id).volume <= maxScanVolume) { "Selector schematic exceeds the configured scan volume: $id" }
+            }
             val building = Building(definition.buildingId)
             require(building.volume <= maxScanVolume) { "Schematic exceeds the configured scan volume" }
             val slot = player.inventory.firstEmpty()
             require(slot >= 0) { "Player inventory has no empty slot" }
-            val item = BuildBookItems.create(data(definition))
+            val item = BuildBookItems.create(bookData)
             player.inventory.setItem(slot, item)
             sender.sendMessage("SYSTEM_BOOK_ISSUED player=${player.name} schematic=${definition.buildingId} slot=$slot sha256=${definition.schematicSha256}")
         } catch (failure: IllegalArgumentException) {

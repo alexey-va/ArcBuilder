@@ -52,7 +52,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
         val admin = mockk<Player>(relaxed = true)
         every { admin.hasPermission(BuilderSystemBookIssuer.PERMISSION) } returns true
         BuilderSystemBookIssuer.issue(admin, emptyList(), { error("must not resolve") }, 8192) { error("must not deny") }
-        verify { admin.sendMessage("Usage: builder systembook <online-player> <catalogue-file.schem>") }
+        verify { admin.sendMessage("Usage: builder systembook <online-player> <default.schem> [alternative.schem,...]") }
     }
     test("issued catalogue data preserves title and material policy without inventing a player contract") {
         val definition = SystemBuildBookDefinition("house.schem", "Стартовый домик", "a".repeat(64), true, false)
