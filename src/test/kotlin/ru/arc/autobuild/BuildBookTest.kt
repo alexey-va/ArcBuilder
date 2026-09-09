@@ -25,6 +25,19 @@ import java.util.UUID
 
 class BuildBookTest : TestBase() {
     @Test
+    fun `system book volume and included materials survive codec and appear in lore`() {
+        for (count in listOf(0, 1776, 20_000)) {
+            val data = BuildBookData("cottage.schem", "Коттедж", blockCount = count, systemMaterialsIncluded = true).validated()
+            val item = BuildBookItems.create(data)
+            val restored = ItemStack.deserializeBytes(item.serializeAsBytes())
+            assertEquals(data, BuildBookCodec.read(restored))
+            val lore = restored.itemMeta.lore()!!.joinToString("\n") { PlainTextComponentSerializer.plainText().serialize(it) }
+            assertTrue(lore.contains(count.toString()))
+            assertFalse(lore.contains("?"))
+            assertFalse(lore.contains("понадобятся"))
+        }
+    }
+    @Test
     fun `selector choice survives serialization and consumes only one matching book`() {
         val data = BuildBookData("viking.schem", "Викинг", selectableBuildingIds = listOf("viking.schem", "cottage.schem")).validated()
         val stack = BuildBookItems.create(data).also { it.amount = 2 }

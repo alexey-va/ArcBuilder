@@ -2951,7 +2951,7 @@ internal class BuilderToolsRuntime(
                 val updated = BuildBookCodec.update(expected, candidate.copy(
                     title = definition.title,
                     systemMaterialsIncluded = definition.materialsIncluded,
-                    blockCount = null,
+                    blockCount = systemBookBlockCount(selected),
                     playerMaterials = emptyList(),
                 ).validated())
                 discardPreparedBookPlan(player.uniqueId)
@@ -2994,12 +2994,20 @@ internal class BuilderToolsRuntime(
             data.copy(
                 title = definition.title,
                 systemMaterialsIncluded = definition.materialsIncluded,
+                blockCount = systemBookBlockCount(definition.buildingId),
+                playerMaterials = emptyList(),
             ).validated()
         }
         if (canonical == data) return item to data
         val updated = BuildBookCodec.update(item, canonical)
         player.inventory.setItem(slot, updated)
         return updated to canonical
+    }
+
+    private fun systemBookBlockCount(id: String): Int {
+        val building = BuildingManager.getBuilding(id) ?: throw BuilderUserFailure("book.invalid")
+        if (building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
+        return building.blockCount
     }
 
     private fun preparedBookPlan(playerId: UUID, book: ItemStack): BuilderBookPreparedPlan {

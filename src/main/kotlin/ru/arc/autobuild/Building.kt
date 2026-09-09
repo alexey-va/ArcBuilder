@@ -13,6 +13,7 @@ class Building(val fileName: String) {
     @Volatile private var loaded: Clipboard? = null
     val clipboard: Clipboard get() = loaded ?: loadClipboard().also { loaded = it }
     val volume: Long get() = clipboard.region.volume
+    val blockCount: Int by lazy { countBuildBookCells(clipboard) }
 
     private fun loadClipboard(): Clipboard {
         val file = BuilderStoragePaths.schematicsRoot().resolve(fileName).toFile()
@@ -39,6 +40,10 @@ class Building(val fileName: String) {
         mirrored,
     )
 }
+
+/** Includes clearing air, but excludes keep-world markers from the book's volume. */
+internal fun countBuildBookCells(clipboard: Clipboard): Int =
+    clipboard.region.count { clipboard.getFullBlock(it).blockType.id != "minecraft:barrier" }
 
 internal object BuildBookStructureTransform {
     private val horizontalMirror = AffineTransform().scale(-1.0, 1.0, 1.0)

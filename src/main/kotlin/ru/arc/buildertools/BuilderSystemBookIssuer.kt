@@ -7,6 +7,7 @@ import org.bukkit.entity.Player
 import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.Building
+import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.SystemBuildBookDefinition
 import kotlin.random.Random
 
@@ -32,6 +33,13 @@ internal object BuilderSystemBookIssuer {
             return true
         }
         try {
+            val loadedBuildings = mutableMapOf<String, Building>()
+            fun building(id: String): Building = loadedBuildings.getOrPut(id) {
+                Building(id).also {
+                    require(it.volume <= maxScanVolume) { "Schematic exceeds the configured scan volume: $id" }
+                    BuildingManager.addBuilding(it)
+                }
+            }
             val player = requireNotNull(Bukkit.getPlayerExact(issueArgs[0])) { "Player must be online on this server" }
             val requestedId = issueArgs[1]
             require(!requestedId.equals(RANDOM_SELECTOR, ignoreCase = true) || issueArgs.size == 3) {
@@ -47,7 +55,7 @@ internal object BuilderSystemBookIssuer {
                     },
                     resolve,
                     maxScanVolume,
-                    volume = { Building(it).volume },
+                    volume = { building(it).volume },
                 )
                 options = selected.second
                 selected.first
@@ -60,16 +68,15 @@ internal object BuilderSystemBookIssuer {
                 } else emptyList()
                 resolved
             }
+            options.forEach { id ->
+                requireNotNull(resolve(BuildBookData(id, "System book").validated())) { "Selector entry is unavailable: $id" }
+                building(id)
+            }
             val bookData = data(definition).copy(
                 selectableBuildingIds = options,
                 cooldownSeconds = if (requestedId.equals(RANDOM_SELECTOR, ignoreCase = true)) 0L else null,
+                blockCount = building(definition.buildingId).blockCount,
             ).validated()
-            options.forEach { id ->
-                requireNotNull(resolve(BuildBookData(id, "System book").validated())) { "Selector entry is unavailable: $id" }
-                require(Building(id).volume <= maxScanVolume) { "Selector schematic exceeds the configured scan volume: $id" }
-            }
-            val building = Building(definition.buildingId)
-            require(building.volume <= maxScanVolume) { "Schematic exceeds the configured scan volume" }
             val slot = player.inventory.firstEmpty()
             require(slot >= 0) { "Player inventory has no empty slot" }
             val item = BuildBookItems.create(bookData)

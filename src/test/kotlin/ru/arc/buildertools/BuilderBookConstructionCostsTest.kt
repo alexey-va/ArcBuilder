@@ -71,7 +71,10 @@ class BuilderBookConstructionCostsTest : FunSpec({
         MockBukkitTestRuntime.open().use {
             val worldId = UUID.randomUUID()
             val book = ItemStack(Material.BOOK)
-            val data = BuildBookData(buildingId = "viking.schem", title = "Дом викинга")
+            val data = BuildBookData(
+                buildingId = "viking.schem", title = "Дом викинга",
+                playerMaterials = listOf(BuildBookMaterialRequirement(Material.CHEST, 1)),
+            )
             val placements = listOf(
                 BuilderBookPlannedChange(
                     BuilderBlockChange(

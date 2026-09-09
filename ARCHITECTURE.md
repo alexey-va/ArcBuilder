@@ -301,7 +301,7 @@ revalidates authoritative blueprint ownership immediately before charging and
 minting. A stored issue price describes a newly issued copy, not construction;
 building never withdraws money.
 
-System catalogue entries may opt into `materials-included`. Those books consume
+System catalogue entries default to `materials-included`. Those books consume
 only their physical book and create steps without material requirements. The
 starter `viking.schem` book uses this policy. Its Sponge `Offset Y` is zero so a
 ground anchor places the house on, rather than below, the clicked surface.

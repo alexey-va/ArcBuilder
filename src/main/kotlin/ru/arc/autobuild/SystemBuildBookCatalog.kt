@@ -88,7 +88,7 @@ internal class SystemBuildBookCatalog private constructor(
                     materialsIncluded = raw["materials-included"]?.let { value ->
                         value as? Boolean
                             ?: throw IllegalArgumentException("System build-book materials-included flag is invalid")
-                    } ?: false,
+                    } ?: true,
                     starterEnabled = raw["starter-enabled"]?.let { value ->
                         value as? Boolean
                             ?: throw IllegalArgumentException("System build-book starter-enabled flag is invalid")

@@ -43,9 +43,19 @@ not a construction charge. Construction never withdraws money. Ordinary
 projects consume only the physical book at start and wait persistently for
 each later material or nearby permitted output slot.
 
-System entries may set `materials-included: true`. Such a book consumes only
-itself and requires no building materials. This is intentionally enabled for
-the `kitstart` starter house.
+System entries default to `materials-included: true`: the server supplies the
+construction materials and the player spends only the physical book. Every
+current catalogue entry uses this policy, including all starter choices.
+An explicit `false` remains an operator override; player-authored books retain
+their own paid/player-supplied material contract.
+
+Issued books contain the selected schematic's full cell count minus barrier
+markers (air is included). Issuance retains each loaded clipboard in
+`BuildingManager`; the count is cached with that Building. Switching the house
+recomputes its displayed count, and normal interaction refreshes older system
+books from the current catalogue. This is schematic volume, not an estimate of
+how many blocks differ at a particular world location. Existing construction
+journals retain their immutable material steps.
 
 A reviewed system entry may also set `container-loot-table` to a vanilla
 namespaced loot table. Only ordinary chest steps carrying that exact catalogue

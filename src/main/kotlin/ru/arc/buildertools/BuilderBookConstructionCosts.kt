@@ -44,8 +44,8 @@ internal object BuilderBookConstructionCosts {
         val exactBook = book.clone().also { it.amount = 1 }
         val playerSuppliedTypes = if (!BuilderGameModePolicy.usesInventory(gameMode)) {
             emptySet()
-        } else if (!data.playerCreated && !systemMaterialsIncluded) {
-            null
+        } else if (!data.playerCreated) {
+            if (systemMaterialsIncluded) emptySet() else null
         } else {
             data.playerMaterials.mapTo(mutableSetOf()) { requirement ->
                 require(requirement.material.isItem) { "Build-book player material is not available as an item" }

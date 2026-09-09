@@ -45,6 +45,10 @@ class SystemBuildBookCatalogTest : FunSpec({
         definition.title.contains(".schem") shouldBe false
         catalog.resolve(BuildBookData(buildingId = "unknown.schem", title = "unknown")) shouldBe null
 
+        val defaultConfig = config(root, Files.readString(root.resolve("system-build-books.yml"))
+            .replace("    materials-included: true\n", ""))
+        checkNotNull(SystemBuildBookCatalog.load(defaultConfig, root).resolve(data)).materialsIncluded shouldBe true
+
         Files.writeString(root.resolve("viking.schem"), "changed")
         catalog.resolve(data) shouldBe null
     }

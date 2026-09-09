@@ -153,7 +153,9 @@ data class BuildBookData(
         require(sourceRotation in BuildBookTransform.CARDINAL_ROTATIONS) {
             "Build-book source rotation must be cardinal"
         }
-        require(blockCount == null || blockCount in 1..10_000) { "Build-book block count is invalid" }
+        require(blockCount == null || blockCount in (if (playerCreated) 1..10_000 else 0..Int.MAX_VALUE)) {
+            "Build-book block count is invalid"
+        }
         require(cooldownSeconds == null || cooldownSeconds in 0..BuildCooldownPolicy.MAX_SECONDS) {
             "Build-book cooldown is invalid"
         }
