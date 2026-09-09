@@ -36,14 +36,8 @@ internal object BuilderDisplaySceneDiff {
 internal object BuilderDisplayGeometry {
     private const val DEFAULT_THICKNESS = .035f
 
-    fun originMarker(position: BuilderBlockPos): BuilderDisplayEdge = BuilderDisplayEdge(
-        x = position.x + .25,
-        y = position.y + .25,
-        z = position.z + .25,
-        scaleX = .5f,
-        scaleY = .5f,
-        scaleZ = .5f,
-    )
+    // Straddle the block edges so an occupied anchor cannot bury the marker.
+    fun originMarker(position: BuilderBlockPos): List<BuilderDisplayEdge> = bounds(listOf(position), .08f)
 
     fun blockTransform(scale: Float): BuilderDisplayBlockTransform {
         require(scale.isFinite() && scale in .5f..1f)

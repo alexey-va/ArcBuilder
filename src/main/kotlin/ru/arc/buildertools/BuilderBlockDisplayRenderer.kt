@@ -307,18 +307,20 @@ internal class BuilderBlockDisplayRenderer(
             val origin = BuilderDisplayGeometry.originMarker(
                 BuilderBlockPos(site.world.uid, anchor.x, anchor.y, anchor.z),
             )
-            add(
-                DisplaySpec(
-                    origin.x,
-                    origin.y,
-                    origin.z,
-                    Material.LIME_STAINED_GLASS.createBlockData(),
-                    origin.scaleX,
-                    origin.scaleY,
-                    origin.scaleZ,
-                    glow = Color.LIME,
-                ),
-            )
+            origin.forEach { edge ->
+                add(
+                    DisplaySpec(
+                        edge.x,
+                        edge.y,
+                        edge.z,
+                        Material.LIME_CONCRETE.createBlockData(),
+                        edge.scaleX,
+                        edge.scaleY,
+                        edge.scaleZ,
+                        glow = Color.LIME,
+                    ),
+                )
+            }
         }
         replace(site.player, Layer.BOOK, specs)
     }

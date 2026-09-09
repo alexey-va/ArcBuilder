@@ -48,17 +48,23 @@ class BuilderDisplayGeometryTest : StringSpec({
         shouldThrow<IllegalArgumentException> { BuilderDisplayGeometry.blockTransform(1.01f) }
     }
 
-    "preview origin marker stays centred on the selected anchor block" {
+    "preview origin frame protrudes outside a solid anchor without covering its faces" {
         val world = UUID.randomUUID()
-
-        BuilderDisplayGeometry.originMarker(BuilderBlockPos(world, 12, 64, -7)) shouldBe BuilderDisplayEdge(
-            x = 12.25,
-            y = 64.25,
-            z = -6.75,
-            scaleX = .5f,
-            scaleY = .5f,
-            scaleZ = .5f,
-        )
+        val edges = BuilderDisplayGeometry.originMarker(BuilderBlockPos(world, 12, 64, -7))
+        edges shouldHaveSize 12
+        edges.forEach { edge ->
+            val axes = listOf(
+                Triple(edge.x, edge.scaleX, 12.0),
+                Triple(edge.y, edge.scaleY, 64.0),
+                Triple(edge.z, edge.scaleZ, -7.0),
+            )
+            axes.count { (start, scale, min) ->
+                scale == 1f && start == min
+            } shouldBe 1
+            axes.count { (start, scale, min) ->
+                scale == .08f && (start < min || start + scale > min + 1.0)
+            } shouldBe 2
+        }
     }
 
     "moving preview windows retain overlap and change only entering and leaving blocks" {
