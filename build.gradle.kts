@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.33"
+version = "1.0.34"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -39,6 +39,7 @@ dependencies {
     implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.5.1")
     implementation("org.snakeyaml:snakeyaml-engine:3.0.1")
     implementation("ru.ruscrafting.arc:arc-core-sql:2.5.1")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
     implementation("de.tr7zw:item-nbt-api:2.15.7")
@@ -62,6 +63,7 @@ dependencies {
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.5.1")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
         exclude(group = "org.bukkit", module = "bukkit")

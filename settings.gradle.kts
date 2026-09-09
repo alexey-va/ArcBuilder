@@ -11,6 +11,7 @@ providers.gradleProperty("arcCoreDir").orNull?.let(::file)?.let { arcCoreDir ->
                 "arc-core-logging",
                 "arc-core-menu",
                 "arc-core-paper",
+                "arc-core-paper-api",
                 "arc-core-paper-menu",
                 "arc-core-paper-testing",
                 "arc-core-sql",
