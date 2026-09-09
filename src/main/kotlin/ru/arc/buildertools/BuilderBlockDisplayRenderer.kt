@@ -121,7 +121,7 @@ internal class BuilderBlockDisplayRenderer(
     private val blockTransform = BuilderDisplayGeometry.blockTransform(blockDisplayScale)
 
     init {
-        require(maxPlanDisplays in 32..512)
+        require(maxPlanDisplays in 32..4096)
         require(planDisplayRange.isFinite() && planDisplayRange in 8.0..128.0)
         require(guidancePeriodTicks in 5L..100L)
         checkNotNull(

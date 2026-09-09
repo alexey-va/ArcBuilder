@@ -74,7 +74,7 @@ class BuilderToolsConfig(
             config.string("construction.site.panel.face", "MAX_Z").uppercase(Locale.ROOT),
         )
     val constructionSitePanelHeightOffset: Double
-        get() = config.double("construction.site.panel.height-offset", 1.6)
+        get() = config.double("construction.site.panel.height-offset", 2.6)
     val constructionSitePanelFrontOffset: Double
         get() = config.double("construction.site.panel.front-offset", 0.4)
     val constructionSitePanelInteractionWidth: Float
@@ -113,7 +113,7 @@ class BuilderToolsConfig(
     val previewRadius: Double get() = config.double("preview.radius", 32.0)
     val previewSpacing: Double get() = config.double("preview.outline-spacing", 0.75)
     val previewMaxSelectionParticles: Int get() = config.integer("preview.max-selection-particles", 512)
-    val previewMaxPlanDisplays: Int get() = config.integer("preview.max-plan-displays", 512)
+    val previewMaxPlanDisplays: Int get() = config.integer("preview.max-plan-displays", 4096)
     val previewBlockDisplayScale: Float get() = config.double("preview.block-display-scale", 1.0).toFloat()
     val previewPlanDisplayRange: Double get() = config.double("preview.plan-display-range", 64.0)
     val previewGuidancePeriodTicks: Long get() = config.long("preview.guidance-period-ticks", 20L)
@@ -289,7 +289,7 @@ class BuilderToolsConfig(
         require(previewRadius.isFinite() && previewRadius in 8.0..64.0) { "Builder-tools preview radius is invalid" }
         require(previewSpacing.isFinite() && previewSpacing in 0.25..2.0) { "Builder-tools preview spacing is invalid" }
         require(previewMaxSelectionParticles in 48..1_024) { "Builder-tools selection preview limit is invalid" }
-        require(previewMaxPlanDisplays in 32..512) { "Builder-tools plan preview limit is invalid" }
+        require(previewMaxPlanDisplays in 32..4096) { "Builder-tools plan preview limit is invalid" }
         require(previewBlockDisplayScale.isFinite() && previewBlockDisplayScale in 0.5f..1.0f) {
             "Builder-tools block display scale is invalid"
         }

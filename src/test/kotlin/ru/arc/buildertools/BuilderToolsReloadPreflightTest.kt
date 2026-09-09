@@ -118,7 +118,7 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe true
         val merged = Config(root, "modules/builder-tools.yml")
         merged.integer("runtime.progress-every-batches") shouldBe 10
-        merged.integer("preview.max-plan-displays") shouldBe 512
+        merged.integer("preview.max-plan-displays") shouldBe 4096
         merged.double("preview.block-display-scale") shouldBe 1.0
         merged.integer("construction.effects.interval-blocks") shouldBe 4
         merged.string("construction.site.outline.material") shouldBe "ORANGE_STAINED_GLASS"

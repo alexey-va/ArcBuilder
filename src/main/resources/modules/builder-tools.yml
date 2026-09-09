@@ -48,7 +48,7 @@ construction:
       enabled: true
       # Fallback for legacy projects. New projects persist the nearest vertical face to the owner at confirmation.
       face: MAX_Z
-      height-offset: 1.6
+      height-offset: 2.6
       front-offset: 0.4
       interaction-width: 3.0
       interaction-height: 1.5
@@ -200,7 +200,7 @@ preview:
   outline-spacing: 0.75
   max-selection-particles: 512
   # Small plans show every non-air block; large plans show this many blocks nearest to the moving player.
-  max-plan-displays: 512
+  max-plan-displays: 4096
   # 1.0 renders every preview block at the exact size of a real Minecraft block.
   block-display-scale: 1.0
   plan-display-range: 64
