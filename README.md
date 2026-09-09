@@ -7,7 +7,7 @@ selection, fill, exact block replacement, copy/paste with player-relative
 anchors and rotation, deconstruction, procedural tree crowns, construction-book
 drafts, pricing, activation, copying, selling, and one-time-use protection.
 
-The plugin uses arc-core 2.4.5 and does not depend on the ARC monolith.
+The plugin uses arc-core 2.5.1 and does not depend on the ARC monolith.
 
 ## Player flow
 

@@ -23,8 +23,7 @@ import ru.arc.paper.menu.PaperMenuConfiguration
 import ru.arc.paper.menu.PaperMenuConfigurationParser
 import ru.arc.paper.menu.PaperMenuContent
 import ru.arc.paper.menu.PaperMenuEntry
-import ru.arc.paper.menu.PaperMenuExternalItemResolver
-import ru.arc.paper.menu.PaperMenuExternalItemResult
+import ru.arc.paper.menu.PaperMenuItemsAdderResolver
 import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.text.LocalizedMiniMessage
@@ -43,15 +42,10 @@ internal class BuilderConstructionProjectsMenuManager(
     private val configuration = loadConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), configuration)
     private val items = PaperMenuItemFactory(
-        externalItems = PaperMenuExternalItemResolver { id ->
-            if (id.namespace != "itemsadder" || !Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
-                PaperMenuExternalItemResult.Missing
-            } else {
-                CustomStack.getInstance(id.key.replaceFirst('/', ':'))?.itemStack
-                    ?.let(PaperMenuExternalItemResult::Resolved)
-                    ?: PaperMenuExternalItemResult.Missing
-            }
-        },
+        externalItems = PaperMenuItemsAdderResolver(
+            isAvailable = { Bukkit.getPluginManager().isPluginEnabled("ItemsAdder") },
+            lookup = { id -> CustomStack.getInstance(id)?.itemStack },
+        ),
     )
     private val viewers = mutableSetOf<UUID>()
     private var closed = false

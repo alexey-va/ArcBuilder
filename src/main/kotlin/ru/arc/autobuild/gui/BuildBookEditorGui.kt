@@ -29,8 +29,7 @@ import ru.arc.paper.menu.PaperMenuConfiguration
 import ru.arc.paper.menu.PaperMenuConfigurationParser
 import ru.arc.paper.menu.PaperMenuContent
 import ru.arc.paper.menu.PaperMenuEntry
-import ru.arc.paper.menu.PaperMenuExternalItemResolver
-import ru.arc.paper.menu.PaperMenuExternalItemResult
+import ru.arc.paper.menu.PaperMenuItemsAdderResolver
 import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.util.TextUtil
@@ -39,15 +38,10 @@ object BuildBookEditorGui {
     private val config: Config get() = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
     private var runtime: PaperMenuRuntime? = null
     private val itemFactory = PaperMenuItemFactory(
-        externalItems = PaperMenuExternalItemResolver { id ->
-            if (id.namespace != "itemsadder" || !Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
-                PaperMenuExternalItemResult.Missing
-            } else {
-                val customId = id.key.replaceFirst('/', ':')
-                CustomStack.getInstance(customId)?.itemStack?.let(PaperMenuExternalItemResult::Resolved)
-                    ?: PaperMenuExternalItemResult.Missing
-            }
-        },
+        externalItems = PaperMenuItemsAdderResolver(
+            isAvailable = { Bukkit.getPluginManager().isPluginEnabled("ItemsAdder") },
+            lookup = { id -> CustomStack.getInstance(id)?.itemStack },
+        ),
     )
 
     fun open(player: Player, onCopy: ((Player) -> Unit)? = null) {

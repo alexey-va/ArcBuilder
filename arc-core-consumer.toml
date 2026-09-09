@@ -1,6 +1,6 @@
 schema = 1
 platform = "paper"
-core_version = "2.5.0"
+core_version = "2.5.1"
 
 capabilities = [
   "atomic-files",

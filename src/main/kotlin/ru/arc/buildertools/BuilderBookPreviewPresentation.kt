@@ -41,8 +41,7 @@ import ru.arc.paper.menu.PaperMenuConfigurationParser
 import ru.arc.paper.menu.PaperMenuClickContext
 import ru.arc.paper.menu.PaperMenuContent
 import ru.arc.paper.menu.PaperMenuEntry
-import ru.arc.paper.menu.PaperMenuExternalItemResolver
-import ru.arc.paper.menu.PaperMenuExternalItemResult
+import ru.arc.paper.menu.PaperMenuItemsAdderResolver
 import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.text.LocalizedMiniMessage
@@ -108,15 +107,10 @@ internal class BuilderBookPreviewPresentation(
     private val menuConfiguration = loadMenuConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
     private val menuItems = PaperMenuItemFactory(
-        externalItems = PaperMenuExternalItemResolver { id ->
-            if (id.namespace != "itemsadder" || !Bukkit.getPluginManager().isPluginEnabled("ItemsAdder")) {
-                PaperMenuExternalItemResult.Missing
-            } else {
-                CustomStack.getInstance(id.key.replaceFirst('/', ':'))?.itemStack
-                    ?.let(PaperMenuExternalItemResult::Resolved)
-                    ?: PaperMenuExternalItemResult.Missing
-            }
-        },
+        externalItems = PaperMenuItemsAdderResolver(
+            isAvailable = { Bukkit.getPluginManager().isPluginEnabled("ItemsAdder") },
+            lookup = { id -> CustomStack.getInstance(id)?.itemStack },
+        ),
     )
     private var closed = false
 
