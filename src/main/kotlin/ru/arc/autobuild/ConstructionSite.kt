@@ -105,7 +105,12 @@ class ConstructionSite internal constructor(
         val bounds = corners
         for (y in bounds.corner1.y()..bounds.corner2.y()) {
             for (x in bounds.corner1.x()..bounds.corner2.x()) {
-                for (z in bounds.corner1.z()..bounds.corner2.z()) yield(BlockVector3.at(x, y, z))
+                for (z in bounds.corner1.z()..bounds.corner2.z()) {
+                    val relative = BlockVector3.at(x, y, z)
+                    // Schematic barriers are keep-world markers, including after rotation/mirroring.
+                    // Exclude them before either preview or construction touches the target block.
+                    if (sourceBlock(relative).blockType.id != "minecraft:barrier") yield(relative)
+                }
             }
         }
     }

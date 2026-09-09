@@ -47,7 +47,7 @@ class BuildBookTest : TestBase() {
         assertThrows(IllegalArgumentException::class.java) { data.copy(buildingId = "other.schem").validated() }
         assertThrows(IllegalArgumentException::class.java) { data.copy(selectableBuildingIds = listOf("viking.schem", "viking.schem")).validated() }
         assertThrows(IllegalArgumentException::class.java) { data.copy(playerCreated = true, creatorId = UUID.randomUUID()).validated() }
-        assertThrows(IllegalArgumentException::class.java) { data.copy(selectableBuildingIds = (0..27).map { "$it.schem" }).validated() }
+        assertThrows(IllegalArgumentException::class.java) { data.copy(selectableBuildingIds = (0..256).map { "$it.schem" }).validated() }
     }
 
     @Test

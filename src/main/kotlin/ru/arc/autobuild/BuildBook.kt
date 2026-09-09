@@ -145,7 +145,7 @@ data class BuildBookData(
         require(BUILDING_ID.matches(buildingId)) { "Build-book building id is invalid" }
         require(title.isNotBlank() && title.length <= 48 && title.none(Char::isISOControl)) { "Build-book title is invalid" }
         require(selectableBuildingIds.isEmpty() || (
-            !playerCreated && selectableBuildingIds.size in 2..27 &&
+            !playerCreated && selectableBuildingIds.size in 2..256 &&
                 selectableBuildingIds.distinct().size == selectableBuildingIds.size &&
                 buildingId in selectableBuildingIds && selectableBuildingIds.all(BUILDING_ID::matches)
             )) { "Build-book selector options are invalid" }

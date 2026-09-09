@@ -38,8 +38,9 @@ books:
     player-enabled: true
   - building-id: viking.schem
     title: Стартовый дом
-    sha256: ae1184f810e3d8979a58a2d332aeb2906c947b68fac1e6a9c7938dcd46e841fa
+    sha256: 6bdde21fd5353aca50593fd1edf3c08ca65b5ca4b2c70d6087f18b14ce5a86fb
     player-enabled: true
+    starter-enabled: true
     materials-included: true
     container-loot-table: minecraft:chests/spawn_bonus_chest
   - building-id: viking2.schem
@@ -48,16 +49,19 @@ books:
     player-enabled: true
   - building-id: atelier-forest-cabin.schem
     title: Лесной сруб
-    sha256: ce10995084e8bef7335bf6e7cbed39e78dcccdcb61dd27967ebbf1623ba8b1c9
+    sha256: 010e09edcd3ae575b35a428405ed3f94a1117fdaa2f3e5f47f0689086bcb5732
     player-enabled: true
+    starter-enabled: true
     materials-included: false
   - building-id: atelier-stone-cottage.schem
     title: Каменный домик
-    sha256: 51f41c4c066bb57d0cd82a8ccdec062ce9e15e6561e1251dfd7f9e2fbd889770
+    sha256: 40fdd96f2247e96867faab9c01f0aebc2a7a886bf0efea9d9b9b97bc1e62e271
     player-enabled: true
+    starter-enabled: true
     materials-included: false
   - building-id: atelier-birch-cottage.schem
     title: Берёзовый коттедж
-    sha256: 79d426a8e05910216d76d133e90bb1174e25a18fc0fb479668d8937f12058b95
+    sha256: 0b9303b7f791a20816b2fc5091013ba351449c298b06276cdddd2089cab0daad
     player-enabled: true
+    starter-enabled: true
     materials-included: false

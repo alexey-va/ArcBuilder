@@ -110,6 +110,7 @@ internal class BuilderToolsRuntime(
     private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
     systemBuildBookResolver: ((BuildBookData) -> SystemBuildBookDefinition?)? = null,
     systemBuildBookIds: List<String>? = null,
+    systemBuildBookStarterIds: List<String>? = null,
     private val lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
     private val lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
     private val sendPlayerMessage: (Player, Component) -> Unit = { player, message -> player.sendMessage(message) },
@@ -117,6 +118,9 @@ internal class BuilderToolsRuntime(
     private val systemBuildBookCatalog = if (systemBuildBookResolver == null) loadSystemBuildBookCatalog(plugin, config) else null
     private val systemBuildBookResolver = systemBuildBookResolver ?: requireNotNull(systemBuildBookCatalog)::resolve
     private val systemBuildBookIds = systemBuildBookIds ?: systemBuildBookCatalog?.enabledBuildingIds.orEmpty()
+    private val systemBuildBookStarterIds = systemBuildBookStarterIds
+        ?: systemBuildBookCatalog?.starterBuildingIds
+        ?: this.systemBuildBookIds
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
     private val safety = BuilderBlockSafety(plugin, config.replaceableMaterials)
@@ -770,9 +774,14 @@ internal class BuilderToolsRuntime(
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         if (args.firstOrNull()?.equals("systembook", ignoreCase = true) == true) {
-            return BuilderSystemBookIssuer.issue(sender, args.drop(1), systemBuildBookResolver, config.maxScanVolume) {
-                sender.sendMessage(messages.render("errors.no-permission"))
-            }
+            return BuilderSystemBookIssuer.issue(
+                sender,
+                args.drop(1),
+                systemBuildBookResolver,
+                config.maxScanVolume,
+                { systemBuildBookStarterIds },
+                { sender.sendMessage(messages.render("errors.no-permission")) },
+            )
         }
         val player = sender as? Player ?: run {
             sender.sendMessage(messages.render("errors.player-only"))

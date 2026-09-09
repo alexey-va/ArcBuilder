@@ -60,6 +60,13 @@ player to supply it in their inventory or a permitted nearby container.
 
 ## Schematic storage and origin fixes
 
+`minecraft:barrier` in a schematic marks a position whose existing world block
+must be preserved. Book preview and construction omit these cells before reading
+or planning target blocks, including rotated and mirrored books. Ordinary air
+still clears a position. Mark exterior terrain/air with barriers while retaining
+the house, foundations and the air needed to clear rooms and entrances.
+Existing saved construction projects retain their original immutable steps.
+
 The live canonical files are under the shared Minecraft root
 `ARC/schematics`. ArcBuilder reaches the same directory through
 `plugins/ArcBuilder/modules/builder-tools-runtime.yml` with the explicit
@@ -112,6 +119,14 @@ existing unsafe-block exclusions. Issuing a book does not paste blocks.
 Administrators can use `/builder systembook <catalogue-file.schem>` to issue
 to themselves, or `/builder systembook <online-player> <catalogue-file.schem>`
 to select a recipient. Command blocks cannot issue books.
+
+Use `random @starter` to issue a random starter book, or provide an explicit
+pool: `builder systembook <online-player> random house-a.schem,house-b.schem`.
+The `@starter` pool consists of validated catalogue entries marked
+`starter-enabled: true`; the issued book keeps every selected ID as a selector
+option. Bare `random` is refused so the issuer always controls the pool. Add a
+new starter by setting the flag in the reviewed catalogue. Regular catalogue
+IDs remain available for direct issuance and completion.
 
 ### Reviewed system furniture
 

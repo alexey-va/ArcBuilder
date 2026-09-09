@@ -11,6 +11,7 @@ internal data class SystemBuildBookDefinition(
     val schematicSha256: String,
     val playerEnabled: Boolean,
     val materialsIncluded: Boolean,
+    val starterEnabled: Boolean = false,
     val containerLootTableKey: String? = null,
 ) {
     fun validated(): SystemBuildBookDefinition = apply {
@@ -42,6 +43,10 @@ internal class SystemBuildBookCatalog private constructor(
     private val definitions = definitions.associateBy(SystemBuildBookDefinition::buildingId)
 
     val enabledBuildingIds: List<String> = definitions.filter { it.playerEnabled }.map { it.buildingId }.sorted()
+    val starterBuildingIds: List<String> = definitions
+        .filter { it.playerEnabled && it.starterEnabled }
+        .map { it.buildingId }
+        .sorted()
 
     init {
         require(definitions.size in 1..256) { "System build-book catalog size is invalid" }
@@ -83,6 +88,10 @@ internal class SystemBuildBookCatalog private constructor(
                     materialsIncluded = raw["materials-included"]?.let { value ->
                         value as? Boolean
                             ?: throw IllegalArgumentException("System build-book materials-included flag is invalid")
+                    } ?: false,
+                    starterEnabled = raw["starter-enabled"]?.let { value ->
+                        value as? Boolean
+                            ?: throw IllegalArgumentException("System build-book starter-enabled flag is invalid")
                     } ?: false,
                     containerLootTableKey = raw["container-loot-table"]?.let { value ->
                         value as? String

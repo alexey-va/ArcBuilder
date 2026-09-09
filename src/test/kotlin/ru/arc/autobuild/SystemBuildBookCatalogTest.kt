@@ -27,6 +27,7 @@ class SystemBuildBookCatalogTest : FunSpec({
                     title: Стартовый дом
                     sha256: ${sha256(bytes)}
                     player-enabled: true
+                    starter-enabled: true
                     materials-included: true
                     container-loot-table: minecraft:chests/spawn_bonus_chest
                 """,
@@ -36,6 +37,7 @@ class SystemBuildBookCatalogTest : FunSpec({
         val data = BuildBookData(buildingId = "viking.schem", title = "viking.schem")
 
         catalog.enabledBuildingIds shouldBe listOf("viking.schem")
+        catalog.starterBuildingIds shouldBe listOf("viking.schem")
         val definition = checkNotNull(catalog.resolve(data))
         definition.title shouldBe "Стартовый дом"
         definition.materialsIncluded shouldBe true
@@ -149,6 +151,7 @@ class SystemBuildBookCatalogTest : FunSpec({
             root,
         )
         disabled.enabledBuildingIds shouldBe emptyList()
+        disabled.starterBuildingIds shouldBe emptyList()
         disabled.resolve(BuildBookData(buildingId = "viking.schem", title = "Viking")) shouldBe null
     }
 })
