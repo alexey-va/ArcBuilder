@@ -200,6 +200,23 @@ class BuilderConstructionProjectDomainTest : FunSpec({
         }) shouldBe null
     }
 
+    test("cancellation waits for exchanges and cancels active or paused projects without refund") {
+        val active = prepared().activated(createdAt + 1)
+        val input = active.inputPrepared(mutation(stone, insert = false), createdAt + 2)
+        val requests = BuilderConstructionPauseRequests()
+        requests.requestCancel(input, playerId) shouldBe true
+        requests.pauseTarget(input, createdAt + 3) shouldBe null
+        val cancelled = requests.pauseTarget(active, createdAt + 4)!!
+        cancelled.state shouldBe BuilderConstructionProjectState.CANCELLED
+        cancelled.cursor shouldBe active.cursor
+        cancelled.bookCost shouldBe active.bookCost
+        val paused = active.paused(createdAt + 5)
+        requests.pauseTarget(paused, createdAt + 6)!!.state shouldBe BuilderConstructionProjectState.CANCELLED
+        requests.requestCancel(active.recoveryRequired(createdAt + 7), playerId) shouldBe false
+        requests.complete(active.projectId)
+        requests.pauseTarget(active, createdAt + 8) shouldBe null
+    }
+
     test("pause request made during a durable step waits for the next safe boundary") {
         val active = prepared().activated(createdAt + 1)
         val inputPrepared = active.inputPrepared(mutation(stone, insert = false), createdAt + 2)

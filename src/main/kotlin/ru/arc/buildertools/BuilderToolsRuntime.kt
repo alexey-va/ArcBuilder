@@ -479,6 +479,8 @@ internal class BuilderToolsRuntime(
                 projectLookup = constructionProjects::get,
                 canControl = ::canControlConstruction,
                 requestPaused = ::requestConstructionPaused,
+                requestCancelled = ::requestConstructionCancelled,
+                canCancel = constructionPauseRequests::canRequestCancel,
                 canBuildInstantly = { it.hasPermission(CONSTRUCTION_ADMIN_PERMISSION) },
                 requestInstant = ::requestInstantConstruction,
             ).also { initializedConstructionMenus = it }
@@ -1761,7 +1763,8 @@ internal class BuilderToolsRuntime(
         val now = System.currentTimeMillis()
         plannedConstructionProjects.entries.removeIf { (_, project) -> project.plan.expiresAtMillis <= now }
         val candidates = constructionProjects.values.filter { record ->
-            record.state == BuilderConstructionProjectState.PREPARED ||
+            (record.state == BuilderConstructionProjectState.PAUSED && constructionPauseRequests.cancellationPending(record.projectId)) ||
+                record.state == BuilderConstructionProjectState.PREPARED ||
                 record.state == BuilderConstructionProjectState.ACTIVE ||
                 record.state == BuilderConstructionProjectState.WAITING_MATERIALS ||
                 record.state == BuilderConstructionProjectState.INPUT_PREPARED ||
@@ -1813,7 +1816,7 @@ internal class BuilderToolsRuntime(
                 callback = { durable, failure ->
                     constructionWrites.remove(expected.projectId)
                     if (failure != null || durable == null) {
-                        if (target.state == BuilderConstructionProjectState.PAUSED) {
+                        if (target.state == BuilderConstructionProjectState.PAUSED || target.state == BuilderConstructionProjectState.CANCELLED) {
                             constructionPauseRequests.complete(expected.projectId)
                         }
                         if (failure is BuilderConstructionProjectTransitionRejectedException &&
@@ -1945,6 +1948,7 @@ internal class BuilderToolsRuntime(
                     "total" to messages.literal(current.steps.size),
                 ),
             )
+            BuilderConstructionProjectState.CANCELLED -> send(player, "construction.cancelled")
             BuilderConstructionProjectState.RECOVERY_REQUIRED -> send(player, "construction.recovery-required")
             else -> Unit
         }
@@ -2417,6 +2421,14 @@ internal class BuilderToolsRuntime(
         player: Player,
         construction: BuilderConstructionProjectRecord,
     ): Boolean = player.uniqueId == construction.playerId || player.hasPermission(CONSTRUCTION_ADMIN_PERMISSION)
+
+    private fun requestConstructionCancelled(player: Player, projectId: UUID): Boolean {
+        val project = constructionProjects[projectId] ?: return false
+        if (!canControlConstruction(player, project) || recoveryBlocked || projectId in constructionInstantRequests) return false
+        if (!constructionPauseRequests.requestCancel(project, player.uniqueId)) return false
+        send(player, "construction.cancel-requested")
+        return true
+    }
 
     private fun requestConstructionPaused(player: Player, projectId: UUID, pause: Boolean): Boolean {
         val expected = constructionProjects[projectId]?.takeUnless(BuilderConstructionProjectRecord::terminal)

@@ -527,3 +527,9 @@ Preview and construction plaques have two fixed opposing text faces, each at
 2x scale with a small separation to prevent coincident surfaces. Their hitbox
 and culling bounds scale with the text; both faces share updates and cleanup.
 Plaque titles use the localized ArcBuilder prefix on both sides.
+
+Construction-site cancellation uses a two-click owner/admin confirmation. The
+existing pause request queue drains any in-flight material/output exchange before
+writing CANCELLED at ACTIVE, WAITING_MATERIALS or PAUSED. Terminal cleanup removes
+the panel and region lock. Placed blocks and spent resources are not refunded;
+recovery-held and instant-build projects cannot be cancelled through this menu.

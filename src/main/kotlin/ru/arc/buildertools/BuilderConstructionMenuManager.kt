@@ -74,6 +74,8 @@ internal class BuilderConstructionMenuManager(
     private val projectLookup: (UUID) -> BuilderConstructionProjectRecord?,
     private val canControl: (Player, BuilderConstructionProjectRecord) -> Boolean,
     private val requestPaused: (Player, UUID, Boolean) -> Boolean,
+    private val requestCancelled: (Player, UUID) -> Boolean = { _, _ -> false },
+    private val canCancel: (BuilderConstructionProjectRecord) -> Boolean = { false },
     private val canBuildInstantly: (Player) -> Boolean,
     private val requestInstant: (Player, UUID) -> Boolean,
 ) : Listener, AutoCloseable {
@@ -86,6 +88,7 @@ internal class BuilderConstructionMenuManager(
         ),
     )
     private val viewers = mutableMapOf<UUID, UUID>()
+    private val cancelConfirmations = mutableMapOf<UUID, UUID>()
     private var closed = false
 
     init {
@@ -98,6 +101,7 @@ internal class BuilderConstructionMenuManager(
     fun open(player: Player, project: BuilderConstructionProjectRecord) {
         if (closed || project.terminal) return
         val current = projectLookup(project.projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal) ?: return
+        cancelConfirmations.remove(player.uniqueId)
         menus.open(player, MENU_ID) { content(player, current.projectId) }
         viewers[player.uniqueId] = current.projectId
     }
@@ -109,6 +113,7 @@ internal class BuilderConstructionMenuManager(
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         viewers.remove(event.player.uniqueId)
+        cancelConfirmations.remove(event.player.uniqueId)
     }
 
     private fun content(player: Player, projectId: UUID): PaperMenuContent {
@@ -160,6 +165,26 @@ internal class BuilderConstructionMenuManager(
                     ),
                 )
                 put(CONTROL, controlEntry(player, project, values))
+                if (canControl(player, project) && canCancel(project)) {
+                    val path = if (cancelConfirmations[player.uniqueId] == projectId) "cancel-confirm" else "cancel"
+                    put(CANCEL, entry(CANCEL, "cancel",
+                        messages.render("construction.site.menu.$path.name", locale(player), values),
+                        messages.renderLines("construction.site.menu.$path.lore", locale(player), values),
+                    ) { click ->
+                        val current = projectLookup(projectId)
+                        if (current != null && canControl(click.player, current) && canCancel(current)) {
+                            if (cancelConfirmations[click.player.uniqueId] == projectId) {
+                                if (requestCancelled(click.player, projectId)) {
+                                    cancelConfirmations.remove(click.player.uniqueId)
+                                    click.player.closeInventory()
+                                }
+                            } else {
+                                cancelConfirmations[click.player.uniqueId] = projectId
+                                refreshViewer(click.player.uniqueId)
+                            }
+                        }
+                    })
+                }
                 if (canBuildInstantly(player)) put(INSTANT, instantEntry(player, project, values))
             },
         )
@@ -356,6 +381,7 @@ internal class BuilderConstructionMenuManager(
         HandlerList.unregisterAll(this)
         menus.close()
         viewers.clear()
+        cancelConfirmations.clear()
     }
 
     private companion object {
@@ -365,6 +391,7 @@ internal class BuilderConstructionMenuManager(
         val RESOURCES = MenuElementId.of("resources")
         val CONTROL = MenuElementId.of("control")
         val INSTANT = MenuElementId.of("instant")
-        val CONTRACT = MenuContract(requiredElements = setOf(OVERVIEW, PROGRESS, RESOURCES, CONTROL, INSTANT))
+        val CANCEL = MenuElementId.of("cancel")
+        val CONTRACT = MenuContract(requiredElements = setOf(OVERVIEW, PROGRESS, RESOURCES, CONTROL, INSTANT, CANCEL))
     }
 }

@@ -84,6 +84,7 @@ construction:
             resources: { slot: 14, kind: decoration, template: resources }
             control: { slot: 16, template: pause }
             instant: { slot: 22, template: instant }
+            cancel: { slot: 24, template: cancel }
       templates:
         background:
           external-item: itemsadder:arc/background
@@ -96,6 +97,7 @@ construction:
         resume: { material: LIME_DYE }
         unavailable: { material: GRAY_DYE }
         instant: { material: NETHER_STAR }
+        cancel: { material: RED_CONCRETE }
   projects-menu:
     layouts:
       construction-projects:
@@ -1050,6 +1052,8 @@ locales:
         <#8c8c8c>   <#e6fff3>Готово: <#d48763><count>/<total> <#e6fff3>блоков.
       completed: "<prefix><#2bba43>Строительный проект завершён: <#d48763><count> <#e6fff3>блоков."
       instant-started: "<prefix><#2bba43>Завершаю стройку без расхода материалов."
+      cancel-requested: "<prefix><#b8b8b8>Отмена запрошена. Дождитесь завершения текущего шага и выдачи снятых блоков."
+      cancelled: "<prefix><#b8b8b8>Стройка отменена. Уже поставленные блоки остались на месте."
       recovery-required: |-
 
         <prefix><#c42323>Стройка остановлена из-за изменения мира или прав.
@@ -1168,6 +1172,24 @@ locales:
               lore:
                 - "<#e6fff3>Управлять может владелец проекта или администратор."
                 - "<#969696>Прогресс и материалы доступны для просмотра."
+          cancel:
+            name: "<!italic><#c42323>Отменить стройку"
+            lore:
+              - "<!italic>"
+              - "<!italic><#b8b8b8>Остановить этот проект навсегда."
+              - "<!italic><#b8b8b8>Поставленные блоки останутся."
+              - "<!italic><#b8b8b8>Книга и потраченные материалы не возвращаются."
+              - "<!italic>"
+              - "<!italic><#c42323>[▶] ЛКМ <#b8b8b8>— показать подтверждение"
+          cancel-confirm:
+            name: "<!italic><#c42323>Подтвердить отмену"
+            lore:
+              - "<!italic>"
+              - "<!italic><#b8b8b8>Остановить этот проект навсегда."
+              - "<!italic><#b8b8b8>Поставленные блоки останутся."
+              - "<!italic><#b8b8b8>Книга и потраченные материалы не возвращаются."
+              - "<!italic>"
+              - "<!italic><#c42323>[▶] ЛКМ <#b8b8b8>— отменить стройку"
           instant:
             name: "<#d48763><bold>Построить мгновенно"
             lore:
@@ -1937,6 +1959,8 @@ locales:
         <dark_gray>   <gray>Progress: <white><count>/<total></white> blocks.
       completed: "<prefix><green>Construction completed: <white><count></white> blocks."
       instant-started: "<prefix><green>Completing construction without consuming materials."
+      cancel-requested: "<prefix><#b8b8b8>Cancellation requested. Wait for the current step and recovered block delivery."
+      cancelled: "<prefix><#b8b8b8>Construction cancelled. Placed blocks remain in the world."
       recovery-required: |-
 
         <prefix><red>Construction stopped because the world or permissions changed.
@@ -2055,6 +2079,24 @@ locales:
               lore:
                 - "<#e6fff3>Only the project owner or an administrator can control it."
                 - "<gray>Progress and materials remain visible."
+          cancel:
+            name: "<!italic><#c42323>Cancel construction"
+            lore:
+              - "<!italic>"
+              - "<!italic><#b8b8b8>Stop this project permanently."
+              - "<!italic><#b8b8b8>Placed blocks remain in the world."
+              - "<!italic><#b8b8b8>The book and spent materials are not refunded."
+              - "<!italic>"
+              - "<!italic><#c42323>[▶] Click <#b8b8b8>— review cancellation"
+          cancel-confirm:
+            name: "<!italic><#c42323>Confirm cancellation"
+            lore:
+              - "<!italic>"
+              - "<!italic><#b8b8b8>Stop this project permanently."
+              - "<!italic><#b8b8b8>Placed blocks remain in the world."
+              - "<!italic><#b8b8b8>The book and spent materials are not refunded."
+              - "<!italic>"
+              - "<!italic><#c42323>[▶] Click <#b8b8b8>— cancel construction"
           instant:
             name: "<#d48763><bold>Build instantly"
             lore:
