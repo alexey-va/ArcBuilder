@@ -188,6 +188,22 @@ internal class BuilderBookPreviewPresentation(
         }
     }
 
+    /** Keeps the world entry point after placement is converted into a prepared plan. */
+    fun retainConfirmation(site: ConstructionSite) {
+        if (closed) return
+        snapshots[site.player.uniqueId] = site.snapshot()
+        placementSites[site.player.uniqueId] = site
+        replacePanelSafely(site)
+    }
+
+    fun clearConfirmation(playerId: UUID) {
+        if (snapshots.remove(playerId) == null) return
+        confirmationInventories.remove(playerId)
+        placementSites.remove(playerId)
+        removePanel(playerId)
+        Bukkit.getPlayer(playerId)?.let(menus::session)?.close()
+    }
+
     fun clearPlayer(playerId: UUID) {
         close(playerId)
         snapshots.remove(playerId)

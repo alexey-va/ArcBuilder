@@ -573,7 +573,10 @@ internal class BuilderToolsRuntime(
                     )
                 },
                 renderPlan = displayRenderer::plan,
-                clearPlan = displayRenderer::clearPlan,
+                clearPlan = { playerId ->
+                    displayRenderer.clearPlan(playerId)
+                    bookPreviewPresentation.clearConfirmation(playerId)
+                },
                 onExpired = { playerId ->
                     shop.clear(playerId)
                     crown.clearAnchor(playerId)
@@ -1348,6 +1351,7 @@ internal class BuilderToolsRuntime(
         plannedConstructionProjects[planned.plan.id] = planned.project
         try {
             preparePlan(player, planned.plan, announce)
+            bookPreviewPresentation.retainConfirmation(site)
         } catch (failure: Throwable) {
             plannedConstructionProjects.remove(planned.plan.id)
             throw failure

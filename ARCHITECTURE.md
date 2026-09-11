@@ -533,3 +533,8 @@ existing pause request queue drains any in-flight material/output exchange befor
 writing CANCELLED at ACTIVE, WAITING_MATERIALS or PAUSED. Terminal cleanup removes
 the panel and region lock. Placed blocks and spent resources are not refunded;
 recovery-held and instant-build projects cannot be cancelled through this menu.
+
+Preparing a construction plan retains its clickable world plaque and placement
+snapshot, including the right-click-air route. The plaque opens confirmation;
+plan removal (start, cancellation, replacement, expiry) clears this retained
+entry point without restoring a discarded plan.

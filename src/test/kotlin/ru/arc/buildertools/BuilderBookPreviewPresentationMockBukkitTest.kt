@@ -31,6 +31,53 @@ import java.util.Locale
 import java.util.UUID
 
 class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
+    test("fixed plan retains a clickable world plaque until confirmation cleanup") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val world = paper.addSimpleWorld("fixed-plan-plaque")
+                val player = paper.addPlayer("FixedPlanOwner").also { it.setLocale(Locale.forLanguageTag("ru-RU")) }
+                player.teleport(world.getBlockAt(10, 64, 20).location)
+                val site = previewSite(player, player.location, BuildBookData("house.schem", "Дом"))
+                val panelWorld = mockk<org.bukkit.World>(relaxed = true)
+                every { panelWorld.uid } returns world.uid
+                val displays = mutableListOf<org.bukkit.entity.TextDisplay>()
+                val panel = mockk<org.bukkit.entity.Interaction>(relaxed = true)
+                every { panel.uniqueId } returns UUID.randomUUID()
+                every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.TextDisplay::class.java, any<java.util.function.Consumer<org.bukkit.entity.TextDisplay>>()) } answers {
+                    mockk<org.bukkit.entity.TextDisplay>(relaxed = true).also { displays += it }
+                }
+                every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<java.util.function.Consumer<org.bukkit.entity.Interaction>>()) } returns panel
+                every { site.world } returns panelWorld
+                every { site.adjustedCenter } returns player.location
+                val host = PreviewHost(site, BuilderBookPreviewConfirmation(
+                    kind = BuilderBookPreviewConfirmationKind.CONSTRUCTION,
+                    blockCount = 1, title = "Дом", cooldownRemaining = Duration.ZERO,
+                    requiredMaterials = emptyList(),
+                ))
+                previewPresentation(plugin, config, host).use { presentation ->
+                    presentation.close(player.uniqueId)
+                    presentation.retainConfirmation(site)
+                    displays.size shouldBe 2
+                    val event = org.bukkit.event.player.PlayerInteractEntityEvent(
+                        player, panel, org.bukkit.inventory.EquipmentSlot.HAND,
+                    )
+                    paper.callEvent(event)
+                    event.isCancelled.shouldBeTrue()
+                    player.openInventory.topInventory.getItem(25)?.type shouldBe Material.LIME_CONCRETE
+                    plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Начать строительство"
+                    presentation.clearConfirmation(player.uniqueId)
+                    io.mockk.verify(exactly = 1) { panel.remove() }
+                    displays.forEach { display -> io.mockk.verify(exactly = 1) { display.remove() } }
+                    host.restoreCalls shouldBe 0
+                }
+            } finally { ConfigManager.clear() }
+        }
+    }
+
     test("permitted admin opens a read-only foreign preview status") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
