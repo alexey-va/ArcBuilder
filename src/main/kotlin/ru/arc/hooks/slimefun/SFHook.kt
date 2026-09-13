@@ -1,9 +1,9 @@
 package ru.arc.hooks.slimefun
 
-import io.github.thebusybiscuit.slimefun4.implementation.Slimefun
+import com.xzavier0722.mc.plugin.slimefun4.storage.util.StorageCacheUtils
 import org.bukkit.block.Block
 
 class SFHook {
     fun isSlimefunBlock(block: Block): Boolean =
-        Slimefun.getBlockDataService().getBlockData(block).isPresent
+        StorageCacheUtils.hasSlimefunBlock(block.location)
 }

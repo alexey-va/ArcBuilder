@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.36"
+version = "1.0.37"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -65,6 +65,7 @@ dependencies {
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.5.1")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.6")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
+    testImplementation("com.github.Slimefun:Slimefun4:4.10")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
         exclude(group = "org.bukkit", module = "bukkit")
     }
