@@ -7,6 +7,7 @@ import dev.lone.itemsadder.api.CustomBlock
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.block.Block
 import org.bukkit.block.TileState
 import org.bukkit.block.data.BlockData
@@ -28,6 +29,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.PlayerInventory
 import org.bukkit.inventory.meta.Damageable
 import org.bukkit.plugin.Plugin
+import org.bukkit.persistence.PersistentDataType
 import ru.arc.ARC
 import ru.arc.hooks.HookRegistry
 import ru.arc.paper.playerstate.NativePaperItemStackBinaryCodec
@@ -525,6 +527,9 @@ internal class BuilderBlockSafety(
 
     private fun isCustom(block: Block): Boolean {
         if (CustomBlockData.hasCustomBlockData(block, plugin)) return true
+        Bukkit.getPluginManager().getPlugin("ARC")?.let { arc ->
+            if (CustomBlockData(block, arc).has(ARC_TRAVEL_ANCHOR_KEY, PersistentDataType.BYTE)) return true
+        }
         HookRegistry.sfHook?.let { hook ->
             if (hook.isSlimefunBlock(block)) return true
         }
@@ -535,6 +540,7 @@ internal class BuilderBlockSafety(
     }
 
     companion object {
+        private val ARC_TRAVEL_ANCHOR_KEY = NamespacedKey("arc", "travel_anchor")
         private val UNSAFE_MATERIALS = setOf(
             Material.BEDROCK,
             Material.BARRIER,
