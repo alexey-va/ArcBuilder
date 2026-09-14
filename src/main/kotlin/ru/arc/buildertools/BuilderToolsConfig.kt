@@ -30,7 +30,7 @@ class BuilderToolsConfig(
             ?: config.string("storage.schematics-root", "schematics")
     val maxChanges: Int get() = config.integer("limits.max-changes", 4_096)
     val maxClipboardBlocks: Int get() = config.integer("limits.max-clipboard-blocks", 4_096)
-    val maxScanVolume: Long get() = config.long("limits.max-scan-volume", 8_192L)
+    val maxScanVolume: Long get() = config.long("limits.max-scan-volume", 1_000_000L)
     val absoluteMaxAxis: Int get() = config.integer("limits.absolute-max-axis", 48)
     val blocksPerTick: Int get() = config.integer("limits.blocks-per-tick", 16)
     val baseHourlyChanges: Int get() = config.integer("limits.base-hourly-changes", 20_000)

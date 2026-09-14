@@ -10,7 +10,7 @@ storage:
 limits:
   max-changes: 4096
   max-clipboard-blocks: 4096
-  max-scan-volume: 8192
+  max-scan-volume: 1000000
   absolute-max-axis: 100
   blocks-per-tick: 16
   base-hourly-changes: 20000
