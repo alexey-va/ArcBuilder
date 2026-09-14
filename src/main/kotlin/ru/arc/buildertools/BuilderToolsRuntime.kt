@@ -156,7 +156,7 @@ internal class BuilderToolsRuntime(
     }
     private val coreProtect = BuilderCoreProtectBridge.resolve()
     private val journal = BuilderJournalStore(plugin.dataPath, config.maxChanges)
-    private val constructionStore = BuilderConstructionProjectStore(plugin.dataPath, config.maxChanges)
+    private val constructionStore = BuilderConstructionProjectStore(plugin.dataPath, config.maxConstructionChanges)
     private val stateService = PaperPlayerStateService()
     private val stateCodec = PaperPlayerStateCodec()
     private val storageExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -1101,8 +1101,10 @@ internal class BuilderToolsRuntime(
                 lootTableKey = lootTableKey.takeIf { safety.isSafeSystemLootContainer(cell.after) },
                 systemFurniture = systemDefinition != null && safety.isSafeSystemFurniture(cell.after),
             )
-        }.take(config.maxChanges + 1).toList()
-        requireChanges(placements.map(BuilderBookPlannedChange::change))
+        }.take(config.maxConstructionChanges + 1).toList()
+        val changes = placements.map(BuilderBookPlannedChange::change)
+        if (changes.isEmpty()) throw BuilderUserFailure("errors.nothing-to-change")
+        if (changes.size > config.maxConstructionChanges) throw BuilderUserFailure("errors.selection-too-large")
         val construction = BuilderBookConstructionCosts.calculate(
             book,
             data,
@@ -1140,7 +1142,7 @@ internal class BuilderToolsRuntime(
                 cursor = 0,
                 createdAtMillis = plan.createdAtMillis,
                 updatedAtMillis = plan.createdAtMillis,
-            ).validated(config.maxChanges),
+            ).validated(config.maxConstructionChanges),
         )
     }
 
@@ -1242,7 +1244,7 @@ internal class BuilderToolsRuntime(
             skippedUnsafeBlocks = skippedUnsafeBlocks,
             createdAtMillis = now,
             expiresAtMillis = now + config.planTtl.toMillis(),
-        ).validated(config.maxChanges)
+        ).validated(config.maxChangesFor(kind))
     }
 
     private fun preparePlan(player: Player, plan: BuilderPlan, announce: Boolean = true) {
@@ -1304,7 +1306,7 @@ internal class BuilderToolsRuntime(
     private fun preflightPlan(player: Player, plan: BuilderPlan) {
         if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
         val used = hourlyUsage(player.uniqueId, System.currentTimeMillis())
-        if (plan.kind != BuilderPlanKind.UNDO && used + plan.changes.size > hourlyLimit(player)) {
+        if (plan.kind.usesHourlyLimit() && used + plan.changes.size > hourlyLimit(player)) {
             throw BuilderUserFailure("errors.hourly-limit")
         }
         val construction = plannedConstructionProjects[plan.id]
@@ -1620,7 +1622,7 @@ internal class BuilderToolsRuntime(
                 player.location.x,
                 player.location.z,
             ),
-        ).validated(config.maxChanges)
+        ).validated(config.maxConstructionChanges)
         var durablePrepared: BuilderConstructionProjectRecord? = null
         var attemptedTarget: BuilderConstructionProjectRecord? = null
         var constructionLeaseHeld = false
@@ -1632,7 +1634,7 @@ internal class BuilderToolsRuntime(
             val activationPrepared = prepared.activationPrepared(activationMutation).copy(
                 applicationStartedAtMillis = applicationStartedAtMillis,
                 updatedAtMillis = applicationStartedAtMillis,
-            ).validated(config.maxChanges)
+            ).validated(config.maxConstructionChanges)
             check(lockConstruction(activationPrepared)) { "Builder construction area is already locked" }
             val now = System.currentTimeMillis()
             durablePrepared = constructionStore.commit(activationPrepared.copy(updatedAtMillis = now))
@@ -2291,7 +2293,7 @@ internal class BuilderToolsRuntime(
         plan: BuilderPlan,
         systemBookExceptionPositions: Set<BuilderBlockPos> = emptySet(),
     ) {
-        plan.validated(config.maxChanges)
+        plan.validated(config.maxChangesFor(plan.kind))
         if (
             BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, plan) &&
             !BuilderPermissionPolicy.canDeconstructWithoutTool(player::hasPermission)
@@ -2590,11 +2592,7 @@ internal class BuilderToolsRuntime(
         .asSequence()
         .filter { it.playerId == playerId && it.plan.kind != BuilderPlanKind.UNDO }
         .filter { (it.committedAtMillis ?: 0L) >= now - 3_600_000L }
-        .sumOf { it.plan.changes.size } + constructionProjects.values
-        .asSequence()
-        .filter { it.playerId == playerId && it.state == BuilderConstructionProjectState.COMPLETED }
-        .filter { (it.completedAtMillis ?: 0L) >= now - 3_600_000L }
-        .sumOf { it.steps.size }
+        .sumOf { it.plan.changes.size }
 
     private fun lockConstruction(record: BuilderConstructionProjectRecord): Boolean {
         if (record.projectId in constructionLocks) return true

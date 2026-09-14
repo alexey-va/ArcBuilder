@@ -19,6 +19,8 @@ enum class BuilderPlanKind {
     UNDO,
 }
 
+internal fun BuilderPlanKind.usesHourlyLimit(): Boolean = this != BuilderPlanKind.UNDO && this != BuilderPlanKind.BUILD_BOOK
+
 enum class BuilderJournalPhase {
     PREPARED,
     APPLYING,
@@ -209,7 +211,8 @@ data class BuilderPlan(
     }
 
     companion object {
-        const val ABSOLUTE_MAX_CHANGES = 10_000
+        const val ABSOLUTE_MAX_IMMEDIATE_CHANGES = 10_000
+        const val ABSOLUTE_MAX_CHANGES = 100_000
         const val ABSOLUTE_MAX_ITEMS = 2_000_000L
     }
 }

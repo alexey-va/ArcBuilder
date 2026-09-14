@@ -31,6 +31,8 @@ class BuilderToolsConfig(
     val maxChanges: Int get() = config.integer("limits.max-changes", 4_096)
     val maxClipboardBlocks: Int get() = config.integer("limits.max-clipboard-blocks", 4_096)
     val maxScanVolume: Long get() = config.long("limits.max-scan-volume", 1_000_000L)
+    val maxConstructionChanges: Int
+        get() = minOf(maxScanVolume, BuilderPlan.ABSOLUTE_MAX_CHANGES.toLong()).toInt()
     val absoluteMaxAxis: Int get() = config.integer("limits.absolute-max-axis", 48)
     val blocksPerTick: Int get() = config.integer("limits.blocks-per-tick", 16)
     val baseHourlyChanges: Int get() = config.integer("limits.base-hourly-changes", 20_000)
@@ -161,6 +163,9 @@ class BuilderToolsConfig(
     fun allowsWorld(worldName: String): Boolean =
         "*" in allowedWorlds || worldName.lowercase(Locale.ROOT) in allowedWorlds
 
+    fun maxChangesFor(kind: BuilderPlanKind): Int =
+        if (kind == BuilderPlanKind.BUILD_BOOK) maxConstructionChanges else maxChanges
+
     private fun configuredMenuMaterial(path: String, fallback: String): Material =
         Material.matchMaterial(config.string("construction.site.menu.materials.$path", fallback)) ?: Material.AIR
 
@@ -176,7 +181,9 @@ class BuilderToolsConfig(
         require(schematicsRoot.isNotBlank() && schematicsRoot.length <= 512 && schematicsRoot.none(Char::isISOControl)) {
             "Builder-tools schematic root is invalid"
         }
-        require(maxChanges in 1..BuilderPlan.ABSOLUTE_MAX_CHANGES) { "Builder-tools max-changes is invalid" }
+        require(maxChanges in 1..BuilderPlan.ABSOLUTE_MAX_IMMEDIATE_CHANGES) {
+            "Builder-tools immediate max-changes is invalid"
+        }
         require(maxClipboardBlocks in 1..BuilderPlan.ABSOLUTE_MAX_CHANGES) { "Builder-tools clipboard limit is invalid" }
         require(maxClipboardBlocks <= maxChanges) {
             "Builder-tools clipboard limit cannot exceed the per-operation change limit"
