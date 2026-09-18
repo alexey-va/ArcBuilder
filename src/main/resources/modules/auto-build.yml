@@ -36,18 +36,18 @@ build-book:
     - "<#b8b8b8>Выбран дом: <#ffb142><name>"
     - "<#b8b8b8>На выбор: <#ffb142><count> <#b8b8b8>проектов. Одна книга — один дом."
     - ""
-    - "<#92bed8>[▶] Shift + ПКМ <#b8b8b8>— выбрать дом"
+    - "<#2bba43>[▶] Shift + ПКМ <#b8b8b8>— выбрать дом"
   footer:
     - ''
     - '<#d48763><bold>Управление'
     - '<#d48763>ПКМ по блоку <#8c8c8c>— поставить или переставить предпросмотр'
-    - '<#d48763>ПКМ в воздух <#8c8c8c>— подготовить план строительства'
+    - '<#d48763>ПКМ по светящейся голограмме <#8c8c8c>— открыть единое меню'
     - '<#d48763>Shift+ПКМ <#8c8c8c>— открыть настройки'
   received: '<white>🛠</white> <#2bba43>Книга строительства создана: <#e6fff3><building>'
   draft-preview-message: |-
 
     <white>🛠</white> <#ff9f0f>Черновик <#8c8c8c>— оплаты ещё нет
-    <#8c8c8c>   ПКМ по блоку — переставить; ПКМ в воздух — узнать цену
+    <#8c8c8c>   ПКМ по блоку — переставить; ПКМ по голограмме — открыть меню
   player-copy:
     max-offset: 16
     max-per-player: 24
@@ -190,7 +190,7 @@ display:
 start-message: |-
 
   <white>🛠</white> <#e6fff3>Превью открыто.
-  <#8c8c8c>   ПКМ по светящейся табличке — открыть меню.
+  <#8c8c8c>   ПКМ по светящейся голограмме — открыть единое меню.
 confirm-time: 180
 construction:
   # Legacy import value. The durable builder-tools cooldown is authoritative and cannot be weakened by book PDC.

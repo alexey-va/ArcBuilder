@@ -95,9 +95,10 @@ class BuilderConstructionAtomicCompanionMockBukkitTest : FunSpec({
                     mutation: BuilderResourceMutation,
                 ): BuilderResourceMutationResult = error("bed pair has no resource receipt")
 
-                override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) {
+                override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int {
                     footBlock.setBlockData(foot, false)
                     headBlock.setBlockData(head, false)
+                    return 2
                 }
             }
 

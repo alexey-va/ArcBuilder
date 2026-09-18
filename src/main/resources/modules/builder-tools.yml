@@ -29,7 +29,9 @@ construction:
   container-radius: 4
   # An online owner's inventory participates only while they remain near the site.
   online-inventory-range: 48
-  tick-period-ticks: 1
+  # Maximum physical blocks in one durable world-only batch. Resource steps stay separate.
+  blocks-per-cycle: 10
+  tick-period-ticks: 3
   # Hard cap for container coordinates inspected by one project tick.
   max-container-probes-per-tick: 512
   # Per-project cache and per-call resolution caps keep dense storage areas bounded.
@@ -171,16 +173,6 @@ paper-menus:
           mirror: { slot: 37, template: mirror }
           toward: { slot: 38, template: arrow }
           reset: { slot: 39, template: reset }
-      book-preview-confirmation:
-        schema-version: 1
-        rows: 5
-        background: { template: background }
-        elements:
-          overview: { slot: 19, kind: decoration, template: overview }
-          materials: { slot: 21, kind: decoration, template: materials }
-          start: { slot: 25, template: start }
-          back: { slot: 29, template: arrow }
-          cancel: { slot: 34, template: cancel }
       book-preview-inspection:
         schema-version: 1
         rows: 3
@@ -205,10 +197,6 @@ paper-menus:
       cancel: { material: RED_CONCRETE }
       continue: { material: LIME_CONCRETE }
       overview: { material: BOOK }
-      materials: { material: CHEST }
-      price: { material: SUNFLOWER }
-      start: { material: LIME_CONCRETE }
-      blocked: { material: BARRIER }
 
 runtime:
   # Refreshes the in-memory builder contribution; lifecycle health logging remains platform-owned.
@@ -565,8 +553,8 @@ locales:
         - "<#8c8c8c>   4. <#e6fff3>ПКМ по блоку — поставить или перенести <hover:show_text:'Личный контур будущей постройки; мир пока не меняется.'>превью</hover>."
         - "<#8c8c8c>      <#e6fff3>Shift + ПКМ — подробные настройки."
         - "<#8c8c8c>      <#969696>Черновик — только предпросмотр; он не строит."
-        - "<#8c8c8c>   5. <#e6fff3>ПКМ в воздух — бесплатно узнать цену."
-        - "<#8c8c8c>   6. <#e6fff3>Нажмите <#92bed8>[▶ Подтвердить]<#e6fff3> в сообщении с ценой."
+        - "<#8c8c8c>   5. <#e6fff3>ПКМ по светящейся голограмме — открыть единое меню постройки."
+        - "<#8c8c8c>   6. <#e6fff3>Нажмите зелёную кнопку в голограмме — проверить и подтвердить строительство."
         - |-
           <#8c8c8c>   7. <#e6fff3>Автор может выпустить <hover:show_text:'Отдельный оплачиваемый экземпляр той же книги; каждую книгу можно использовать один раз.'>новую одноразовую копию</hover>.
           <#8c8c8c>      <#e6fff3>Используйте настройки или <click:run_command:'/builder book copy'><#d48763>/builder book copy</click>.
@@ -604,7 +592,7 @@ locales:
           <prefix><#2bba43>Этап 4/7: бесплатный черновик готов.
           <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
           <#8c8c8c>   <#e6fff3>ПКМ по блоку — поставить или перенести превью.
-          <#8c8c8c>   <#e6fff3>ПКМ в воздух — узнать цену.
+          <#8c8c8c>   <#e6fff3>ПКМ по светящейся голограмме — открыть меню.
         draft-recovery: |-
 
           <prefix><#ff9f0f>Черновик сохранён и ожидает выдачи.
@@ -614,7 +602,7 @@ locales:
 
           <prefix><#2bba43>Этап 5/7: превью открыто.
           <#8c8c8c>   <#e6fff3>Контур обновляется постоянно.
-          <#8c8c8c>   <#e6fff3>ПКМ по блоку — перенести; ПКМ в воздух — узнать цену.
+          <#8c8c8c>   <#e6fff3>ПКМ по блоку — перенести; ПКМ по голограмме — открыть меню.
         quote: |-
 
           <prefix><#ff9f0f>Этап 6/7: цена рассчитана — <#2bba43><price><#ff9f0f>.
@@ -643,7 +631,7 @@ locales:
         <#8c8c8c>   <#e6fff3>Название: <#d48763><name>
         <#8c8c8c>   <#e6fff3>Блоков: <#d48763><count> <#8c8c8c>— <#969696>денег пока не списано
         <#8c8c8c>   <#e6fff3>ПКМ по блоку — поставить или перенести превью.
-        <#8c8c8c>   <#e6fff3>ПКМ в воздух — узнать цену.
+        <#8c8c8c>   <#e6fff3>ПКМ по светящейся голограмме — открыть меню.
         <#8c8c8c>   <#e6fff3>Shift + ПКМ — настроить положение.
       draft-recovered: |-
 
@@ -665,7 +653,7 @@ locales:
       preview-required: |-
 
         <prefix><#ff9f0f>Сначала разместите превью книги.
-        <#8c8c8c>   <#e6fff3>Нажмите ПКМ книгой по опорному блоку.
+        <#8c8c8c>   <#e6fff3>ПКМ по блоку — поставить превью; ПКМ по светящейся голограмме и зелёная кнопка — подтвердить.
       active-required: "<prefix><#ff9f0f>Держите активную книгу в основной руке."
       creator-only: |-
 
@@ -674,7 +662,7 @@ locales:
       unactivated: |-
 
         <prefix><#ff9f0f>Это только черновик — по нему нельзя строить.
-        <#8c8c8c>   <#e6fff3>Откройте превью и нажмите ПКМ в воздух.
+        <#8c8c8c>   <#e6fff3>Откройте превью и нажмите ПКМ по светящейся голограмме.
       duplicate: |-
 
         <prefix><#c42323>Эта книга уже используется или потрачена.
@@ -708,10 +696,10 @@ locales:
       preview-opened: |-
 
         <prefix><#d48763>Превью постройки «<name>» готово.
-        <#8c8c8c>   1. <#e6fff3>Найдите светящуюся табличку перед постройкой.
-        <#8c8c8c>   2. <#e6fff3>Нажмите по табличке ПКМ — откроется меню настройки.
+        <#8c8c8c>   1. <#e6fff3>Найдите светящуюся голограмму перед постройкой.
+        <#8c8c8c>   2. <#e6fff3>Нажмите по голограмме ПКМ — откроется единое меню.
         <#8c8c8c>   <#2bba43>Зелёный куб<#e6fff3> показывает выбранный блок.
-        <#8c8c8c>   Превью и табличка исчезнут сами через 3 минуты.
+        <#8c8c8c>   Превью и голограмма исчезнут сами через 3 минуты.
         <#8c8c8c>   <click:run_command:'/builder cancel'><#c42323>[✖ Убрать превью]</click>
       selector:
         title: "Выбор дома"
@@ -737,10 +725,10 @@ locales:
         <#92bed8>ПКМ — открыть меню
       preview:
         title: "<#ffb142>Превью постройки готово"
-        subtitle: "<#e6fff3>Нажмите ПКМ по светящейся табличке"
-        actionbar: "<#d48763>Светящаяся табличка: ПКМ — открыть меню   <#8c8c8c>—   <#969696>/builder cancel"
-        bossbar-draft: "<#ffb142>Черновик «<name>» — нажмите ПКМ по табличке"
-        bossbar-active: "<#2bba43>Книга «<name>» — нажмите ПКМ по табличке"
+        subtitle: "<#e6fff3>Нажмите ПКМ по светящейся голограмме"
+        actionbar: "<#d48763>Светящаяся голограмма: ПКМ — открыть меню   <#8c8c8c>—   <#969696>/builder cancel"
+        bossbar-draft: "<#ffb142>Черновик «<name>» — нажмите ПКМ по голограмме"
+        bossbar-active: "<#2bba43>Книга «<name>» — нажмите ПКМ по голограмме"
       hold-hint:
         title: "<#ffb142>Поставьте превью постройки"
         subtitle: "<#e6fff3>Нажмите ПКМ по нужному блоку"
@@ -807,62 +795,11 @@ locales:
               - "<#8c8c8c>Убрать превью. Блоки не изменятся."
               - "<#8c8c8c>[<#c42323>▶<#8c8c8c>] <#c42323>ЛКМ<#e6fff3> — убрать"
           continue:
-            name: "<#2bba43>Проверить и продолжить"
+            name: "<#2bba43>Подтвердить строительство"
             lore:
-              - "<#e6fff3>Показать, что нужно для стройки."
-              - "<#969696>Блоки пока не изменятся."
-              - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — продолжить"
-        confirmation:
-          title: "<#2bba43>Финальная проверка: <name>"
-          activation-title: "<#2bba43>Создание книги: <name>"
-          overview:
-            name: "<#e6fff3>Что изменится"
-            lore:
-              - "<#8c8c8c>Изменится блоков: <#92bed8><count>"
-              - "<#c42323>Красные блоки будут удалены."
-              - "<#969696>Осмотрите постройку перед запуском."
-          activation-overview:
-            name: "<#e6fff3>Создание строительной книги"
-            lore:
-              - "<#8c8c8c>Блоков в постройке: <#92bed8><count>"
-              - "<#969696>После оплаты вы получите готовую книгу."
-          activation-price:
-            name: "<#ffb142>Стоимость: <price>"
-            lore:
-              - "<#8c8c8c>Материалы: <#e6fff3><materials>"
-              - "<#8c8c8c>Работа: <#e6fff3><labor>"
-              - "<#969696>Сумма спишется только после нажатия кнопки."
-          materials:
-            name: "<#ffb142>Что нужно для стройки"
-            lore:
-              - "<#8c8c8c>Материалы для изменяемых блоков:"
-          material-line: "<#e6fff3><amount>× <material>"
-          material-more: "<#969696>И ещё <count> видов"
-          materials-none: "<#2bba43>Материалы не требуются"
-          back:
-            name: "<#92bed8>Изменить место"
-            lore:
-              - "<#8c8c8c>Вернуться к перемещению и повороту постройки."
-          start:
-            name: "<#2bba43>Начать строительство"
-            lore:
-              - "<#e6fff3>После запуска книга исчезнет."
-              - "<#969696>Стройка сохранится и переживёт рестарт."
-              - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — начать стройку"
-          activation-start:
-            name: "<#2bba43>Создать книгу"
-            lore:
-              - "<#e6fff3>Заплатить <price> и получить готовую книгу."
-              - "<#969696>После создания контур дома исчезнет."
-              - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — создать книгу"
-          blocked:
-            name: "<#ff9f0f>Пока недоступно"
-            lore:
-              - "<#8c8c8c>Осталось: <#e6fff3><hours> ч <minutes> мин."
-          cancel:
-            name: "<#c42323>Отменить"
-            lore:
-              - "<#8c8c8c>Закрыть план. Мир не изменится."
+              - "<#e6fff3>Проверить план и подтвердить его одной кнопкой."
+              - "<#969696>Все изменения начнутся только после подтверждения."
+              - "<#8c8c8c>[<#2bba43>▶<#8c8c8c>] <#2bba43>ЛКМ<#e6fff3> — подтвердить"
         inspection:
           title: "<#20252b>Чужой контур дома"
           overview:
@@ -930,7 +867,7 @@ locales:
 
         <prefix><#2bba43>Книга активна; открытое превью обновлено.
         <#8c8c8c>   <#e6fff3>ПКМ по блоку — перенести превью.
-        <#8c8c8c>   <#e6fff3>ПКМ в воздух — открыть подтверждение стройки.
+        <#8c8c8c>   <#e6fff3>ПКМ по светящейся голограмме — открыть единое меню стройки.
       copied: |-
 
         <prefix><#2bba43>Новый экземпляр зарегистрирован.
@@ -1201,7 +1138,7 @@ locales:
               - "<#2bba43>[▶] ЛКМ <#b8b8b8>— завершить стройку"
       states:
         prepared: "<hover:show_text:'Проект сохранён и готовится к первому безопасному шагу.'>подготовка</hover>"
-        active: "<hover:show_text:'Стройка обрабатывает блоки по одному.'>строится</hover>"
+        active: "<hover:show_text:'Блоки без обмена ресурсами применяются пакетами; ресурсные шаги проходят отдельно.'>строится</hover>"
         waiting_materials: "<hover:show_text:'Следующий блок ждёт нужный ресурс в инвентаре или доступном сундуке.'>ждёт материалы</hover>"
         input_prepared: "<hover:show_text:'Шаг записан до безопасного списания материала.'>подтверждает материал</hover>"
         world_prepared: "<hover:show_text:'Списание подтверждено; блок применяется идемпотентно.'>применяет блок</hover>"
@@ -1489,8 +1426,8 @@ locales:
         - "<dark_gray>      <aqua>/builder book draft [name] <gray>— free <hover:show_text:'A positioning and price-check book that cannot build yet.'>draft</hover>."
         - "<dark_gray>   4. <gray>Right-click a block to place or move <hover:show_text:'A player-only outline of the future build; the world is unchanged.'>preview</hover>."
         - "<dark_gray>      <gray>Sneak-click to open detailed settings."
-        - "<dark_gray>   5. <gray>Right-click air for a <hover:show_text:'The material and labor price calculated before any charge.'>quote</hover> without charge."
-        - "<dark_gray>   6. <gray>Click <#92bed8>[▶ Confirm]<gray> in the quote."
+        - "<dark_gray>   5. <gray>Right-click the glowing hologram to open the single build menu."
+        - "<dark_gray>   6. <gray>Click the green button in the hologram to validate and confirm construction."
         - |-
           <dark_gray>   7. <gray>The author can issue a <hover:show_text:'A separately paid instance of the same book; each physical book is single-use.'>new single-use copy</hover>.
           <dark_gray>      <gray>Use the settings or <aqua>/builder book copy</aqua>.
@@ -1528,7 +1465,7 @@ locales:
           <prefix><green>Step 4/7: free draft ready.
           <dark_gray>   <gray>Name: <white><name>
           <dark_gray>   <gray>Right-click a block — place or move preview.
-          <dark_gray>   <gray>Right-click air — calculate the quote.
+          <dark_gray>   <gray>Right-click the glowing hologram to open the menu.
         draft-recovery: |-
 
           <prefix><yellow>Your blueprint is saved and waiting for draft delivery.
@@ -1538,7 +1475,7 @@ locales:
 
           <prefix><green>Step 5/7: preview is open.
           <dark_gray>   <gray>The outline updates continuously.
-          <dark_gray>   <gray>Right-click a block to move; air for the quote.
+          <dark_gray>   <gray>Right-click a block to move; right-click the hologram to open the menu.
         quote: |-
 
           <prefix><yellow>Step 6/7: quote <green><price></green>.
@@ -1566,7 +1503,7 @@ locales:
         <dark_gray>   <gray>Name: <white><name>
         <dark_gray>   <gray><count> blocks — no charge
         <dark_gray>   <gray>Right-click a block to place or move the preview.
-        <dark_gray>   <gray>Right-click air for the quote.
+        <dark_gray>   <gray>Right-click the glowing hologram to open the menu.
         <dark_gray>   <gray>Sneak-click to adjust the position.
       draft-recovered: |-
 
@@ -1591,7 +1528,7 @@ locales:
       preview-required: |-
 
         <prefix><yellow>Place the book preview first.
-        <dark_gray>   <gray>Right-click an anchor block while holding the book.
+        <dark_gray>   <gray>Right-click a block to place the preview, then right-click the glowing hologram and use its green button.
       active-required: "<prefix><yellow>Hold a registered build book in your main hand."
       creator-only: |-
 
@@ -1600,7 +1537,7 @@ locales:
       unactivated: |-
 
         <prefix><yellow>This draft is preview-only.
-        <dark_gray>   <gray>Open its preview and right-click the air.
+        <dark_gray>   <gray>Open its preview and right-click the glowing hologram.
       duplicate: |-
 
         <prefix><red>This book is already in use or was consumed.
@@ -1634,10 +1571,10 @@ locales:
       preview-opened: |-
 
         <prefix><aqua>The preview for “<name>” is ready.
-        <dark_gray>   1. <white>Find the glowing sign in front of the build.
-        <dark_gray>   2. <white>Right-click the sign to open the controls.
+        <dark_gray>   1. <white>Find the glowing hologram in front of the build.
+        <dark_gray>   2. <white>Right-click the hologram to open the single menu.
         <dark_gray>   <green>The green cube<white> marks the selected block.
-        <dark_gray>   The preview and sign disappear automatically after 3 minutes.
+        <dark_gray>   The preview and hologram disappear automatically after 3 minutes.
         <dark_gray>   <click:run_command:'/builder cancel'><red>[✖ Remove preview]</click>
       selector:
         title: "Choose a house"
@@ -1663,10 +1600,10 @@ locales:
         <aqua>Right-click — open controls
       preview:
         title: "<gold>Build preview ready"
-        subtitle: "<white>Right-click the glowing sign"
-        actionbar: "<aqua>Glowing sign: right-click to open controls   <dark_gray>—   <gray>/builder cancel"
-        bossbar-draft: "<gold>Draft “<name>” — right-click the sign"
-        bossbar-active: "<green>Book “<name>” — right-click the sign"
+        subtitle: "<white>Right-click the glowing hologram"
+        actionbar: "<aqua>Glowing hologram: right-click to open the single menu   <dark_gray>—   <gray>/builder cancel"
+        bossbar-draft: "<gold>Draft “<name>” — right-click the hologram"
+        bossbar-active: "<green>Book “<name>” — right-click the hologram"
       hold-hint:
         title: "<gold>Place the build preview"
         subtitle: "<white>Right-click the block you want"
@@ -1733,62 +1670,11 @@ locales:
               - "<gray>Remove the build outline without changing blocks."
               - "<dark_gray>[<red>▶<dark_gray>] <red>Left-click<white> — remove"
           continue:
-            name: "<green>Check and continue"
+            name: "<green>Confirm construction"
             lore:
-              - "<white>Show what the build needs."
-              - "<dark_gray>Blocks are still unchanged."
-              - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — continue"
-        confirmation:
-          title: "<green>Final check: <name>"
-          activation-title: "<green>Create book: <name>"
-          overview:
-            name: "<white>What will change"
-            lore:
-              - "<gray>Blocks changed: <aqua><count>"
-              - "<red>Red blocks will be removed."
-              - "<dark_gray>Inspect the build before starting."
-          activation-overview:
-            name: "<white>Create a build book"
-            lore:
-              - "<gray>Blocks in the build: <aqua><count>"
-              - "<dark_gray>After payment, you receive a ready build book."
-          activation-price:
-            name: "<gold>Price: <price>"
-            lore:
-              - "<gray>Materials: <white><materials>"
-              - "<gray>Labor: <white><labor>"
-              - "<dark_gray>The total is charged only after you click confirm."
-          materials:
-            name: "<gold>Materials needed"
-            lore:
-              - "<gray>Materials for changed blocks:"
-          material-line: "<white><amount>× <material>"
-          material-more: "<dark_gray>And <count> more types"
-          materials-none: "<green>No materials required"
-          back:
-            name: "<aqua>Change position"
-            lore:
-              - "<gray>Return to moving and rotating the build."
-          start:
-            name: "<green>Start construction"
-            lore:
-              - "<white>The book disappears after construction starts."
-              - "<dark_gray>The build is saved and survives a restart."
-              - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — start building"
-          activation-start:
-            name: "<green>Create book"
-            lore:
-              - "<white>Pay <price> and receive a ready book."
-              - "<dark_gray>The build outline disappears afterward."
-              - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — create book"
-          blocked:
-            name: "<yellow>Not ready yet"
-            lore:
-              - "<gray>Remaining: <white><hours>h <minutes>m."
-          cancel:
-            name: "<red>Cancel"
-            lore:
-              - "<gray>Close the plan. The world stays unchanged."
+              - "<white>Validate the plan and confirm it with one button."
+              - "<dark_gray>The world remains unchanged until confirmation."
+              - "<dark_gray>[<green>▶<dark_gray>] <green>Left-click<white> — confirm"
         inspection:
           title: "<#20252b>Another player's build outline"
           overview:
@@ -1855,7 +1741,7 @@ locales:
 
         <prefix><green>The book is active; the open preview was refreshed.
         <dark_gray>   <gray>Right-click a block to move the preview.
-        <dark_gray>   <gray>Right-click air to open build confirmation.
+        <dark_gray>   <gray>Right-click the glowing hologram to open the build menu.
       copied: |-
 
         <prefix><green>A new instance is registered.
@@ -2108,7 +1994,7 @@ locales:
               - "<#2bba43>[▶] Left click <#b8b8b8>— finish construction"
       states:
         prepared: "<hover:show_text:'The project is stored and preparing its first safe step.'>preparing</hover>"
-        active: "<hover:show_text:'The project is processing one block at a time.'>building</hover>"
+        active: "<hover:show_text:'Steps without item exchange are applied in batches; resource steps stay separate.'>building</hover>"
         waiting_materials: "<hover:show_text:'The next block needs a resource from inventory or an accessible container.'>waiting for materials</hover>"
         input_prepared: "<hover:show_text:'The step is durable before its material is debited.'>confirming material</hover>"
         world_prepared: "<hover:show_text:'The debit is confirmed and the block is applied idempotently.'>applying block</hover>"

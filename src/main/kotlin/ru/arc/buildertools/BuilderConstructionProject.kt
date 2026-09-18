@@ -283,6 +283,30 @@ internal data class BuilderConstructionProjectRecord(
         return advanceFromCurrent(nowMillis)
     }
 
+    /** Advances only consecutive steps that do not debit or deliver any item. */
+    fun advancedNoExchangeBatch(nextCursor: Int, nowMillis: Long): BuilderConstructionProjectRecord {
+        require(state == BuilderConstructionProjectState.ACTIVE || state == BuilderConstructionProjectState.WORLD_PREPARED) {
+            "A no-exchange batch must start from an active or world-prepared construction project"
+        }
+        require(nextCursor in (cursor + 1)..steps.size) {
+            "A construction batch must advance the cursor"
+        }
+        require((cursor until nextCursor).all { index ->
+            steps[index].requiredMaterial == null && steps[index].output == null
+        }) { "A construction batch cannot contain an item exchange" }
+        val completed = nextCursor == steps.size
+        return transitionTo(
+            copy(
+                state = if (completed) BuilderConstructionProjectState.COMPLETED else BuilderConstructionProjectState.ACTIVE,
+                cursor = nextCursor,
+                pendingOutput = null,
+                pendingResourceMutation = null,
+                updatedAtMillis = nowMillis,
+                completedAtMillis = nowMillis.takeIf { completed },
+            ),
+        )
+    }
+
     fun outputDelivered(nowMillis: Long): BuilderConstructionProjectRecord = advanceFromCurrent(nowMillis)
 
     fun recoveryRequired(nowMillis: Long): BuilderConstructionProjectRecord = transitionTo(
@@ -417,20 +441,24 @@ internal object BuilderConstructionProjectTransitionRules {
         }
         val sameCursor = after.cursor == before.cursor
         val advancedOne = after.cursor == before.cursor + 1
+        val advancedPureBatch = after.cursor > before.cursor &&
+            (before.cursor until after.cursor).all { index ->
+                before.steps[index].requiredMaterial == null && before.steps[index].output == null
+            }
         val valid = when (before.state) {
             BuilderConstructionProjectState.PREPARED ->
                 after.state == BuilderConstructionProjectState.ACTIVE && sameCursor ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.ACTIVE ->
-                after.state == BuilderConstructionProjectState.INPUT_PREPARED && sameCursor ||
+                    after.state == BuilderConstructionProjectState.INPUT_PREPARED && sameCursor ||
                     after.state == BuilderConstructionProjectState.WORLD_PREPARED && sameCursor ||
-                    after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
+                    after.state == BuilderConstructionProjectState.ACTIVE && (advancedOne || advancedPureBatch) ||
                     after.state == BuilderConstructionProjectState.WAITING_MATERIALS && sameCursor ||
                     after.state == BuilderConstructionProjectState.OUTPUT_PENDING && sameCursor ||
                     after.state == BuilderConstructionProjectState.PAUSED && sameCursor ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
-                    after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
+                    after.state == BuilderConstructionProjectState.COMPLETED && (advancedOne || advancedPureBatch) ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.WAITING_MATERIALS ->
                 after.state == BuilderConstructionProjectState.INPUT_PREPARED && sameCursor ||
@@ -447,9 +475,9 @@ internal object BuilderConstructionProjectTransitionRules {
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.WORLD_PREPARED ->
-                after.state == BuilderConstructionProjectState.ACTIVE && advancedOne ||
+                after.state == BuilderConstructionProjectState.ACTIVE && (advancedOne || advancedPureBatch) ||
                     after.state == BuilderConstructionProjectState.OUTPUT_PENDING && sameCursor ||
-                    after.state == BuilderConstructionProjectState.COMPLETED && advancedOne ||
+                    after.state == BuilderConstructionProjectState.COMPLETED && (advancedOne || advancedPureBatch) ||
                     after.state == BuilderConstructionProjectState.RECOVERY_REQUIRED && sameCursor ||
                     after.state == BuilderConstructionProjectState.CANCELLED && sameCursor
             BuilderConstructionProjectState.OUTPUT_PENDING ->
@@ -615,7 +643,11 @@ internal interface BuilderConstructionProjectPort {
         mutation: BuilderResourceMutation,
     ): BuilderResourceMutationResult
 
-    fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep)
+    /** Returns the number of physical blocks changed, including an atomic companion. */
+    fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int
+
+    /** Best-effort count for a mutation that threw after changing the world. */
+    fun appliedBlockCount(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int = 1
 }
 
 internal class BuilderConstructionTemporarilyUnavailableException : RuntimeException()
@@ -694,8 +726,26 @@ internal object BuilderConstructionProjectController {
         record: BuilderConstructionProjectRecord,
         nowMillis: Long,
         port: BuilderConstructionProjectPort,
+        maxBlocksPerCycle: Int = 1,
     ): BuilderConstructionProjectRecord? {
+        require(maxBlocksPerCycle >= 1) { "Builder construction batch size must be positive" }
         val current = record.validated()
+        return tickValidated(current, nowMillis, port, maxBlocksPerCycle)
+    }
+
+    /**
+     * Processes a validated record without repeating its full graph validation.
+     * The runtime calls this only for records loaded from or just returned by
+     * the durable construction store.
+     */
+    internal fun tickValidated(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+        maxBlocksPerCycle: Int = 1,
+    ): BuilderConstructionProjectRecord? {
+        require(maxBlocksPerCycle >= 1) { "Builder construction batch size must be positive" }
+        val current = record
         if (current.instantBuildRequestedBy != null && current.state == BuilderConstructionProjectState.WORLD_PREPARED) {
             return BuilderInstantConstruction.applyBatch(current, nowMillis, port)
         }
@@ -708,12 +758,27 @@ internal object BuilderConstructionProjectController {
             BuilderConstructionProjectState.PREPARED -> activate(current, nowMillis, port)
             BuilderConstructionProjectState.WAITING_MATERIALS -> prepareStep(current, nowMillis, port)
             BuilderConstructionProjectState.INPUT_PREPARED -> debitInput(current, nowMillis, port)
-            BuilderConstructionProjectState.WORLD_PREPARED -> applyWorld(current, nowMillis, port)
+            BuilderConstructionProjectState.WORLD_PREPARED -> if (maxBlocksPerCycle == 1) {
+                applyWorld(current, nowMillis, port)
+            } else {
+                applyWorldBatch(current, nowMillis, port, maxBlocksPerCycle)
+            }
             BuilderConstructionProjectState.OUTPUT_PENDING,
             BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
             -> prepareOutput(current, nowMillis, port)
             BuilderConstructionProjectState.DELIVERING_OUTPUT -> deliverOutput(current, nowMillis, port)
-            BuilderConstructionProjectState.ACTIVE -> prepareStep(current, nowMillis, port)
+            BuilderConstructionProjectState.ACTIVE -> if (
+                maxBlocksPerCycle > 1 &&
+                current.steps.getOrNull(current.cursor)?.let { it.requiredMaterial == null && it.output == null } == true
+            ) {
+                // Pure world steps need no durable preparation record. They can be
+                // validated and applied in this cycle; the cursor transition is
+                // still written after the world mutation and remains idempotent
+                // if the process stops before that write.
+                applyWorldBatch(current, nowMillis, port, maxBlocksPerCycle)
+            } else {
+                prepareStep(current, nowMillis, port)
+            }
         }
     }
 
@@ -865,6 +930,102 @@ internal object BuilderConstructionProjectController {
             }
         }
         return appliedStep(record, step, nowMillis)
+    }
+
+    private sealed interface WorldOnlyStepResult {
+        data class Applied(val physicalBlocks: Int) : WorldOnlyStepResult
+        data object TemporarilyUnavailable : WorldOnlyStepResult
+        data object Invalid : WorldOnlyStepResult
+    }
+
+    /**
+     * Applies a bounded run of pure world steps. Resource-bearing steps are
+     * intentionally left to the single-step state machine so a durable item
+     * receipt can never be hidden inside a batch.
+     */
+    private fun applyWorldBatch(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+        maxBlocksPerCycle: Int,
+    ): BuilderConstructionProjectRecord? {
+        val startCursor = record.cursor
+        var cursor = startCursor
+        var physicalBlocks = 0
+        var stoppedTemporarily = false
+        var stoppedInvalidly = false
+
+        while (cursor < record.steps.size && physicalBlocks < maxBlocksPerCycle) {
+            val step = record.steps[cursor]
+            if (step.requiredMaterial != null || step.output != null) break
+            val result = applyWorldOnlyStep(record, step, port)
+            when (result) {
+                is WorldOnlyStepResult.Applied -> {
+                    physicalBlocks += result.physicalBlocks
+                    cursor += 1
+                }
+                WorldOnlyStepResult.TemporarilyUnavailable -> {
+                    stoppedTemporarily = true
+                    break
+                }
+                WorldOnlyStepResult.Invalid -> {
+                    stoppedInvalidly = true
+                    break
+                }
+            }
+        }
+
+        if (cursor == startCursor) {
+            return when {
+                stoppedInvalidly -> record.recoveryRequired(nowMillis)
+                stoppedTemporarily -> null
+                else -> applyWorld(record, nowMillis, port)
+            }
+        }
+        // If a later step is unavailable or invalid, persist the progress that
+        // physically happened before it. The next tick evaluates that step
+        // independently and can then enter recovery without losing the prefix.
+        return record.advancedNoExchangeBatch(cursor, nowMillis)
+    }
+
+    private fun applyWorldOnlyStep(
+        record: BuilderConstructionProjectRecord,
+        step: BuilderConstructionStep,
+        port: BuilderConstructionProjectPort,
+    ): WorldOnlyStepResult {
+        val before = worldMatchesBefore(step, port) ?: return WorldOnlyStepResult.TemporarilyUnavailable
+        if (!before) {
+            when (worldBlockDataMatchesAfter(step, port)) {
+                null -> return WorldOnlyStepResult.TemporarilyUnavailable
+                false -> return WorldOnlyStepResult.Invalid
+                true -> Unit
+            }
+            when (worldMatchesAfter(step, port)) {
+                null -> return WorldOnlyStepResult.TemporarilyUnavailable
+                true -> return WorldOnlyStepResult.Applied(0)
+                false -> Unit
+            }
+        } else {
+            when (canModify(record, step, port)) {
+                null -> return WorldOnlyStepResult.TemporarilyUnavailable
+                false -> return WorldOnlyStepResult.Invalid
+                true -> Unit
+            }
+        }
+        return try {
+            val changed = port.apply(record, step)
+            require(changed > 0) { "Builder construction apply reported no changed blocks" }
+            WorldOnlyStepResult.Applied(changed)
+        } catch (_: Throwable) {
+            when (worldMatchesAfter(step, port)) {
+                true -> WorldOnlyStepResult.Applied(
+                    runCatching { port.appliedBlockCount(record, step) }
+                        .getOrDefault(1)
+                        .coerceAtLeast(1),
+                )
+                false, null -> WorldOnlyStepResult.Invalid
+            }
+        }
     }
 
     private fun appliedStep(

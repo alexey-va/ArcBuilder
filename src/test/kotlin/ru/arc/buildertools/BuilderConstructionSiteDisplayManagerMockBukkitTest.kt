@@ -57,13 +57,21 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         onInspect = { _, _ -> },
                     ).use { manager ->
                         manager.upsert(project)
-                        spawned.size shouldBe 14
+                        spawned.size shouldBe 15
+                        spawned.filterIsInstance<TextDisplay>().forEach { display ->
+                            io.mockk.verify(exactly = 1) { display.displayWidth = 3f }
+                            io.mockk.verify(exactly = 1) { display.displayHeight = 1.5f }
+                        }
+                        spawned.filterIsInstance<Interaction>().single().also { interaction ->
+                            io.mockk.verify(exactly = 1) { interaction.interactionWidth = 3f }
+                            io.mockk.verify(exactly = 1) { interaction.interactionHeight = 1.5f }
+                        }
 
                         valid.replaceAll { _, _ -> false }
                         paper.callEvent(ChunkLoadEvent(chunk, false))
 
-                        spawned.size shouldBe 28
-                        spawned.takeLast(14).all { valid[it] == true } shouldBe true
+                        spawned.size shouldBe 30
+                        spawned.takeLast(15).all { valid[it] == true } shouldBe true
                     }
                 } finally {
                     unmockkStatic(Bukkit::class)

@@ -4,12 +4,12 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 
 class BuilderBookInteractionPolicyTest : FunSpec({
-    test("repeated air click on the same prepared plan only repeats confirmation guidance") {
+    test("air click never prepares or confirms a build book") {
         BuilderBookInteractionPolicy.decide(
             action = BuilderBookClick.AIR,
             exactBookPreviewOpen = false,
             preparedPlan = BuilderBookPreparedPlan.SAME_BOOK,
-        ) shouldBe BuilderBookInteractionDecision.RESHOW_PREPARED_PLAN
+        ) shouldBe BuilderBookInteractionDecision.REQUIRE_PREVIEW
     }
 
     test("new block click disposes any prepared plan before opening one preview") {
@@ -25,15 +25,15 @@ class BuilderBookInteractionPolicyTest : FunSpec({
             action = BuilderBookClick.AIR,
             exactBookPreviewOpen = false,
             preparedPlan = BuilderBookPreparedPlan.OTHER_BOOK,
-        ) shouldBe BuilderBookInteractionDecision.DISCARD_PLAN_AND_REQUIRE_PREVIEW
+        ) shouldBe BuilderBookInteractionDecision.REQUIRE_PREVIEW
     }
 
-    test("ordinary positioning flow requires one exact preview before preparing") {
+    test("ordinary positioning flow requires the hologram path before preparing") {
         BuilderBookInteractionPolicy.decide(
             action = BuilderBookClick.AIR,
             exactBookPreviewOpen = true,
             preparedPlan = BuilderBookPreparedPlan.NONE,
-        ) shouldBe BuilderBookInteractionDecision.PREPARE_PLAN
+        ) shouldBe BuilderBookInteractionDecision.REQUIRE_PREVIEW
         BuilderBookInteractionPolicy.decide(
             action = BuilderBookClick.AIR,
             exactBookPreviewOpen = false,

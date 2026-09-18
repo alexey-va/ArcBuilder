@@ -247,13 +247,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val site = checkNotNull(BuildingManager.pending(player.uniqueId))
                 val target = site.worldLocation(BlockVector3.ZERO).block.also { it.type = Material.ANDESITE }
 
-                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
-
-                checkNotNull(journey.renderer.plans[player.uniqueId]).changes.single().let { change ->
-                    change.position shouldBe BuilderBlockPos(target.world.uid, target.x, target.y, target.z)
-                    change.beforeBlockData shouldBe "minecraft:andesite"
-                    change.afterBlockData shouldBe "minecraft:air"
-                }
+                journey.confirmBookHologram(player)
+                journey.awaitSettled(player) { target.type == Material.AIR }
+                target.type shouldBe Material.AIR
             }
         } finally {
             unmockkStatic(BukkitAdapter::class)
@@ -302,13 +298,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val site = checkNotNull(BuildingManager.pending(player.uniqueId))
                 val bottomTarget = site.worldLocation(BlockVector3.ZERO).block
                 val topTarget = site.worldLocation(BlockVector3.at(0, 1, 0)).block
-                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
-                val pendingPlan = journey.renderer.plans[player.uniqueId] ?: error(
-                    generateSequence(player::nextComponentMessage)
-                        .joinToString(" | ") { PlainTextComponentSerializer.plainText().serialize(it) },
-                )
-                pendingPlan.changes.size shouldBe 2
-                player.performCommand("builder confirm") shouldBe true
+                journey.confirmBookHologram(player)
                 journey.await("first atomic door mutation") {
                     bottomTarget.type == Material.OAK_DOOR || topTarget.type == Material.OAK_DOOR
                 }
@@ -368,16 +358,13 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 val site = checkNotNull(BuildingManager.pending(player.uniqueId))
                 val bottomTarget = site.worldLocation(BlockVector3.ZERO).block
                 val topTarget = site.worldLocation(BlockVector3.at(0, 1, 0)).block
-                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
-                val pendingPlan = journey.renderer.plans[player.uniqueId] ?: error(
-                    generateSequence(player::nextComponentMessage)
-                        .joinToString(" | ") { PlainTextComponentSerializer.plainText().serialize(it) },
-                )
-                pendingPlan.changes.size shouldBe 2
-                player.performCommand("builder confirm") shouldBe true
+                journey.confirmBookHologram(player)
                 val store = BuilderConstructionProjectStore(journey.plugin.dataPath, 10000)
+                var projectId: UUID? = null
                 journey.await("waiting for missing materials") {
-                    store.loadOrNull(pendingPlan.id)?.state == BuilderConstructionProjectState.WAITING_MATERIALS
+                    val record = store.loadAll().firstOrNull { it.playerId == player.uniqueId }
+                    projectId = record?.projectId
+                    record?.state == BuilderConstructionProjectState.WAITING_MATERIALS
                 }
                 bottomTarget.type shouldBe Material.AIR
                 player.addAttachment(journey.plugin, "arcbuild.admin.construction", true)
@@ -392,7 +379,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 player.openInventory.topInventory.getItem(22)?.type shouldBe Material.NETHER_STAR
                 click(22, org.bukkit.event.inventory.ClickType.LEFT)
                 journey.await("admin completion through the real menu callback") {
-                    store.loadOrNull(pendingPlan.id)?.state == BuilderConstructionProjectState.COMPLETED
+                    store.loadOrNull(checkNotNull(projectId))?.state == BuilderConstructionProjectState.COMPLETED
                 }
                 player.inventory.contains(Material.OAK_DOOR) shouldBe false
 
@@ -464,9 +451,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                     .worldLocation(BlockVector3.ZERO)
                     .block
                     .also { it.type = Material.AIR }
-                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
-
-                player.performCommand("builder confirm") shouldBe true
+                journey.confirmBookHologram(player)
                 journey.await("loot-table assignment") { appliedLootKey != null }
                 journey.awaitSettled(player) { target.type == Material.CHEST }
 
@@ -1253,13 +1238,12 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 journey.renderer.hasBook(player.uniqueId) shouldBe true
 
                 journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
-                journey.renderer.hasBook(player.uniqueId) shouldBe false
-                journey.renderer.plans.containsKey(player.uniqueId) shouldBe true
-                val firstPlan = checkNotNull(journey.renderer.plans[player.uniqueId])
-                firstPlan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:book" to 1)
-
-                journey.rightClickBook(player, Action.RIGHT_CLICK_AIR, null)
-                journey.renderer.plans[player.uniqueId] shouldBe firstPlan
+                journey.renderer.hasBook(player.uniqueId) shouldBe true
+                journey.renderer.plans[player.uniqueId] shouldBe null
+                journey.openBookHologramMenu(player)
+                player.openInventory.topInventory.size shouldBe 45
+                journey.renderer.plans[player.uniqueId] shouldBe null
+                player.closeInventory()
 
                 journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, second)
                 journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
@@ -1369,6 +1353,25 @@ private class ArcBuilderJourney private constructor(
                 EquipmentSlot.HAND,
             ),
         )
+    }
+
+    fun openBookHologramMenu(player: Player) = runtime.openBookPreviewMenuForTest(player)
+
+    fun confirmOpenBookMenu(player: Player) {
+        val event = org.bukkit.event.inventory.InventoryClickEvent(
+            player.openInventory,
+            org.bukkit.event.inventory.InventoryType.SlotType.CONTAINER,
+            25,
+            org.bukkit.event.inventory.ClickType.LEFT,
+            org.bukkit.event.inventory.InventoryAction.PICKUP_ALL,
+        )
+        paper.callEvent(event)
+        event.isCancelled shouldBe true
+    }
+
+    fun confirmBookHologram(player: Player) {
+        openBookHologramMenu(player)
+        confirmOpenBookMenu(player)
     }
 
     fun await(description: String, condition: () -> Boolean) {

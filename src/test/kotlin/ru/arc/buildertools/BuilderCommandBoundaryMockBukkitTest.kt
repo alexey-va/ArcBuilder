@@ -35,10 +35,10 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
                 fixture.runtime.onTabComplete(sender, fixture.command, "builder", args)
             complete(admin, "sys") shouldBe listOf("systembook")
             complete(admin, "systembook", "ATELIER") shouldBe listOf("atelier-house.schem")
-            complete(admin, "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem")
+            complete(admin, "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "random")
             complete(Bukkit.getConsoleSender(), "sys") shouldBe listOf("systembook")
             complete(Bukkit.getConsoleSender(), "systembook", "Gro") shouldBe listOf("GrocerMC")
-            complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem")
+            complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "random")
             complete(fixture.player("NoBooks"), "sys") shouldBe emptyList()
         }
     }

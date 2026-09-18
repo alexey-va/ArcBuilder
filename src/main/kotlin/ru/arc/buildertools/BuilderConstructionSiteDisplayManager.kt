@@ -296,19 +296,19 @@ internal class BuilderConstructionSiteDisplayManager(
                         display.isShadowed = true
                         display.isSeeThrough = false
                         display.alignment = TextDisplay.TextAlignment.CENTER
-                        display.displayWidth = settings.panelInteractionWidth * BuilderConstructionSitePanelOrientation.SCALE
-                        display.displayHeight = settings.panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE
+                        display.displayWidth = settings.panelInteractionWidth
+                        display.displayHeight = settings.panelInteractionHeight
                     }
                     spawned += panel
                     panels += panel
                 }
                 spawned += world.spawn(
-                    location.clone().subtract(0.0, settings.panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE / 2.0, 0.0),
+                    location.clone().subtract(0.0, settings.panelInteractionHeight / 2.0, 0.0),
                     Interaction::class.java,
                 ) { interaction ->
                     configureEntity(interaction, project.projectId)
-                    interaction.interactionWidth = settings.panelInteractionWidth * BuilderConstructionSitePanelOrientation.SCALE
-                    interaction.interactionHeight = settings.panelInteractionHeight * BuilderConstructionSitePanelOrientation.SCALE
+                    interaction.interactionWidth = settings.panelInteractionWidth
+                    interaction.interactionHeight = settings.panelInteractionHeight
                     interaction.isResponsive = true
                 }
             }

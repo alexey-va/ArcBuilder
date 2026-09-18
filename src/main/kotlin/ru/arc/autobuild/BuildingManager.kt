@@ -36,7 +36,20 @@ object BuildingManager {
         if (!fileName.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}"))) return null
         val path = BuilderStoragePaths.schematicsRoot().resolve(fileName)
         if (!Files.isRegularFile(path)) return null
-        return Building(fileName).also { buildings.putIfAbsent(fileName, it) }
+        val created = Building(fileName)
+        return buildings.putIfAbsent(fileName, created) ?: created
+    }
+
+    /** Preloads catalogue schematics on a storage worker, never on the tick thread. */
+    internal fun preload(buildingIds: Iterable<String>): Int {
+        var loaded = 0
+        buildingIds.distinct().forEach { id ->
+            getBuilding(id)?.let {
+                it.preload()
+                loaded++
+            }
+        }
+        return loaded
     }
 
     @JvmStatic fun hasExactOpenPreview(player: Player, expected: BuildBookData): Boolean =

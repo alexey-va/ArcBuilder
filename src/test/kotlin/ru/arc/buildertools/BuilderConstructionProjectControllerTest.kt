@@ -42,6 +42,29 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         updatedAtMillis = createdAt,
     ).validated().activated(createdAt + 1)
 
+    fun pureProject(stepCount: Int): BuilderConstructionProjectRecord {
+        val changes = (0 until stepCount).map { index ->
+            BuilderBlockChange(
+                BuilderBlockPos(worldId, 20 + index, 64, 20),
+                "minecraft:dirt",
+                "minecraft:stone",
+            )
+        }
+        val purePlan = plan.copy(changes = changes, costs = listOf(book), rewards = emptyList())
+        return BuilderConstructionProjectRecord(
+            projectId = projectId,
+            playerId = playerId,
+            playerName = "Builder",
+            plan = purePlan,
+            steps = changes.map { BuilderConstructionStep(it, requiredMaterial = null, output = null) },
+            bookCost = book,
+            state = BuilderConstructionProjectState.ACTIVE,
+            cursor = 0,
+            createdAtMillis = createdAt,
+            updatedAtMillis = createdAt + 1,
+        ).validated()
+    }
+
     fun mutation(
         amount: BuilderItemAmount,
         insert: Boolean,
@@ -76,8 +99,13 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         var applied = 0
         private var inputApplied = false
         private var outputApplied = false
+        private val blocks = mutableMapOf<BuilderBlockPos, String>()
 
-        override fun currentBlockData(position: BuilderBlockPos): String = blockData
+        fun seed(position: BuilderBlockPos, data: String) {
+            blocks[position] = data
+        }
+
+        override fun currentBlockData(position: BuilderBlockPos): String = blocks[position] ?: blockData
 
         override fun isStepApplied(step: BuilderConstructionStep): Boolean =
             blockData == step.change.afterBlockData && (step.lootTableKey == null || lootApplied)
@@ -129,11 +157,13 @@ class BuilderConstructionProjectControllerTest : FunSpec({
             return BuilderResourceMutationResult.APPLIED
         }
 
-        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) {
+        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int {
             applied += 1
+            blocks[step.change.position] = step.change.afterBlockData
             blockData = step.change.afterBlockData
             if (step.lootTableKey != null) lootApplied = true
             if (applyFailureAfterMutation) error("CoreProtect failed after the block changed")
+            return 1
         }
     }
 
@@ -167,6 +197,46 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         port.inputAvailable = true
         BuilderConstructionProjectController.tick(result, createdAt + 4, port)?.state shouldBe
             BuilderConstructionProjectState.INPUT_PREPARED
+    }
+
+    test("pure no-exchange steps are applied in a bounded physical block batch") {
+        val port = FakePort()
+        val project = pureProject(stepCount = 4)
+        project.steps.forEach { port.seed(it.change.position, it.change.beforeBlockData) }
+        val worldPrepared = checkNotNull(BuilderConstructionProjectController.tick(project, createdAt + 2, port))
+
+        worldPrepared.state shouldBe BuilderConstructionProjectState.WORLD_PREPARED
+        val batched = checkNotNull(
+            BuilderConstructionProjectController.tick(
+                worldPrepared,
+                createdAt + 3,
+                port,
+                maxBlocksPerCycle = 3,
+            ),
+        )
+
+        batched.state shouldBe BuilderConstructionProjectState.ACTIVE
+        batched.cursor shouldBe 3
+        port.applied shouldBe 3
+    }
+
+    test("active pure steps do not spend an extra cycle on durable preparation") {
+        val port = FakePort()
+        val project = pureProject(stepCount = 4)
+        project.steps.forEach { port.seed(it.change.position, it.change.beforeBlockData) }
+
+        val batched = checkNotNull(
+            BuilderConstructionProjectController.tick(
+                project,
+                createdAt + 2,
+                port,
+                maxBlocksPerCycle = 3,
+            ),
+        )
+
+        batched.state shouldBe BuilderConstructionProjectState.ACTIVE
+        batched.cursor shouldBe 3
+        port.applied shouldBe 3
     }
 
     test("inventory movement after planning pauses for a fresh material snapshot") {

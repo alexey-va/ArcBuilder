@@ -11,9 +11,18 @@ import java.nio.file.Files
 
 class Building(val fileName: String) {
     @Volatile private var loaded: Clipboard? = null
-    val clipboard: Clipboard get() = loaded ?: loadClipboard().also { loaded = it }
+    val clipboard: Clipboard
+        get() = loaded ?: synchronized(this) {
+            loaded ?: loadClipboard().also { loaded = it }
+        }
     val volume: Long get() = clipboard.region.volume
     val blockCount: Int by lazy { countBuildBookCells(clipboard) }
+
+    /** Loads the immutable schematic data without touching Bukkit state. */
+    internal fun preload(): Int {
+        clipboard
+        return blockCount
+    }
 
     private fun loadClipboard(): Clipboard {
         val file = BuilderStoragePaths.schematicsRoot().resolve(fileName).toFile()

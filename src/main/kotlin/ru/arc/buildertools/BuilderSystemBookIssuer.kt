@@ -35,9 +35,8 @@ internal object BuilderSystemBookIssuer {
         try {
             val loadedBuildings = mutableMapOf<String, Building>()
             fun building(id: String): Building = loadedBuildings.getOrPut(id) {
-                Building(id).also {
+                (BuildingManager.getBuilding(id) ?: Building(id).also { BuildingManager.addBuilding(it) }).also {
                     require(it.volume <= maxScanVolume) { "Schematic exceeds the configured scan volume: $id" }
-                    BuildingManager.addBuilding(it)
                 }
             }
             val player = requireNotNull(Bukkit.getPlayerExact(issueArgs[0])) { "Player must be online on this server" }

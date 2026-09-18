@@ -128,6 +128,8 @@ class BuilderToolsDomainTest : FunSpec({
             setLong("runtime.health-refresh-period-ticks", 40L)
             setLong("runtime.player-recovery-retry-period-ticks", 80L)
             setInt("runtime.progress-every-batches", 3)
+            setInt("construction.blocks-per-cycle", 37)
+            setLong("construction.tick-period-ticks", 4L)
             setDouble("preview.plan-display-range", 48.0)
             setDouble("preview.block-display-scale", 1.0)
             setInt("preview.max-plan-displays", 320)
@@ -172,6 +174,8 @@ class BuilderToolsDomainTest : FunSpec({
         configured.healthRefreshPeriodTicks shouldBe 40L
         configured.playerRecoveryRetryPeriodTicks shouldBe 80L
         configured.progressEveryBatches shouldBe 3
+        configured.constructionBlocksPerCycle shouldBe 37
+        configured.constructionTickPeriod shouldBe 4L
         configured.previewPlanDisplayRange shouldBe 48.0
         configured.previewBlockDisplayScale shouldBe 1.0f
         configured.previewMaxPlanDisplays shouldBe 320

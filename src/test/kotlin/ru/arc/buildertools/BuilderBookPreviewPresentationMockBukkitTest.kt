@@ -27,11 +27,12 @@ import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
 import java.time.Duration
+import java.util.function.Consumer
 import java.util.Locale
 import java.util.UUID
 
 class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
-    test("fixed plan retains a clickable world plaque until confirmation cleanup") {
+    test("fixed plan retains a clickable world hologram until confirmation cleanup") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -48,9 +49,15 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 val panel = mockk<org.bukkit.entity.Interaction>(relaxed = true)
                 every { panel.uniqueId } returns UUID.randomUUID()
                 every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.TextDisplay::class.java, any<java.util.function.Consumer<org.bukkit.entity.TextDisplay>>()) } answers {
-                    mockk<org.bukkit.entity.TextDisplay>(relaxed = true).also { displays += it }
+                    mockk<org.bukkit.entity.TextDisplay>(relaxed = true).also {
+                        displays += it
+                        thirdArg<Consumer<org.bukkit.entity.TextDisplay>>().accept(it)
+                    }
                 }
-                every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<java.util.function.Consumer<org.bukkit.entity.Interaction>>()) } returns panel
+                every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<java.util.function.Consumer<org.bukkit.entity.Interaction>>()) } answers {
+                    thirdArg<Consumer<org.bukkit.entity.Interaction>>().accept(panel)
+                    panel
+                }
                 every { site.world } returns panelWorld
                 every { site.adjustedCenter } returns player.location
                 val host = PreviewHost(site, BuilderBookPreviewConfirmation(
@@ -62,13 +69,19 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     presentation.close(player.uniqueId)
                     presentation.retainConfirmation(site)
                     displays.size shouldBe 2
+                    displays.forEach { display ->
+                        io.mockk.verify(exactly = 1) { display.displayWidth = 3f }
+                        io.mockk.verify(exactly = 1) { display.displayHeight = 1.5f }
+                    }
+                    io.mockk.verify(exactly = 1) { panel.interactionWidth = 3f }
+                    io.mockk.verify(exactly = 1) { panel.interactionHeight = 1.5f }
                     val event = org.bukkit.event.player.PlayerInteractEntityEvent(
                         player, panel, org.bukkit.inventory.EquipmentSlot.HAND,
                     )
                     paper.callEvent(event)
                     event.isCancelled.shouldBeTrue()
                     player.openInventory.topInventory.getItem(25)?.type shouldBe Material.LIME_CONCRETE
-                    plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Начать строительство"
+                    plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Подтвердить строительство"
                     presentation.clearConfirmation(player.uniqueId)
                     io.mockk.verify(exactly = 1) { panel.remove() }
                     displays.forEach { display -> io.mockk.verify(exactly = 1) { display.remove() } }
@@ -129,7 +142,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         }
     }
 
-    test("closing build confirmation restores the world plaque and placement stage") {
+    test("closing build confirmation restores the world hologram and placement stage") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -151,13 +164,13 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                         cooldownRemaining = Duration.ZERO,
                         requiredMaterials = emptyList(),
                     ),
+                    deferPreparation = true,
+                    hasCurrentConfirmation = false,
                 )
 
                 previewPresentation(plugin, config, host).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     click(paper, player, 25).isCancelled.shouldBeTrue()
-                    paper.performTicks(1)
-
                     paper.callEvent(InventoryCloseEvent(player.openInventory))
 
                     host.restoreCalls shouldBe 1
@@ -165,7 +178,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     presentation.openPlacementForTest(player, site)
                     val reopened = player.openInventory.topInventory
                     reopened.getItem(25)?.type shouldBe Material.LIME_CONCRETE
-                    plain(reopened.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Проверить и продолжить"
+                    plain(reopened.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Подтвердить строительство"
                     host.restoreCalls shouldBe 1
                 }
             } finally {
@@ -174,7 +187,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         }
     }
 
-    test("placement menu moves only the preview session and continues to a cooldown-aware confirmation") {
+    test("placement menu moves only the preview session and confirms from the same hologram menu") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -246,26 +259,21 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
 
                     click(paper, player, 25).isCancelled.shouldBeTrue()
                     paper.performTicks(1)
-                    val confirmation = player.openInventory.topInventory
-                    (confirmation === placement) shouldBe true
-                    confirmation.size shouldBe 45
-                    confirmation.getItem(21)?.type shouldBe Material.CHEST
-                    plainLore(confirmation.getItem(21)!!) shouldContain "32× Oak Planks"
-                    confirmation.getItem(25)?.type shouldBe Material.BARRIER
-                    plain(confirmation.getItem(25)!!.itemMeta.displayName()!!) shouldContain "недоступно"
+                    val stillPlacement = player.openInventory.topInventory
+                    (stillPlacement === placement) shouldBe true
+                    stillPlacement.size shouldBe 45
+                    stillPlacement.getItem(21)?.type shouldBe Material.ARROW
+                    stillPlacement.getItem(25)?.type shouldBe Material.LIME_CONCRETE
+                    plain(stillPlacement.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Подтвердить строительство"
                     host.confirmCalls shouldBe 0
 
-                    click(paper, player, 29).isCancelled.shouldBeTrue()
-                    paper.performTicks(1)
                     host.confirmation = host.confirmation.copy(
                         cooldownRemaining = Duration.ZERO,
                         requiredMaterials = emptyList(),
                     )
                     click(paper, player, 25).isCancelled.shouldBeTrue()
-                    paper.performTicks(1)
-                    val noMaterials = player.openInventory.topInventory
-                    noMaterials.getItem(21)?.type shouldBe Material.GRAY_STAINED_GLASS_PANE
-                    noMaterials.getItem(25)?.type shouldBe Material.LIME_CONCRETE
+                    host.confirmCalls shouldBe 1
+                    host.completedConfirmations shouldBe listOf(BuilderBookPreviewConfirmationKind.CONSTRUCTION)
                 }
             } finally {
                 ConfigManager.clear()
@@ -273,7 +281,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         }
     }
 
-    test("draft activation stays in the preview gui and presents the full price before minting") {
+    test("draft activation stays in the preview gui and uses its green button to mint") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -332,15 +340,8 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     viewRange = 64.0,
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
-                    click(paper, player, 25).isCancelled.shouldBeTrue()
-                    paper.performTicks(1)
-
-                    val confirmation = player.openInventory.topInventory
-                    plain(confirmation.getItem(19)!!.itemMeta.displayName()!!) shouldContain "Создание"
-                    confirmation.getItem(21)?.type shouldBe Material.SUNFLOWER
-                    plain(confirmation.getItem(21)!!.itemMeta.displayName()!!) shouldContain "148.45"
-                    plain(confirmation.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Создать"
-
+                    plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain
+                        "Подтвердить строительство"
                     click(paper, player, 25).isCancelled.shouldBeTrue()
                     host.confirmCalls shouldBe 1
                     host.completedConfirmations shouldBe listOf(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION)
@@ -419,11 +420,14 @@ private fun item(material: Material, amount: Int): BuilderItemAmount = BuilderIt
 private class PreviewHost(
     private val site: ConstructionSite,
     var confirmation: BuilderBookPreviewConfirmation,
+    private val deferPreparation: Boolean = false,
+    private val hasCurrentConfirmation: Boolean = true,
 ) : BuilderBookPreviewPresentationHost {
     val adjustments = mutableListOf<BuildBookPreviewAdjustment>()
     var confirmCalls = 0
     var restoreCalls = 0
     val completedConfirmations = mutableListOf<BuilderBookPreviewConfirmationKind>()
+    var pendingPreparation: ((BuilderBookPreviewConfirmation?) -> Unit)? = null
 
     override fun adjust(player: org.bukkit.entity.Player, adjustment: BuildBookPreviewAdjustment): ConstructionSite {
         adjustments += adjustment
@@ -434,9 +438,12 @@ private class PreviewHost(
         player: org.bukkit.entity.Player,
         site: ConstructionSite,
         complete: (BuilderBookPreviewConfirmation?) -> Unit,
-    ) = complete(confirmation)
+    ) {
+        if (deferPreparation) pendingPreparation = complete else complete(confirmation)
+    }
 
-    override fun currentConfirmation(player: org.bukkit.entity.Player): BuilderBookPreviewConfirmation = confirmation
+    override fun currentConfirmation(player: org.bukkit.entity.Player): BuilderBookPreviewConfirmation? =
+        confirmation.takeIf { hasCurrentConfirmation }
 
     override fun confirm(player: org.bukkit.entity.Player): Boolean {
         confirmCalls += 1

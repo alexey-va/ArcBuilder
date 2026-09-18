@@ -246,6 +246,7 @@ internal object BuilderToolsReloadPreflight {
         "timers.journal-retention" to YamlValueType.DURATION,
         "construction.container-radius" to YamlValueType.INT,
         "construction.online-inventory-range" to YamlValueType.DOUBLE,
+        "construction.blocks-per-cycle" to YamlValueType.INT,
         "construction.tick-period-ticks" to YamlValueType.LONG,
         "construction.max-container-probes-per-tick" to YamlValueType.INT,
         "construction.max-cached-containers-per-project" to YamlValueType.INT,

@@ -17,10 +17,7 @@ internal enum class BuilderBookPreparedPlan {
 internal enum class BuilderBookInteractionDecision {
     OPEN_PREVIEW,
     REPLACE_PLAN_WITH_PREVIEW,
-    PREPARE_PLAN,
-    RESHOW_PREPARED_PLAN,
     REQUIRE_PREVIEW,
-    DISCARD_PLAN_AND_REQUIRE_PREVIEW,
 }
 
 /** Keeps book positioning and prepared-plan previews in one explicit state machine. */
@@ -35,15 +32,10 @@ internal object BuilderBookInteractionPolicy {
         } else {
             BuilderBookInteractionDecision.REPLACE_PLAN_WITH_PREVIEW
         }
-        BuilderBookClick.AIR -> when (preparedPlan) {
-            BuilderBookPreparedPlan.SAME_BOOK -> BuilderBookInteractionDecision.RESHOW_PREPARED_PLAN
-            BuilderBookPreparedPlan.OTHER_BOOK -> BuilderBookInteractionDecision.DISCARD_PLAN_AND_REQUIRE_PREVIEW
-            BuilderBookPreparedPlan.NONE -> if (exactBookPreviewOpen) {
-                BuilderBookInteractionDecision.PREPARE_PLAN
-            } else {
-                BuilderBookInteractionDecision.REQUIRE_PREVIEW
-            }
-        }
+        // A build book is confirmed only from the green button in the hologram
+        // menu. Air clicks are deliberately inert at the event boundary; this
+        // result keeps direct policy callers on the same safe path.
+        BuilderBookClick.AIR -> BuilderBookInteractionDecision.REQUIRE_PREVIEW
     }
 }
 

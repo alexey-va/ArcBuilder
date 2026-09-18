@@ -31,7 +31,11 @@ class BuilderInstantConstructionTest : FunSpec({
         every { port.currentBlockData(any()) } answers { blocks[firstArg()] ?: "minecraft:air" }
         every { port.isStepApplied(any()) } answers { val step = firstArg<BuilderConstructionStep>(); blocks[step.change.position] == step.change.afterBlockData }
         every { port.canModify(any(), any()) } returns true
-        every { port.apply(any(), any()) } answers { val step = secondArg<BuilderConstructionStep>(); blocks[step.change.position] = step.change.afterBlockData }
+        every { port.apply(any(), any()) } answers {
+            val step = secondArg<BuilderConstructionStep>()
+            blocks[step.change.position] = step.change.afterBlockData
+            1
+        }
         return port
     }
     test("waiting project completes all remaining blocks in one batch with no resource calls") {
@@ -111,7 +115,10 @@ class BuilderInstantConstructionTest : FunSpec({
         var metadataApplied = false
         every { port.isStepApplied(any()) } answers { metadataApplied }
         every { port.canModify(any(), any()) } returns false
-        every { port.apply(any(), any()) } answers { metadataApplied = true }
+        every { port.apply(any(), any()) } answers {
+            metadataApplied = true
+            1
+        }
         BuilderConstructionProjectController.tick(intent, 1003, port)?.state shouldBe BuilderConstructionProjectState.COMPLETED
         metadataApplied shouldBe true
         verify(exactly = 0) { port.canModify(any(), any()) }

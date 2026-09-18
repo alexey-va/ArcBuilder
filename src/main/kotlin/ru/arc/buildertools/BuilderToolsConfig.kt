@@ -39,7 +39,8 @@ class BuilderToolsConfig(
     val maximumRange: Double get() = config.double("limits.maximum-range", 64.0)
     val constructionContainerRadius: Int get() = config.integer("construction.container-radius", 4)
     val constructionOnlineInventoryRange: Double get() = config.double("construction.online-inventory-range", 48.0)
-    val constructionTickPeriod: Long get() = config.long("construction.tick-period-ticks", 1L)
+    val constructionBlocksPerCycle: Int get() = config.integer("construction.blocks-per-cycle", 10)
+    val constructionTickPeriod: Long get() = config.long("construction.tick-period-ticks", 3L)
     val bookApplicationCooldown: Duration
         get() = config.duration("construction.book-application-cooldown", Duration.ofHours(12))
     val constructionMaxContainerProbesPerTick: Int
@@ -197,6 +198,7 @@ class BuilderToolsConfig(
         require(constructionOnlineInventoryRange.isFinite() && constructionOnlineInventoryRange in 1.0..128.0) {
             "Builder construction online inventory range is invalid"
         }
+        require(constructionBlocksPerCycle in 1..256) { "Builder construction block batch size is invalid" }
         require(constructionTickPeriod in 1L..100L) { "Builder construction tick period is invalid" }
         require(bookApplicationCooldown in Duration.ofHours(12)..Duration.ofDays(7)) {
             "Builder build-book application cooldown must be between 12 hours and 7 days"
@@ -475,8 +477,6 @@ class BuilderToolsConfig(
                 "book.hold-hint.subtitle",
                 "book.preview-panel",
                 "book.preview-menu.placement.title",
-                "book.preview-menu.confirmation.title",
-                "book.preview-menu.confirmation.activation-title",
                 "book.preview-menu.inspection.title",
                 "book.plan-ready.title",
                 "book.plan-ready.subtitle",
@@ -607,18 +607,6 @@ class BuilderToolsConfig(
                 "book.preview-menu.placement.toward.name",
                 "book.preview-menu.placement.cancel.name",
                 "book.preview-menu.placement.continue.name",
-                "book.preview-menu.confirmation.overview.name",
-                "book.preview-menu.confirmation.activation-overview.name",
-                "book.preview-menu.confirmation.activation-price.name",
-                "book.preview-menu.confirmation.materials.name",
-                "book.preview-menu.confirmation.material-line",
-                "book.preview-menu.confirmation.material-more",
-                "book.preview-menu.confirmation.materials-none",
-                "book.preview-menu.confirmation.back.name",
-                "book.preview-menu.confirmation.start.name",
-                "book.preview-menu.confirmation.activation-start.name",
-                "book.preview-menu.confirmation.blocked.name",
-                "book.preview-menu.confirmation.cancel.name",
                 "book.preview-menu.inspection.overview.name",
                 "book.preview-menu.inspection.mirror.yes",
                 "book.preview-menu.inspection.mirror.no",
@@ -667,15 +655,6 @@ class BuilderToolsConfig(
                 "book.preview-menu.placement.toward.lore",
                 "book.preview-menu.placement.cancel.lore",
                 "book.preview-menu.placement.continue.lore",
-                "book.preview-menu.confirmation.overview.lore",
-                "book.preview-menu.confirmation.activation-overview.lore",
-                "book.preview-menu.confirmation.activation-price.lore",
-                "book.preview-menu.confirmation.materials.lore",
-                "book.preview-menu.confirmation.back.lore",
-                "book.preview-menu.confirmation.start.lore",
-                "book.preview-menu.confirmation.activation-start.lore",
-                "book.preview-menu.confirmation.blocked.lore",
-                "book.preview-menu.confirmation.cancel.lore",
                 "book.preview-menu.inspection.overview.lore",
             ),
         )

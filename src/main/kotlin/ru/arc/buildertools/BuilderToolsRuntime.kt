@@ -388,7 +388,7 @@ internal class BuilderToolsRuntime(
             }
         }
 
-        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) {
+        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int {
             val mutations = atomicSteps(project, step).map { atomicStep ->
                 val change = atomicStep.change
                 val world = Bukkit.getWorld(change.position.worldId)
@@ -444,7 +444,15 @@ internal class BuilderToolsRuntime(
                 project.cursor,
                 constructionFeedbackSettings,
             )
+            return changed.size
         }
+
+        override fun appliedBlockCount(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int =
+            atomicSteps(project, step).count { atomicStep ->
+                runCatching {
+                    currentBlockData(atomicStep.change.position) == atomicStep.change.afterBlockData
+                }.getOrDefault(false)
+            }.coerceAtLeast(1)
     }
     private var recovering = true
     private var recoveryBlocked = false
@@ -544,7 +552,6 @@ internal class BuilderToolsRuntime(
                 ),
                 panelGlowColor = Color.fromRGB(config.constructionSiteGlowColor.removePrefix("#").toInt(16)),
                 viewRange = config.constructionSiteViewRange,
-                materialLineLimit = config.bookPlayerMaterialsSummaryLimit,
             ).also { initializedBookPreviewPresentation = it }
             BuildingManager.installPreviewBridge(bookPreviewPresentation)
             Bukkit.getPluginManager().registerEvents(this, plugin)
@@ -747,6 +754,7 @@ internal class BuilderToolsRuntime(
                 "Builder-tools health publication task was not scheduled"
             }
             loadRecoveryState()
+            preloadSystemBuilds()
             books.start()
             loadConstructionProjects()
             checkNotNull(
@@ -774,6 +782,23 @@ internal class BuilderToolsRuntime(
             BuildingManager.installPreviewBridge(null)
             displayRenderer.close()
             throw failure
+        }
+    }
+
+    private fun preloadSystemBuilds() {
+        if (systemBuildBookCatalog == null || systemBuildBookIds.isEmpty()) return
+        try {
+            storageExecutor.submit {
+                try {
+                    val uniqueIds = systemBuildBookIds.distinct()
+                    val loaded = BuildingManager.preload(uniqueIds)
+                    info("Builder system schematics preloaded: {}/{}", loaded, uniqueIds.size)
+                } catch (failure: Throwable) {
+                    warn("Builder system schematic preload failed: {}", failure.message)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            warn("Builder system schematic preload was rejected because storage is stopping")
         }
     }
 
@@ -1181,6 +1206,14 @@ internal class BuilderToolsRuntime(
         )
     }
 
+    /** Opens the owner preview menu for MockBukkit, whose world does not expose Interaction entities. */
+    internal fun openBookPreviewMenuForTest(player: Player) {
+        val site = checkNotNull(BuildingManager.pending(player.uniqueId)) {
+            "Build-book preview is missing"
+        }
+        bookPreviewPresentation.openPlacementForTest(player, site)
+    }
+
     private fun placementData(material: Material) = material
         .takeIf(safety::isSafeMaterial)
         ?.createBlockData()
@@ -1492,6 +1525,9 @@ internal class BuilderToolsRuntime(
     private fun confirm(player: Player, buyMissing: Boolean = false, buildBook: Boolean = false) {
         val pending = previews[player.uniqueId] ?: throw BuilderUserFailure("errors.expired")
         val plan = pending.plan
+        if (plan.kind == BuilderPlanKind.BUILD_BOOK && !buildBook) {
+            throw BuilderUserFailure("book.preview-required")
+        }
         if (buildBook || plan.kind == BuilderPlanKind.BUILD_BOOK) ensureBuildBookAvailable(player) else ensureAvailable(player)
         if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
         if (plan.expiresAtMillis <= System.currentTimeMillis()) {
@@ -1646,10 +1682,11 @@ internal class BuilderToolsRuntime(
                 ),
             ) { "Builder construction activation resource is already locked" }
             constructionLeaseHeld = true
-            attemptedTarget = BuilderConstructionProjectController.tick(
+            attemptedTarget = BuilderConstructionProjectController.tickValidated(
                 durablePrepared,
                 System.currentTimeMillis(),
                 constructionPort,
+                config.constructionBlocksPerCycle,
             )
             player.updateInventory()
             val current = if (attemptedTarget == null) {
@@ -1804,7 +1841,12 @@ internal class BuilderToolsRuntime(
                         ?: constructionInstantRequests[expected.projectId]?.let { requester ->
                             BuilderInstantConstruction.prepare(expected, requester, System.currentTimeMillis())
                         }
-                        ?: BuilderConstructionProjectController.tick(expected, System.currentTimeMillis(), constructionPort)
+                        ?: BuilderConstructionProjectController.tickValidated(
+                            expected,
+                            System.currentTimeMillis(),
+                            constructionPort,
+                            config.constructionBlocksPerCycle,
+                        )
                 }
             } catch (failure: Throwable) {
                 constructionWrites.remove(expected.projectId)
@@ -2834,12 +2876,9 @@ internal class BuilderToolsRuntime(
         val item = event.item ?: return
         if (event.hand == EquipmentSlot.HAND) {
             BuildBookCodec.read(item)?.let { data ->
-                if (
-                    event.action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK ||
-                    event.action == org.bukkit.event.block.Action.RIGHT_CLICK_AIR
-                ) {
+                if (event.action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
                     event.isCancelled = true
-                    handleBookInteraction(player, item, data, event.action, event.clickedBlock?.location)
+                    handleBookInteraction(player, item, data, event.clickedBlock?.location)
                     return
                 }
             }
@@ -2863,7 +2902,6 @@ internal class BuilderToolsRuntime(
         player: Player,
         item: ItemStack,
         data: BuildBookData,
-        action: org.bukkit.event.block.Action,
         clickedLocation: Location?,
     ) {
         try {
@@ -2881,11 +2919,7 @@ internal class BuilderToolsRuntime(
             val current = BuildingManager.pending(player.uniqueId)
             val preparedPlan = preparedBookPlan(player.uniqueId, effectiveItem)
             val decision = BuilderBookInteractionPolicy.decide(
-                action = if (action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
-                    BuilderBookClick.BLOCK
-                } else {
-                    BuilderBookClick.AIR
-                },
+                action = BuilderBookClick.BLOCK,
                 exactBookPreviewOpen = current?.isExactOpenPreview(player, effectiveData) == true,
                 preparedPlan = preparedPlan,
             )
@@ -2917,22 +2951,6 @@ internal class BuilderToolsRuntime(
                             ),
                         )
                     }
-                }
-                BuilderBookInteractionDecision.PREPARE_PLAN -> {
-                    val site = checkNotNull(current)
-                    if (effectiveData.draft) {
-                        books.handleCommand(player, listOf("activate"))
-                    } else {
-                        startPlayerBuildBook(player, site, effectiveItem)
-                    }
-                }
-                BuilderBookInteractionDecision.RESHOW_PREPARED_PLAN -> {
-                    val plan = checkNotNull(previews.plan(player.uniqueId))
-                    showPlanSummary(player, plan, includeShop = false)
-                }
-                BuilderBookInteractionDecision.DISCARD_PLAN_AND_REQUIRE_PREVIEW -> {
-                    discardPendingPlan(player.uniqueId)
-                    throw BuilderUserFailure("book.preview-required")
                 }
                 BuilderBookInteractionDecision.REQUIRE_PREVIEW -> throw BuilderUserFailure("book.preview-required")
             }

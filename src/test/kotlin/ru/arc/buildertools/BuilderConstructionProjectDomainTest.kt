@@ -291,7 +291,7 @@ class BuilderConstructionProjectDomainTest : FunSpec({
                 BuilderResourceMutationResult.RETRY
             override fun rollbackResource(project: BuilderConstructionProjectRecord, mutation: BuilderResourceMutation) =
                 BuilderResourceMutationResult.RETRY
-            override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) = Unit
+            override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep) = 1
         }
 
         val resumed = BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(

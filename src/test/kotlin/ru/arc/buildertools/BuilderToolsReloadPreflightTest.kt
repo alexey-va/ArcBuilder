@@ -23,6 +23,8 @@ class BuilderToolsReloadPreflightTest : FunSpec({
 
         candidate.enabled shouldBe false
         candidate.constructionMaxContainerProbesPerTick shouldBe 512
+        candidate.constructionBlocksPerCycle shouldBe 10
+        candidate.constructionTickPeriod shouldBe 3L
     }
 
     test("malformed YAML is rejected before Config can degrade it into default values") {
@@ -62,7 +64,7 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         val path = root.resolve("modules/builder-tools.yml")
         Files.writeString(
             path,
-            Files.readString(path).replace("blocks-per-tick: 16", "blocks-per-tick: nope"),
+            Files.readString(path).replace("blocks-per-tick: 16", "blocks-per-tick: \"nope\""),
         )
 
         val failure = shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
@@ -118,6 +120,8 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe true
         val merged = Config(root, "modules/builder-tools.yml")
         merged.integer("runtime.progress-every-batches") shouldBe 10
+        merged.integer("construction.blocks-per-cycle") shouldBe 10
+        merged.long("construction.tick-period-ticks") shouldBe 3L
         merged.integer("preview.max-plan-displays") shouldBe 4096
         merged.double("preview.block-display-scale") shouldBe 1.0
         merged.integer("construction.effects.interval-blocks") shouldBe 4
