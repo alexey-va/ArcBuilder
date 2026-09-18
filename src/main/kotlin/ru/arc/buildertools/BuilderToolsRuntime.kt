@@ -1218,6 +1218,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun openBookPreviewMenu(player: Player) {
+        books.ensureAvailable(player)
         val site = BuildingManager.pending(player.uniqueId)
             ?: throw BuilderUserFailure("book.preview-required")
         bookPreviewPresentation.openPlacementForOwner(player, site)
