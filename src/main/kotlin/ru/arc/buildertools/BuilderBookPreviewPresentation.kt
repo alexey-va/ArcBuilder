@@ -335,7 +335,14 @@ internal class BuilderBookPreviewPresentation(
         }
     }
 
-    internal fun openPlacementForTest(player: Player, site: ConstructionSite) = openPlacement(player, site)
+    internal fun openPlacementForOwner(player: Player, site: ConstructionSite) {
+        require(site.player.uniqueId == player.uniqueId) {
+            "Build-book placement menu can only be opened by the preview owner"
+        }
+        openPlacement(player, site)
+    }
+
+    internal fun openPlacementForTest(player: Player, site: ConstructionSite) = openPlacementForOwner(player, site)
 
     internal fun openInspectionForTest(player: Player, site: ConstructionSite) = openInspection(player, site)
 

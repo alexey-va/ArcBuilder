@@ -700,7 +700,7 @@ locales:
         <#8c8c8c>   2. <#e6fff3>Нажмите по голограмме ПКМ — откроется единое меню.
         <#8c8c8c>   <#2bba43>Зелёный куб<#e6fff3> показывает выбранный блок.
         <#8c8c8c>   Превью и голограмма исчезнут сами через 3 минуты.
-        <#8c8c8c>   <click:run_command:'/builder cancel'><#c42323>[✖ Убрать превью]</click>
+        <#8c8c8c>   <click:run_command:'/builder book menu'><#2bba43>[▶ Открыть меню]</click> <click:run_command:'/builder cancel'><#c42323>[✖ Убрать превью]</click>
       selector:
         title: "Выбор дома"
         name: "<white><name>"
@@ -1575,7 +1575,7 @@ locales:
         <dark_gray>   2. <white>Right-click the hologram to open the single menu.
         <dark_gray>   <green>The green cube<white> marks the selected block.
         <dark_gray>   The preview and hologram disappear automatically after 3 minutes.
-        <dark_gray>   <click:run_command:'/builder cancel'><red>[✖ Remove preview]</click>
+        <dark_gray>   <click:run_command:'/builder book menu'><green>[▶ Open menu]</click> <click:run_command:'/builder cancel'><red>[✖ Remove preview]</click>
       selector:
         title: "Choose a house"
         name: "<white><name>"

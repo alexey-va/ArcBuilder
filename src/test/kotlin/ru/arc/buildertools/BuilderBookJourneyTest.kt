@@ -119,6 +119,11 @@ class BuilderBookJourneyTest : FunSpec({
         config.string("locales.en.book.status.changed") shouldContain "/builder book status"
         config.string("locales.ru.book.preview-required") shouldContain "ПКМ"
         config.string("locales.en.book.preview-required").lowercase() shouldContain "right-click"
+        listOf("ru", "en").forEach { locale ->
+            val previewOpened = config.string("locales.$locale.book.preview-opened")
+            previewOpened shouldContain "/builder book menu"
+            (previewOpened.indexOf("/builder book menu") < previewOpened.indexOf("/builder cancel")) shouldBe true
+        }
         config.string("locales.ru.book.status.first-point") shouldContain "ПКМ"
         config.string("locales.en.book.status.first-point") shouldContain "right-click"
         config.string("locales.ru.book.status.second-point") shouldContain "ЛКМ"

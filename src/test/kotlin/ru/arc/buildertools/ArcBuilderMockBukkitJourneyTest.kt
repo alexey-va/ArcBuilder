@@ -1249,6 +1249,8 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
                 journey.renderer.hasBook(player.uniqueId) shouldBe true
                 checkNotNull(BuildingManager.pending(player.uniqueId)).centerBlock.blockX shouldBe 9
+                player.performCommand("builder book menu") shouldBe true
+                player.openInventory.topInventory.size shouldBe 45
             }
         } finally {
             unmockkStatic(BukkitAdapter::class)

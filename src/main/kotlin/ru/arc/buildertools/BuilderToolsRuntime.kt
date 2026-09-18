@@ -865,7 +865,7 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.CONFIRM -> listOf("buy")
             BuilderRootCommand.DISCONNECT -> listOf("confirm")
             BuilderRootCommand.PASTE -> listOf("rotate", "left", "right")
-            BuilderRootCommand.BOOK -> listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel")
+            BuilderRootCommand.BOOK -> listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel", "menu")
             BuilderRootCommand.FILL -> safeMaterialNames
             else -> emptyList()
         }
@@ -923,7 +923,10 @@ internal class BuilderToolsRuntime(
                     ),
                 )
             }
-            BuilderRootCommand.BOOK -> books.handleCommand(player, args.drop(1))
+            BuilderRootCommand.BOOK -> when (args.getOrNull(1)?.lowercase(Locale.ROOT)) {
+                "menu" -> openBookPreviewMenu(player)
+                else -> books.handleCommand(player, args.drop(1))
+            }
             BuilderRootCommand.PASTE -> {
                 when (args.getOrNull(1)?.lowercase(Locale.ROOT)) {
                     null -> Unit
@@ -1211,7 +1214,13 @@ internal class BuilderToolsRuntime(
         val site = checkNotNull(BuildingManager.pending(player.uniqueId)) {
             "Build-book preview is missing"
         }
-        bookPreviewPresentation.openPlacementForTest(player, site)
+        bookPreviewPresentation.openPlacementForOwner(player, site)
+    }
+
+    private fun openBookPreviewMenu(player: Player) {
+        val site = BuildingManager.pending(player.uniqueId)
+            ?: throw BuilderUserFailure("book.preview-required")
+        bookPreviewPresentation.openPlacementForOwner(player, site)
     }
 
     private fun placementData(material: Material) = material
