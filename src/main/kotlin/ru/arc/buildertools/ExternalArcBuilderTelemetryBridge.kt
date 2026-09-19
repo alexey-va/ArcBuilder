@@ -6,11 +6,14 @@ import java.util.UUID
 
 /** Optional ARC product telemetry; a missing ARC never affects a committed build. */
 internal object ExternalArcBuilderTelemetryBridge {
-    private val telemetry by lazy { Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java) }
-
     fun completed(playerId: UUID, operationId: String) {
-        runCatching {
-            telemetry?.record(
+        if (!Bukkit.getPluginManager().isPluginEnabled("ARC")) return
+        runCatching { AvailableArcTelemetry.completed(playerId, operationId) }
+    }
+
+    private object AvailableArcTelemetry {
+        fun completed(playerId: UUID, operationId: String) {
+            Bukkit.getServicesManager().load(ArcTelemetryProvider::class.java)?.record(
                 playerId,
                 "arcbuilder",
                 "autobuild",
