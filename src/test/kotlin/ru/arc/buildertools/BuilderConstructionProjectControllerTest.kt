@@ -108,7 +108,8 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         override fun currentBlockData(position: BuilderBlockPos): String = blocks[position] ?: blockData
 
         override fun isStepApplied(step: BuilderConstructionStep): Boolean =
-            blockData == step.change.afterBlockData && (step.lootTableKey == null || lootApplied)
+            currentBlockData(step.change.position) == step.change.afterBlockData &&
+                (step.lootTableKey == null || lootApplied)
 
         override fun canModify(
             project: BuilderConstructionProjectRecord,
@@ -237,6 +238,38 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         batched.state shouldBe BuilderConstructionProjectState.ACTIVE
         batched.cursor shouldBe 3
         port.applied shouldBe 3
+    }
+
+    test("already-applied pure steps still consume the batch step budget") {
+        val port = FakePort()
+        val project = pureProject(stepCount = 6)
+        project.steps.forEach { port.seed(it.change.position, it.change.afterBlockData) }
+
+        val batched = checkNotNull(
+            BuilderConstructionProjectController.tick(
+                project,
+                createdAt + 2,
+                port,
+                maxBlocksPerCycle = 3,
+            ),
+        )
+
+        batched.state shouldBe BuilderConstructionProjectState.ACTIVE
+        batched.cursor shouldBe 3
+        port.applied shouldBe 0
+    }
+
+    test("construction cadence throttles pure batches but never resource stages") {
+        val pure = pureProject(stepCount = 2)
+        val resource = active()
+
+        BuilderConstructionCadencePolicy.TIMER_PERIOD_TICKS shouldBe 1L
+        (0L..5L).map { tick ->
+            BuilderConstructionCadencePolicy.shouldRun(pure, tick, pureBatchPeriodTicks = 3L)
+        } shouldBe listOf(true, false, false, true, false, false)
+        (0L..5L).all { tick ->
+            BuilderConstructionCadencePolicy.shouldRun(resource, tick, pureBatchPeriodTicks = 3L)
+        } shouldBe true
     }
 
     test("inventory movement after planning pauses for a fresh material snapshot") {

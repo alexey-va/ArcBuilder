@@ -31,6 +31,11 @@ object BuildingManager {
 
     @JvmStatic fun addBuilding(building: Building) { buildings[building.fileName] = building }
 
+    /** Drops cached schematics whose files may have changed between runtime generations. */
+    internal fun invalidateBuildings(buildingIds: Iterable<String>) {
+        buildingIds.forEach(buildings::remove)
+    }
+
     @JvmStatic fun getBuilding(fileName: String): Building? {
         buildings[fileName]?.let { return it }
         if (!fileName.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}"))) return null

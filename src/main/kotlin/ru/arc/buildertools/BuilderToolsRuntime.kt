@@ -457,6 +457,7 @@ internal class BuilderToolsRuntime(
     private var recovering = true
     private var recoveryBlocked = false
     private var closed = false
+    private var constructionSchedulerTick = 0L
     private val runtimeHealth = AtomicReference(
         RuntimeHealthContribution(state = RuntimeHealthState.STARTING),
     )
@@ -759,8 +760,8 @@ internal class BuilderToolsRuntime(
             loadConstructionProjects()
             checkNotNull(
                 taskScope.runTimer(
-                    config.constructionTickPeriod,
-                    config.constructionTickPeriod,
+                    BuilderConstructionCadencePolicy.TIMER_PERIOD_TICKS,
+                    BuilderConstructionCadencePolicy.TIMER_PERIOD_TICKS,
                     ::tickConstructionProjects,
                 ),
             ) { "Builder construction project task was not scheduled" }
@@ -787,6 +788,9 @@ internal class BuilderToolsRuntime(
 
     private fun preloadSystemBuilds() {
         if (systemBuildBookCatalog == null || systemBuildBookIds.isEmpty()) return
+        // The catalog has just revalidated current schematic digests. Do not let a
+        // previous runtime generation supply an old clipboard for the same file name.
+        BuildingManager.invalidateBuildings(systemBuildBookIds)
         try {
             storageExecutor.submit {
                 try {
@@ -1219,9 +1223,9 @@ internal class BuilderToolsRuntime(
 
     private fun openBookPreviewMenu(player: Player) {
         books.ensureAvailable(player)
-        val site = BuildingManager.pending(player.uniqueId)
-            ?: throw BuilderUserFailure("book.preview-required")
-        bookPreviewPresentation.openPlacementForOwner(player, site)
+        if (!bookPreviewPresentation.openCurrentPlacement(player, BuildingManager.pending(player.uniqueId))) {
+            throw BuilderUserFailure("book.preview-required")
+        }
     }
 
     private fun placementData(material: Material) = material
@@ -1813,19 +1817,29 @@ internal class BuilderToolsRuntime(
 
     private fun tickConstructionProjects() {
         if (closed || recoveryBlocked) return
+        val schedulerTick = constructionSchedulerTick++
         val now = System.currentTimeMillis()
         plannedConstructionProjects.entries.removeIf { (_, project) -> project.plan.expiresAtMillis <= now }
         val candidates = constructionProjects.values.filter { record ->
-            (record.state == BuilderConstructionProjectState.PAUSED && constructionPauseRequests.cancellationPending(record.projectId)) ||
-                record.state == BuilderConstructionProjectState.PREPARED ||
-                record.state == BuilderConstructionProjectState.ACTIVE ||
-                record.state == BuilderConstructionProjectState.WAITING_MATERIALS ||
-                record.state == BuilderConstructionProjectState.INPUT_PREPARED ||
-                record.state == BuilderConstructionProjectState.WORLD_PREPARED ||
-                record.state == BuilderConstructionProjectState.OUTPUT_PENDING ||
-                record.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
-                record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT ||
-                canRetryAppliedConstructionRecovery(record)
+            (
+                (record.state == BuilderConstructionProjectState.PAUSED && constructionPauseRequests.cancellationPending(record.projectId)) ||
+                    record.state == BuilderConstructionProjectState.PREPARED ||
+                    record.state == BuilderConstructionProjectState.ACTIVE ||
+                    record.state == BuilderConstructionProjectState.WAITING_MATERIALS ||
+                    record.state == BuilderConstructionProjectState.INPUT_PREPARED ||
+                    record.state == BuilderConstructionProjectState.WORLD_PREPARED ||
+                    record.state == BuilderConstructionProjectState.OUTPUT_PENDING ||
+                    record.state == BuilderConstructionProjectState.WAITING_OUTPUT_SPACE ||
+                    record.state == BuilderConstructionProjectState.DELIVERING_OUTPUT ||
+                    canRetryAppliedConstructionRecovery(record)
+            ) && (
+                record.projectId in constructionInstantRequests ||
+                    BuilderConstructionCadencePolicy.shouldRun(
+                        record,
+                        schedulerTick,
+                        config.constructionTickPeriod,
+                    )
+            )
         }
         candidates.forEach { expected ->
             if (!constructionWrites.add(expected.projectId)) return@forEach

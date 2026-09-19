@@ -607,6 +607,8 @@ class BuilderToolsConfig(
                 "book.preview-menu.placement.toward.name",
                 "book.preview-menu.placement.cancel.name",
                 "book.preview-menu.placement.continue.name",
+                "book.preview-menu.placement.quote.name",
+                "book.preview-menu.placement.activate.name",
                 "book.preview-menu.inspection.overview.name",
                 "book.preview-menu.inspection.mirror.yes",
                 "book.preview-menu.inspection.mirror.no",
@@ -655,6 +657,8 @@ class BuilderToolsConfig(
                 "book.preview-menu.placement.toward.lore",
                 "book.preview-menu.placement.cancel.lore",
                 "book.preview-menu.placement.continue.lore",
+                "book.preview-menu.placement.quote.lore",
+                "book.preview-menu.placement.activate.lore",
                 "book.preview-menu.inspection.overview.lore",
             ),
         )

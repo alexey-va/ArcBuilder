@@ -952,12 +952,18 @@ internal object BuilderConstructionProjectController {
         val startCursor = record.cursor
         var cursor = startCursor
         var physicalBlocks = 0
+        var processedSteps = 0
         var stoppedTemporarily = false
         var stoppedInvalidly = false
 
-        while (cursor < record.steps.size && physicalBlocks < maxBlocksPerCycle) {
+        while (
+            cursor < record.steps.size &&
+            physicalBlocks < maxBlocksPerCycle &&
+            processedSteps < maxBlocksPerCycle
+        ) {
             val step = record.steps[cursor]
             if (step.requiredMaterial != null || step.output != null) break
+            processedSteps += 1
             val result = applyWorldOnlyStep(record, step, port)
             when (result) {
                 is WorldOnlyStepResult.Applied -> {

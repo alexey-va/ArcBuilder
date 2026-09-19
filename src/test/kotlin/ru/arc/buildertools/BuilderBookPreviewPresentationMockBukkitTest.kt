@@ -75,17 +75,21 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     }
                     io.mockk.verify(exactly = 1) { panel.interactionWidth = 3f }
                     io.mockk.verify(exactly = 1) { panel.interactionHeight = 1.5f }
+                    presentation.openCurrentPlacement(player, null) shouldBe true
+                    val chatMenu = player.openInventory.topInventory
                     val event = org.bukkit.event.player.PlayerInteractEntityEvent(
                         player, panel, org.bukkit.inventory.EquipmentSlot.HAND,
                     )
                     paper.callEvent(event)
                     event.isCancelled.shouldBeTrue()
+                    (player.openInventory.topInventory === chatMenu) shouldBe true
                     player.openInventory.topInventory.getItem(25)?.type shouldBe Material.LIME_CONCRETE
                     plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Подтвердить строительство"
                     presentation.clearConfirmation(player.uniqueId)
                     io.mockk.verify(exactly = 1) { panel.remove() }
                     displays.forEach { display -> io.mockk.verify(exactly = 1) { display.remove() } }
                     host.restoreCalls shouldBe 0
+                    presentation.openCurrentPlacement(player, null) shouldBe false
                 }
             } finally { ConfigManager.clear() }
         }
@@ -171,9 +175,18 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 previewPresentation(plugin, config, host).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     click(paper, player, 25).isCancelled.shouldBeTrue()
+                    val staleCompletion = checkNotNull(host.pendingPreparation)
                     paper.callEvent(InventoryCloseEvent(player.openInventory))
 
                     host.restoreCalls shouldBe 1
+
+                    presentation.openPlacementForTest(player, site)
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+                    host.hasCurrentConfirmation = true
+                    staleCompletion(host.confirmation)
+                    host.confirmCalls shouldBe 0
+                    checkNotNull(host.pendingPreparation)(host.confirmation)
+                    host.confirmCalls shouldBe 1
 
                     presentation.openPlacementForTest(player, site)
                     val reopened = player.openInventory.topInventory
@@ -258,6 +271,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     host.adjustments.last() shouldBe BuildBookPreviewAdjustment.ToggleMirror
 
                     click(paper, player, 25).isCancelled.shouldBeTrue()
+                    plain(checkNotNull(player.nextComponentMessage())) shouldContain "7 ч 0 мин"
                     paper.performTicks(1)
                     val stillPlacement = player.openInventory.topInventory
                     (stillPlacement === placement) shouldBe true
@@ -266,6 +280,11 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     stillPlacement.getItem(25)?.type shouldBe Material.LIME_CONCRETE
                     plain(stillPlacement.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Подтвердить строительство"
                     host.confirmCalls shouldBe 0
+                    // Even after conversion to a prepared plan, the same menu
+                    // must restore editable placement before moving it again.
+                    click(paper, player, 18).isCancelled.shouldBeTrue()
+                    host.restoreCalls shouldBe 1
+                    host.adjustments.last() shouldBe BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.LEFT)
 
                     host.confirmation = host.confirmation.copy(
                         cooldownRemaining = Duration.ZERO,
@@ -323,6 +342,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                         constructionFeeMinor = 2_500,
                         issuePriceMinor = 14_845,
                     ),
+                    hasCurrentConfirmation = false,
                 )
 
                 BuilderBookPreviewPresentation(
@@ -340,8 +360,19 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     viewRange = 64.0,
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
+                    val originalMenu = player.openInventory.topInventory
+                    plain(originalMenu.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Рассчитать активацию"
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+                    host.confirmCalls shouldBe 0
+                    paper.performTicks(1)
+                    (player.openInventory.topInventory === originalMenu) shouldBe true
                     plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain
-                        "Подтвердить строительство"
+                        "148.45"
+                    host.confirmation = host.confirmation.copy(issuePriceMinor = 15_000)
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+                    host.confirmCalls shouldBe 0
+                    paper.performTicks(1)
+                    plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "150.00"
                     click(paper, player, 25).isCancelled.shouldBeTrue()
                     host.confirmCalls shouldBe 1
                     host.completedConfirmations shouldBe listOf(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION)
@@ -421,7 +452,7 @@ private class PreviewHost(
     private val site: ConstructionSite,
     var confirmation: BuilderBookPreviewConfirmation,
     private val deferPreparation: Boolean = false,
-    private val hasCurrentConfirmation: Boolean = true,
+    var hasCurrentConfirmation: Boolean = true,
 ) : BuilderBookPreviewPresentationHost {
     val adjustments = mutableListOf<BuildBookPreviewAdjustment>()
     var confirmCalls = 0
@@ -439,7 +470,10 @@ private class PreviewHost(
         site: ConstructionSite,
         complete: (BuilderBookPreviewConfirmation?) -> Unit,
     ) {
-        if (deferPreparation) pendingPreparation = complete else complete(confirmation)
+        if (deferPreparation) pendingPreparation = complete else {
+            hasCurrentConfirmation = true
+            complete(confirmation)
+        }
     }
 
     override fun currentConfirmation(player: org.bukkit.entity.Player): BuilderBookPreviewConfirmation? =
@@ -456,6 +490,7 @@ private class PreviewHost(
 
     override fun restore(player: org.bukkit.entity.Player, snapshot: ConstructionSiteSnapshot): ConstructionSite {
         restoreCalls += 1
+        hasCurrentConfirmation = false
         return site
     }
 

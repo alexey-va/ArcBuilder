@@ -794,6 +794,17 @@ locales:
             lore:
               - "<#8c8c8c>Убрать превью. Блоки не изменятся."
               - "<#8c8c8c>[<#c42323>▶<#8c8c8c>] <#c42323>ЛКМ<#e6fff3> — убрать"
+          quote:
+            name: "<#2bba43>Рассчитать активацию"
+            lore:
+              - "<#e6fff3>Узнать цену выпуска рабочей книги."
+              - "<#969696>Деньги пока не списываются."
+          activate:
+            name: "<#2bba43>Активировать за <price> <white>💰"
+            lore:
+              - "<#e6fff3>Выпустить рабочую книгу из черновика."
+              - "<#969696>При подтверждении спишется <price> <white>💰<#969696>."
+              - "<#2bba43>ЛКМ — оплатить активацию"
           continue:
             name: "<#2bba43>Подтвердить строительство"
             lore:
@@ -1669,6 +1680,17 @@ locales:
             lore:
               - "<gray>Remove the build outline without changing blocks."
               - "<dark_gray>[<red>▶<dark_gray>] <red>Left-click<white> — remove"
+          quote:
+            name: "<green>Calculate activation price"
+            lore:
+              - "<white>Calculate the price of a working book."
+              - "<gray>No money is charged yet."
+          activate:
+            name: "<green>Activate for <price> <white>💰"
+            lore:
+              - "<white>Issue a working book from this draft."
+              - "<gray>Confirmation charges <price> <white>💰<gray>."
+              - "<green>Left-click — pay for activation"
           continue:
             name: "<green>Confirm construction"
             lore:

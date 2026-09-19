@@ -260,6 +260,14 @@ Missing material or output space is a waiting state, not a failed build.
 Ambiguous block, permission, persistence, or output-delivery state fails closed
 into `RECOVERY_REQUIRED`.
 
+The construction-book scheduler heartbeat is always one tick:
+`construction.blocks-per-cycle` is X consecutive pure world steps per batch,
+and `construction.tick-period-ticks` is Y ticks between those pure batches. A
+pure step has neither `requiredMaterial` nor `output`. Resource-bearing durable
+transactions (input preparation/debit, world application, and output delivery)
+remain eligible on every heartbeat; they do not receive the X-step batching or
+the Y-tick delay.
+
 At confirmation, the project durably records the vertical construction face
 whose center is nearest to the player. The global site display recreates its
 fixed text panel outside that face after restart, with a face-specific yaw;
@@ -290,9 +298,9 @@ it also contains player schematics and operational test files.
 
 `BuilderBookInteractionPolicy` is the canonical state machine for book clicks.
 A player may own one block preview or one prepared build plan, never both.
-Opening a new block preview discards an existing book plan first; repeated air
-clicks keep and explain the same prepared plan instead of creating an orphaned
-display. `BuilderToolsRuntime` canonicalizes legacy item titles from the system
+Opening a new block preview discards an existing book plan first; air clicks
+do not prepare or confirm construction. The hologram and `/builder book menu`
+open the same owner placement menu. `BuilderToolsRuntime` canonicalizes legacy item titles from the system
 catalogue before either transition, so filenames are never player-facing.
 
 Player-authored copying is author-only at both boundaries: the editor exposes
@@ -525,7 +533,7 @@ entry. Player-created registered books cannot carry selector options.
 
 Preview and construction plaques have two fixed opposing text faces, each at
 2x scale with a small separation to prevent coincident surfaces. Their hitbox
-and culling bounds scale with the text; both faces share updates and cleanup.
+uses configured dimensions directly; both faces share updates and cleanup.
 Plaque titles use the localized ArcBuilder prefix on both sides.
 
 Construction-site cancellation uses a two-click owner/admin confirmation. The
@@ -535,6 +543,13 @@ the panel and region lock. Placed blocks and spent resources are not refunded;
 recovery-held and instant-build projects cannot be cancelled through this menu.
 
 Preparing a construction plan retains its clickable world plaque and placement
-snapshot, including the right-click-air route. The plaque opens confirmation;
+snapshot. The plaque and chat shortcut open the same placement menu;
 plan removal (start, cancellation, replacement, expiry) clears this retained
 entry point without restoring a discarded plan.
+
+`BuilderBookPreviewPresentation` keeps each pending preparation callback scoped
+to its originating request. Closing or cancelling invalidates that request;
+an old response cannot confirm a newly opened session. Editing a prepared plan
+first restores its placement and discards the old confirmation. A paid draft
+calculates and displays its activation price in the same green button before
+a subsequent click may charge it; a changed quote must be displayed again.

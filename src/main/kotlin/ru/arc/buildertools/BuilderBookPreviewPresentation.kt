@@ -100,7 +100,8 @@ internal class BuilderBookPreviewPresentation(
     private val interactionOwners = mutableMapOf<UUID, UUID>()
     private val snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
     private val placementSites = mutableMapOf<UUID, ConstructionSite>()
-    private val preparing = mutableSetOf<UUID>()
+    private val preparing = mutableMapOf<UUID, Any>()
+    private val displayedConfirmations = mutableMapOf<UUID, BuilderBookPreviewConfirmation>()
     private val confirmationInventories = mutableMapOf<UUID, org.bukkit.inventory.Inventory>()
     private val menuConfiguration = loadMenuConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
@@ -195,6 +196,8 @@ internal class BuilderBookPreviewPresentation(
     }
 
     fun clearConfirmation(playerId: UUID) {
+        preparing.remove(playerId)
+        displayedConfirmations.remove(playerId)
         if (snapshots.remove(playerId) == null) return
         confirmationInventories.remove(playerId)
         placementSites.remove(playerId)
@@ -203,6 +206,8 @@ internal class BuilderBookPreviewPresentation(
     }
 
     fun clearPlayer(playerId: UUID) {
+        preparing.remove(playerId)
+        displayedConfirmations.remove(playerId)
         close(playerId)
         snapshots.remove(playerId)
         confirmationInventories.remove(playerId)
@@ -249,6 +254,8 @@ internal class BuilderBookPreviewPresentation(
         val playerId = player.uniqueId
         val inventory = confirmationInventories[playerId] ?: return
         if (event.view.topInventory !== inventory) return
+        preparing.remove(playerId)
+        displayedConfirmations.remove(playerId)
         confirmationInventories.remove(playerId)
         val snapshot = snapshots.remove(playerId) ?: return
         if (closed || !player.isOnline) return
@@ -256,12 +263,23 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment) {
+        val playerId = player.uniqueId
+        if (playerId in preparing) return
+        // Prepared construction no longer has a BuildingManager preview. Restore
+        // it before editing, and detach the confirmation before discarding its plan.
+        snapshots.remove(playerId)?.let { snapshot ->
+            confirmationInventories.remove(playerId)
+            displayedConfirmations.remove(playerId)
+            val restored = host.restore(player, snapshot) ?: return player.closeInventory()
+            placementSites[playerId] = restored
+        }
         if (host.adjust(player, adjustment) == null) player.closeInventory()
         else player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.65f, 1.15f)
     }
 
     private fun cancel(player: Player) {
         preparing.remove(player.uniqueId)
+        displayedConfirmations.remove(player.uniqueId)
         snapshots.remove(player.uniqueId)
         confirmationInventories.remove(player.uniqueId)
         host.cancel(player)
@@ -271,21 +289,26 @@ internal class BuilderBookPreviewPresentation(
     private fun confirmFromPlacement(player: Player) {
         val playerId = player.uniqueId
         val site = placementSites[playerId] ?: panels[playerId]?.site ?: return player.closeInventory()
-        if (!preparing.add(playerId)) return
+        if (playerId in preparing) return
+        val preparation = Any()
+        preparing[playerId] = preparation
         snapshots[playerId] = site.snapshot()
         menus.session(player)?.inventory?.let { confirmationInventories[playerId] = it }
 
-        // A prepared project can be confirmed immediately from the same green
-        // button. A fresh preview first performs its authoritative preparation,
-        // then returns to this same button without opening a second menu.
         val current = host.currentConfirmation(player)
         if (current != null) {
             preparing.remove(playerId)
+            if (current.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION &&
+                displayedConfirmations[playerId] != current) {
+                menus.session(player)?.requestRefresh()
+                return
+            }
             start(player)
             return
         }
         try {
             host.prepare(player, site) { confirmation ->
+                if (preparing[playerId] !== preparation) return@prepare
                 preparing.remove(playerId)
                 if (closed || !player.isOnline) return@prepare
                 if (playerId !in snapshots) return@prepare
@@ -293,6 +316,9 @@ internal class BuilderBookPreviewPresentation(
                     snapshots.remove(playerId)
                     confirmationInventories.remove(playerId)
                     player.closeInventory()
+                } else if (confirmation.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION) {
+                    // The amount must be visible before the click authorizing payment.
+                    menus.session(player)?.requestRefresh()
                 } else {
                     start(player)
                 }
@@ -310,6 +336,10 @@ internal class BuilderBookPreviewPresentation(
         val confirmation = host.currentConfirmation(player) ?: return player.closeInventory()
         if (!confirmation.cooldownRemaining.isZero) {
             menus.session(player)?.requestRefresh()
+            player.sendMessage(messages.render("book.cooldown", locale(player), mapOf(
+                "hours" to messages.literal(confirmation.cooldownRemaining.toHours()),
+                "minutes" to messages.literal(confirmation.cooldownRemaining.toMinutes() % 60),
+            )))
             player.playSound(player.location, Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f)
             return
         }
@@ -324,6 +354,10 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun openPlacement(player: Player, site: ConstructionSite) {
+        if (menus.session(player)?.menuId == PLACEMENT_MENU) {
+            menus.session(player)?.requestRefresh()
+            return
+        }
         confirmationInventories.remove(player.uniqueId)
         placementSites[player.uniqueId] = site
         if (player.uniqueId in snapshots && host.currentConfirmation(player) == null) {
@@ -340,6 +374,14 @@ internal class BuilderBookPreviewPresentation(
             "Build-book placement menu can only be opened by the preview owner"
         }
         openPlacement(player, site)
+    }
+
+    fun openCurrentPlacement(player: Player, pending: ConstructionSite?): Boolean {
+        val site = pending ?: placementSites[player.uniqueId]
+            ?.takeIf { host.currentConfirmation(player) != null }
+            ?: return false
+        openPlacementForOwner(player, site)
+        return true
     }
 
     internal fun openPlacementForTest(player: Player, site: ConstructionSite) = openPlacementForOwner(player, site)
@@ -398,6 +440,17 @@ internal class BuilderBookPreviewPresentation(
             "rotation" to messages.literal(site.rotation),
         )
         val locale = locale(player)
+        val confirmation = host.currentConfirmation(player)
+        if (confirmation == null) displayedConfirmations.remove(player.uniqueId)
+        else displayedConfirmations[player.uniqueId] = confirmation
+        val confirmKey = when {
+            !site.bookData.draft -> "continue"
+            confirmation == null -> "quote"
+            else -> "activate"
+        }
+        val confirmValues = values + mapOf(
+            "price" to messages.literal(String.format(java.util.Locale.US, "%,.2f", BuilderMoney.decimal(confirmation?.issuePriceMinor ?: 0L))),
+        )
         return PaperMenuContent(
             title = messages.render(
                 "book.preview-menu.placement.title",
@@ -434,7 +487,7 @@ internal class BuilderBookPreviewPresentation(
                     adjust(it.player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.TOWARD))
                 },
                 CANCEL to action(PLACEMENT_MENU, CANCEL, "cancel", values, locale) { cancel(it.player) },
-                CONTINUE to action(PLACEMENT_MENU, CONTINUE, "continue", values, locale) {
+                CONTINUE to action(PLACEMENT_MENU, CONTINUE, confirmKey, confirmValues, locale) {
                     confirmFromPlacement(it.player)
                 },
             ),
@@ -572,6 +625,7 @@ internal class BuilderBookPreviewPresentation(
         confirmationInventories.clear()
         placementSites.clear()
         preparing.clear()
+        displayedConfirmations.clear()
         menus.close()
     }
 
