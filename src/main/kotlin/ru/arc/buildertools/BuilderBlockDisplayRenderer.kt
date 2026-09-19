@@ -1,36 +1,40 @@
 package ru.arc.buildertools
 
 import com.sk89q.worldedit.bukkit.BukkitAdapter
+import com.destroystokyo.paper.event.player.PlayerPostRespawnEvent
+import io.papermc.paper.event.packet.PlayerChunkLoadEvent
+import io.papermc.paper.event.packet.PlayerChunkUnloadEvent
 import org.bukkit.Bukkit
 import org.bukkit.Color
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.block.data.BlockData
-import org.bukkit.entity.BlockDisplay
-import org.bukkit.entity.Display
-import org.bukkit.entity.Entity
 import org.bukkit.entity.Player
+import org.bukkit.event.EventHandler
+import org.bukkit.event.HandlerList
+import org.bukkit.event.Listener
+import org.bukkit.event.player.PlayerChangedWorldEvent
+import org.bukkit.event.player.PlayerJoinEvent
+import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.plugin.java.JavaPlugin
-import org.bukkit.util.Transformation
 import net.kyori.adventure.bossbar.BossBar
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.title.Title
-import org.joml.Quaternionf
-import org.joml.Vector3f
 import ru.arc.autobuild.BuildBookPreviewBridge
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.ScheduledTask
 import ru.arc.util.BlockUtils.rotateBlockData
 import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
+import java.util.PriorityQueue
 
 /**
  * Preview lifecycle boundary owned by the runtime.
  *
- * The Paper implementation below keeps native displays player-only. Platform
- * tests replace this boundary because MockBukkit 4.110 does not implement
- * [Entity.setVisibleByDefault].
+ * The Paper implementation sends client-only BlockDisplay packets. Native
+ * clickable book panels have their own presentation owner.
  */
 internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseable {
     fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?)
@@ -48,30 +52,25 @@ internal object BuilderPreviewWindow {
     fun <T> nearest(
         values: List<T>,
         limit: Int,
-        viewerX: Double,
-        viewerY: Double,
-        viewerZ: Double,
-        center: (T) -> Triple<Double, Double, Double>,
+        distanceSquared: (T) -> Double,
     ): List<T> {
         require(limit > 0)
         if (values.size <= limit) return values
-        return values.mapIndexed { index, value ->
-            val (x, y, z) = center(value)
-            val dx = x - viewerX
-            val dy = y - viewerY
-            val dz = z - viewerZ
-            Candidate(index, value, dx * dx + dy * dy + dz * dz)
+        val order = compareBy<Candidate<T>>(Candidate<T>::distanceSquared).thenBy(Candidate<T>::index)
+        val nearest = PriorityQueue(limit, order.reversed())
+        values.forEachIndexed { index, value ->
+            val distance = distanceSquared(value)
+            // Equal distances keep the earlier schematic index already in the heap.
+            if (nearest.size < limit || distance < nearest.peek().distanceSquared) {
+                if (nearest.size == limit) nearest.remove()
+                nearest.add(Candidate(index, value, distance))
+            }
         }
-            .sortedWith(
-                compareBy<Candidate<T>>(Candidate<T>::distanceSquared).thenBy(Candidate<T>::index),
-            )
-            .take(limit)
-            .sortedBy(Candidate<T>::index)
-            .map(Candidate<T>::value)
+        return nearest.sortedBy(Candidate<T>::index).map(Candidate<T>::value)
     }
 }
 
-/** Player-only native BlockDisplay scenes; no packets, fake blocks, or particles. */
+/** Client-only BlockDisplay scenes; world reads stay on the server thread. */
 internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
     private val maxPlanDisplays: Int,
@@ -80,8 +79,10 @@ internal class BuilderBlockDisplayRenderer(
     private val planDisplayRange: Double,
     private val guidancePeriodTicks: Long,
     private val messages: LocalizedMiniMessage,
-    taskScope: LifecycleTaskScope,
-) : BuilderDisplayRenderer {
+    private val taskScope: LifecycleTaskScope,
+    private val packets: BuilderPreviewPacketTransport = PacketEventsBuilderPreviewTransport(plugin.logger),
+    private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
+) : BuilderDisplayRenderer, Listener {
     private enum class Layer { SELECTION, PLAN, BOOK }
 
     private data class DisplaySpec(
@@ -112,14 +113,20 @@ internal class BuilderBlockDisplayRenderer(
         val glowRgb: Int,
     )
 
-    private data class Scene(val worldId: UUID, val entities: Map<DisplayKey, Entity>)
+    private data class Scene(
+        val worldId: UUID,
+        val entities: Map<DisplayKey, BuilderPacketDisplay>,
+        val audience: BuilderPacketScene,
+    )
     private data class BookBlock(val location: Location, val blockData: BlockData)
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
     private val bookSites = mutableMapOf<UUID, ConstructionSite>()
     private val bookModels = mutableMapOf<UUID, BookModel>()
     private val bookBossBars = mutableMapOf<UUID, BossBar>()
+    private var viewerRefresh: ScheduledTask? = null
     private val blockTransform = BuilderDisplayGeometry.blockTransform(blockDisplayScale)
+    private var closed = false
 
     init {
         require(maxPlanDisplays in 32..4096)
@@ -135,6 +142,7 @@ internal class BuilderBlockDisplayRenderer(
                 }
             },
         ) { "Builder preview guidance task scope is inactive" }
+        plugin.server.pluginManager.registerEvents(this, plugin)
     }
 
     override fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?) {
@@ -161,11 +169,11 @@ internal class BuilderBlockDisplayRenderer(
         val visible = BuilderPreviewWindow.nearest(
             values = plan.changes,
             limit = maxPlanDisplays,
-            viewerX = eye.x,
-            viewerY = eye.y,
-            viewerZ = eye.z,
         ) { change ->
-            Triple(change.position.x + .5, change.position.y + .5, change.position.z + .5)
+            val dx = change.position.x + .5 - eye.x
+            val dy = change.position.y + .5 - eye.y
+            val dz = change.position.z + .5 - eye.z
+            dx * dx + dy * dy + dz * dz
         }
         val specs = buildList {
             visible.forEach { change ->
@@ -276,11 +284,11 @@ internal class BuilderBlockDisplayRenderer(
         val visible = BuilderPreviewWindow.nearest(
             values = model.blocks,
             limit = maxPlanDisplays,
-            viewerX = eye.x,
-            viewerY = eye.y,
-            viewerZ = eye.z,
         ) { block ->
-            Triple(block.location.blockX + .5, block.location.blockY + .5, block.location.blockZ + .5)
+            val dx = block.location.blockX + .5 - eye.x
+            val dy = block.location.blockY + .5 - eye.y
+            val dz = block.location.blockZ + .5 - eye.z
+            dx * dx + dy * dy + dz * dz
         }
         val specs = buildList {
             visible.forEach { block ->
@@ -405,68 +413,84 @@ internal class BuilderBlockDisplayRenderer(
             remove(player.uniqueId, layer)
             return
         }
-        val previousEntities = previous?.entities.orEmpty().filterValues(Entity::isValid)
+        val previousEntities = previous?.entities.orEmpty()
         val nextSpecs = specs.associateBy { it.key() }
         val delta = BuilderDisplaySceneDiff.between(previousEntities.keys, nextSpecs.keys.toList())
-        if (delta.added.isEmpty() && delta.removed.isEmpty()) {
-            if (layer == Layer.BOOK) syncBookSceneVisibility(player, previousEntities.values)
-            return
-        }
-        val nextEntities = LinkedHashMap<DisplayKey, Entity>(delta.retained.size + delta.added.size)
+        val nextEntities = LinkedHashMap<DisplayKey, BuilderPacketDisplay>(delta.retained.size + delta.added.size)
         delta.retained.forEach { displayKey -> nextEntities[displayKey] = previousEntities.getValue(displayKey) }
-        val spawned = mutableListOf<Entity>()
-        try {
-            delta.added.forEach { displayKey ->
-                val spec = nextSpecs.getValue(displayKey)
-                val display = player.world.spawn(Location(player.world, spec.x, spec.y, spec.z), BlockDisplay::class.java) { entity ->
-                    entity.block = spec.blockData
-                    entity.setVisibleByDefault(false)
-                    entity.isPersistent = false
-                    entity.isInvulnerable = true
-                    entity.setGravity(false)
-                    entity.isGlowing = true
-                    entity.glowColorOverride = spec.glow
-                    entity.brightness = Display.Brightness(15, 15)
-                    entity.viewRange = (planDisplayRange / 64.0).toFloat()
-                    entity.transformation = Transformation(
-                        Vector3f(spec.translateX, spec.translateY, spec.translateZ),
-                        Quaternionf(),
-                        Vector3f(spec.scaleX, spec.scaleY, spec.scaleZ),
-                        Quaternionf(),
-                    )
-                }
-                if (layer == Layer.BOOK) syncBookSceneVisibility(player, listOf(display))
-                else player.showEntity(plugin, display)
-                spawned += display
-                nextEntities[displayKey] = display
-            }
-            delta.removed.forEach { displayKey -> previousEntities.getValue(displayKey).remove() }
-            scenes[key] = Scene(player.world.uid, nextEntities)
-        } catch (failure: Throwable) {
-            spawned.forEach(Entity::remove)
-            throw failure
+        delta.added.forEach { displayKey ->
+            val spec = nextSpecs.getValue(displayKey)
+            nextEntities[displayKey] = BuilderPacketDisplay(
+                entityId = packets.nextEntityId(),
+                uuid = UUID.randomUUID(),
+                x = spec.x, y = spec.y, z = spec.z,
+                blockStateId = packets.blockStateId(spec.blockData),
+                scaleX = spec.scaleX, scaleY = spec.scaleY, scaleZ = spec.scaleZ,
+                translateX = spec.translateX, translateY = spec.translateY, translateZ = spec.translateZ,
+                glowRgb = spec.glow.asRGB(),
+                viewRange = (planDisplayRange / 64.0).toFloat(),
+            )
         }
+        val scene = Scene(player.world.uid, nextEntities, previous?.audience ?: BuilderPacketScene())
+        // Publish before enqueueing so cleanup can remove even a partially sent scene.
+        scenes[key] = scene
+        syncScene(key, scene)
     }
 
     override fun syncBookViewer(viewer: Player) {
-        if (!viewer.isOnline || !viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) return
-        scenes.forEach { (key, scene) ->
-            if (key.second == Layer.BOOK && scene.worldId == viewer.world.uid) {
-                scene.entities.values.filter(Entity::isValid).forEach { viewer.showEntity(plugin, it) }
+        if (viewer.isOnline) refreshViewersNextTick()
+    }
+
+    private fun syncScene(key: Pair<UUID, Layer>, scene: Scene) {
+        val candidates = if (key.second == Layer.BOOK) Bukkit.getOnlinePlayers()
+            else listOfNotNull(Bukkit.getPlayer(key.first))
+        val audience = candidates.mapNotNull { viewer ->
+            if (!viewer.isOnline || viewer.world.uid != scene.worldId ||
+                (viewer.uniqueId != key.first && !viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION))) {
+                return@mapNotNull null
             }
+            val connection = packets.connection(viewer) ?: return@mapNotNull null
+            viewer.uniqueId to BuilderPacketViewer(connection, sentChunks(viewer))
+        }.toMap()
+        scene.audience.update(scene.entities.values, audience)
+    }
+
+    @EventHandler
+    fun onChunkLoad(event: PlayerChunkLoadEvent) = refreshViewersNextTick()
+
+    @EventHandler
+    fun onChunkUnload(event: PlayerChunkUnloadEvent) {
+        scenes.values.filter { it.worldId == event.world.uid }.forEach {
+            it.audience.forgetChunk(event.player.uniqueId, event.chunk.chunkKey)
         }
     }
 
-    private fun syncBookSceneVisibility(owner: Player, entities: Collection<Entity>) {
-        Bukkit.getOnlinePlayers()
-            .filter { it.world.uid == owner.world.uid }
-            .forEach { viewer ->
-                if (viewer.uniqueId == owner.uniqueId || viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) {
-                    entities.forEach { viewer.showEntity(plugin, it) }
-                } else {
-                    entities.forEach { viewer.hideEntity(plugin, it) }
-                }
-            }
+    @EventHandler
+    fun onJoin(event: PlayerJoinEvent) = refreshViewersNextTick()
+
+    @EventHandler
+    fun onWorldChange(event: PlayerChangedWorldEvent) = resetViewer(event.player.uniqueId)
+
+    @EventHandler
+    fun onRespawn(event: PlayerPostRespawnEvent) = resetViewer(event.player.uniqueId)
+
+    @EventHandler
+    fun onQuit(event: PlayerQuitEvent) {
+        scenes.values.forEach { it.audience.removeViewer(event.player.uniqueId) }
+        packets.forget(event.player)
+    }
+
+    private fun resetViewer(playerId: UUID) {
+        scenes.values.forEach { it.audience.removeViewer(playerId) }
+        refreshViewersNextTick()
+    }
+
+    private fun refreshViewersNextTick() {
+        if (closed || viewerRefresh != null || scenes.isEmpty()) return
+        viewerRefresh = taskScope.runLater(1L) {
+            viewerRefresh = null
+            if (!closed) scenes.forEach { (key, scene) -> syncScene(key, scene) }
+        }
     }
 
     private fun DisplaySpec.key() = DisplayKey(
@@ -484,7 +508,7 @@ internal class BuilderBlockDisplayRenderer(
     )
 
     private fun remove(playerId: UUID, layer: Layer) {
-        scenes.remove(playerId to layer)?.entities?.values?.forEach(Entity::remove)
+        scenes.remove(playerId to layer)?.audience?.close()
     }
 
     override fun clearPlayer(playerId: UUID) {
@@ -493,8 +517,14 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun close() {
+        if (closed) return
+        closed = true
+        HandlerList.unregisterAll(this)
+        viewerRefresh?.cancel()
+        viewerRefresh = null
         bookBossBars.keys.toList().forEach(::closeBookGuidance)
-        scenes.values.flatMap { scene -> scene.entities.values }.forEach(Entity::remove)
+        scenes.values.forEach { it.audience.close() }
         scenes.clear()
+        packets.close()
     }
 }

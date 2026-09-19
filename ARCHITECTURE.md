@@ -60,7 +60,19 @@ iteration.
 The runtime validates axis and scan-volume limits before a planner sees the
 selection. `BuilderBlockDisplayRenderer` and `BuilderPreviewSessions` render
 player-only selection and plan displays; preview rendering never mutates the
-world. Selection, clipboard, pending plan, and active operation are distinct
+world. `BuilderPreviewPacketTransport` uses the installed PacketEvents 2.12.1
+to send client-only BlockDisplay entities instead of registering Bukkit entities.
+The renderer reads Bukkit state and converts block states on the server thread;
+immutable spawn/metadata/destroy batches are encoded and flushed on each captured
+connection's Netty event loop. `BuilderPacketScene` retains unchanged entity IDs,
+tracks the owner and permitted book-preview observers, and replays displays after
+client chunk eviction, world changes, respawn, or reconnect. Cleanup uses the
+same ordered connection queue. Native book panels retain their text and clickable
+Interaction entities in `BuilderBookPreviewPresentation`.
+
+Large preview windows select the nearest K blocks with a bounded heap and retain
+schematic order, avoiding a full sort and boxed coordinate triples on every
+guidance tick. Selection, clipboard, pending plan, and active operation are distinct
 states and must not be collapsed into one session object.
 
 The completed-selection chat surface exposes only operations that consume the

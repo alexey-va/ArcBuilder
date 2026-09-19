@@ -9,10 +9,10 @@ class BuilderPreviewWindowTest : FunSpec({
     fun select(points: List<Point>, limit: Int, viewerX: Double): List<Int> = BuilderPreviewWindow.nearest(
         values = points,
         limit = limit,
-        viewerX = viewerX,
-        viewerY = 0.0,
-        viewerZ = 0.0,
-    ) { point -> Triple(point.x, point.y, point.z) }.map(Point::id)
+    ) { point ->
+        val dx = point.x - viewerX
+        dx * dx + point.y * point.y + point.z * point.z
+    }.map(Point::id)
 
     test("preview below its limit keeps every block in schematic order") {
         select(
@@ -43,5 +43,21 @@ class BuilderPreviewWindowTest : FunSpec({
             limit = 2,
             viewerX = 0.0,
         ) shouldBe listOf(0, 1)
+    }
+
+    test("large moving windows match exact distance ordering including ties") {
+        val random = kotlin.random.Random(291)
+        val points = (0 until 20_000).map {
+            Point(it, random.nextInt(-128, 129).toDouble(), random.nextInt(0, 64).toDouble())
+        }
+        for (eye in listOf(-90.0, 0.0, 67.5)) {
+            for (limit in listOf(1, 32, 4096)) {
+                val expected = points.sortedWith(
+                    compareBy<Point> { (it.x - eye) * (it.x - eye) + it.y * it.y }
+                        .thenBy(Point::id),
+                ).take(limit).sortedBy(Point::id).map(Point::id)
+                select(points, limit, eye) shouldBe expected
+            }
+        }
     }
 })

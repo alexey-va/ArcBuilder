@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.43"
+version = "1.0.44"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -45,6 +45,7 @@ dependencies {
     implementation("de.tr7zw:item-nbt-api:2.15.7")
 
     compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    compileOnly("com.github.retrooper:packetevents-spigot:2.12.1")
     compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     compileOnly("com.github.angeschossen:LandsAPI:6.26.18")
     compileOnly("com.github.Slimefun:Slimefun4:4.10")
@@ -60,6 +61,7 @@ dependencies {
     testImplementation("io.kotest:kotest-assertions-core:6.0.7")
     testImplementation("io.kotest:kotest-property:6.0.7")
     testImplementation("io.mockk:mockk:1.14.7")
+    testImplementation("com.github.retrooper:packetevents-spigot:2.12.1")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.9")
@@ -130,6 +132,7 @@ tasks {
 plugwright {
     minecraftVersion.set("1.21.11")
     downloadPlugins {
+        url("https://github.com/retrooper/packetevents/releases/download/v2.12.1/packetevents-spigot-2.12.1.jar")
         url("https://cdn.modrinth.com/data/Vebnzrzj/versions/OrIs0S6b/LuckPerms-Bukkit-5.5.17.jar")
         url("https://cdn.modrinth.com/data/1u6JkXh5/versions/p8T2aZ8U/worldedit-bukkit-7.4.2.jar")
     }

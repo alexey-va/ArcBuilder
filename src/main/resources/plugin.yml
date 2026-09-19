@@ -4,6 +4,7 @@ main: ru.ruscrafting.builder.paper.ArcBuilderPlugin
 api-version: '1.21.11'
 authors: [RusCrafting]
 description: Survival-friendly builder tools and construction books
+depend: [packetevents]
 softdepend:
   - CoreProtect
   - Lands
