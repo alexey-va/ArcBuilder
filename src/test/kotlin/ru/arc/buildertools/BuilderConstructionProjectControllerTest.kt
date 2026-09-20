@@ -506,6 +506,32 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         port.removed shouldBe 1
     }
 
+    test("durable activation waits for an unavailable player and reconciles the same book receipt once") {
+        val pending = active().copy(state = BuilderConstructionProjectState.PREPARED, updatedAtMillis = createdAt)
+            .activationPrepared(mutation(book, insert = false, requireNearProject = false))
+        val port = FakePort(inputReconcileResult = BuilderResourceMutationResult.RETRY)
+        BuilderConstructionProjectController.tickValidated(pending, createdAt + 1, port) shouldBe null
+        port.removed shouldBe 0
+        port.applied shouldBe 0
+        port.inputReconcileResult = BuilderResourceMutationResult.APPLIED
+        BuilderConstructionProjectController.tickValidated(pending, createdAt + 2, port)?.state shouldBe
+            BuilderConstructionProjectState.ACTIVE
+        BuilderConstructionProjectController.tickValidated(pending, createdAt + 3, port)?.state shouldBe
+            BuilderConstructionProjectState.ACTIVE
+        port.removed shouldBe 1
+        port.applied shouldBe 0
+    }
+
+    test("inventory changed while initial commit was pending cancels without debit or world writes") {
+        val pending = active().copy(state = BuilderConstructionProjectState.PREPARED, updatedAtMillis = createdAt)
+            .activationPrepared(mutation(book, insert = false, requireNearProject = false))
+        val port = FakePort(inputReconcileResult = BuilderResourceMutationResult.STALE)
+        BuilderConstructionProjectController.tickValidated(pending, createdAt + 1, port)?.state shouldBe
+            BuilderConstructionProjectState.CANCELLED
+        port.removed shouldBe 0
+        port.applied shouldBe 0
+    }
+
     test("confirmed persistence rejection requires recovery only after a value mutation") {
         val prepared = active().copy(state = BuilderConstructionProjectState.PREPARED, updatedAtMillis = createdAt).validated()
         val preparedWithReceipt = prepared.activationPrepared(

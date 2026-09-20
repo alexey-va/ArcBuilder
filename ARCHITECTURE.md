@@ -588,3 +588,21 @@ immutable identity and legal state transitions without rescanning every block;
 the store fully validates proposals before committing them. The site display
 consumes those checked records and reuses its layout while the plan, steps,
 anchor and orientation remain unchanged.
+
+## Nonblocking construction activation and site visuals
+
+Confirmation captures the book receipt and reserves the project area on the
+server thread. The initial PREPARED record is validated, encoded and committed
+on the existing storage executor; pending player starts and construction writes
+fence duplicate starts and reload. Only a confirmed durable record enters the
+ordinary construction tick loop. That loop reconciles the exact inventory
+receipt before debiting and commits ACTIVE asynchronously. Offline players retry;
+a changed receipt cancels without world writes. An unknown initial commit keeps
+the reservation/area held and blocks recovery-sensitive work.
+
+Construction-site outlines and both plaque faces use `PaperPacketDisplays`:
+no native Display entities, chunk loads or chunk tickets. One native Interaction
+preserves the existing right-click contract and is created only if its exact
+chunk is already loaded. Chunk loading restores that hitbox without rebuilding
+packet visuals. Exact legacy ownership tags are cleaned on startup/chunk load;
+client visibility, replay and async packet delivery belong to the shared owner.

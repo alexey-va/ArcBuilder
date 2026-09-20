@@ -282,6 +282,7 @@ internal class BuilderToolsRuntime(
     private val bookPreviewPresentation: BuilderBookPreviewPresentation
     private val bookHoldHints = BuilderBookHoldHintTracker()
     private val constructionWrites = mutableSetOf<UUID>()
+    private val constructionStarts = mutableSetOf<UUID>()
     private val constructionCompletions = mutableSetOf<UUID>()
     private val constructionLocks = mutableSetOf<UUID>()
     private val constructionResources = BuilderConstructionResources(
@@ -965,6 +966,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun ensureOperationalContext(player: Player) {
+        if (player.uniqueId in constructionStarts) throw BuilderUserFailure("errors.busy")
         if (recovering || recoveryBlocked || books.health().recoveryBlocked || playerRecoveries.contains(player.uniqueId)) {
             throw BuilderUserFailure("errors.recovering")
         }
@@ -1589,7 +1591,7 @@ internal class BuilderToolsRuntime(
             throw BuilderUserFailure("errors.inventory")
         }
         if (construction != null) {
-            if (constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
+            if (player.uniqueId in constructionStarts || constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
                 throw BuilderUserFailure("errors.busy")
             }
             previews.remove(player.uniqueId, pending)
@@ -1663,105 +1665,61 @@ internal class BuilderToolsRuntime(
             books.releasePlanReservation(planned.plan)
             throw BuilderUserFailure("errors.game-mode-changed")
         }
-        if (constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
+        if (player.uniqueId in constructionStarts || constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
             books.releasePlanReservation(planned.plan)
             throw BuilderUserFailure("errors.busy")
         }
         val prepared = planned.copy(
             sitePanelFace = BuilderConstructionSiteDisplayLayout.nearestFace(
-                planned,
-                player.location.x,
-                player.location.z,
+                planned, player.location.x, player.location.z,
             ),
-        ).validated(config.maxConstructionChanges)
-        var durablePrepared: BuilderConstructionProjectRecord? = null
-        var attemptedTarget: BuilderConstructionProjectRecord? = null
-        var constructionLeaseHeld = false
-        try {
-            val activationMutation = checkNotNull(
+        )
+        // Capture the receipt on the server thread, but perform validation, encoding and
+        // durable I/O on the storage executor. No inventory mutation precedes the commit.
+        val activation = try {
+            val mutation = checkNotNull(
                 constructionResources.preparePlayerDebit(player.uniqueId, prepared, prepared.bookCost),
             ) { "Builder construction book disappeared before durable preparation" }
-            val applicationStartedAtMillis = System.currentTimeMillis()
-            val activationPrepared = prepared.activationPrepared(activationMutation).copy(
-                applicationStartedAtMillis = applicationStartedAtMillis,
-                updatedAtMillis = applicationStartedAtMillis,
-            ).validated(config.maxConstructionChanges)
-            check(lockConstruction(activationPrepared)) { "Builder construction area is already locked" }
             val now = System.currentTimeMillis()
-            durablePrepared = constructionStore.commit(activationPrepared.copy(updatedAtMillis = now))
-            check(
-                constructionPlayerLeases.acquire(
-                    durablePrepared.projectId,
-                    durablePrepared.playerId,
-                    durablePrepared.pendingResourceMutation,
-                ),
-            ) { "Builder construction activation resource is already locked" }
-            constructionLeaseHeld = true
-            attemptedTarget = BuilderConstructionProjectController.tickValidated(
-                durablePrepared,
-                System.currentTimeMillis(),
-                constructionPort,
-                config.constructionBlocksPerCycle,
-            )
-            player.updateInventory()
-            val current = if (attemptedTarget == null) {
-                durablePrepared
-            } else {
-                constructionStore.transition(durablePrepared, attemptedTarget)
-            }
-            constructionProjects[current.projectId] = current
-            constructionSiteDisplays.upsert(current)
-            if (current.state != BuilderConstructionProjectState.RECOVERY_REQUIRED) {
-                constructionPlayerLeases.release(current.projectId)
-                constructionLeaseHeld = false
-            }
-            when (current.state) {
-                BuilderConstructionProjectState.ACTIVE -> send(
-                    player,
-                    "construction.started",
-                    mapOf("count" to messages.literal(current.steps.size)),
-                )
-                BuilderConstructionProjectState.CANCELLED -> {
-                    books.releasePlanReservation(current.plan)
-                    constructionResources.forget(current.projectId)
-                    unlockConstruction(current)
-                    send(player, "book.failed")
-                }
-                BuilderConstructionProjectState.RECOVERY_REQUIRED -> send(player, "construction.recovery-required")
-                BuilderConstructionProjectState.PREPARED -> send(player, "construction.started", mapOf("count" to messages.literal(current.steps.size)))
-                else -> error("Unexpected builder construction activation state: ${current.state}")
+            prepared.copy(
+                pendingResourceMutation = mutation,
+                applicationStartedAtMillis = now,
+                updatedAtMillis = now,
+            ).also {
+                check(lockConstruction(it)) { "Builder construction area is already locked" }
             }
         } catch (failure: Throwable) {
-            val durable = durablePrepared
-            if (durable != null) {
-                constructionProjects[durable.projectId] = durable
-                constructionSiteDisplays.upsert(durable)
-                val postEffectRejection = attemptedTarget?.let { target ->
-                    BuilderConstructionTransitionFailurePolicy.requiresRecovery(durable, target)
-                } == true
-                if (failure is BuilderConstructionProjectTransitionRejectedException && postEffectRejection) {
-                    recoverRejectedConstructionMutation(durable, failure)
-                } else if (failure is BuilderConstructionProjectUnknownOutcomeException || postEffectRejection) {
-                    recoveryBlocked = true
-                } else if (constructionLeaseHeld) {
-                    constructionPlayerLeases.release(durable.projectId)
-                    constructionLeaseHeld = false
-                }
-                error("Builder construction activation is awaiting durable recovery for ${prepared.projectId}", failure)
-                send(player, "construction.recovery-required")
-                return
-            }
-            if (failure is BuilderConstructionProjectUnknownOutcomeException) {
-                recoveryBlocked = true
-                error("Builder construction initial durable commit has an unknown outcome for ${prepared.projectId}", failure)
-                send(player, "construction.recovery-required")
-                return
-            }
             books.releasePlanReservation(prepared.plan)
             unlockConstruction(prepared)
             error("Builder construction activation failed for ${prepared.projectId}", failure)
             throw BuilderUserFailure("book.failed")
         }
+        constructionStarts.add(player.uniqueId)
+        constructionWrites.add(activation.projectId)
+        writeAsync(
+            action = { constructionStore.commit(activation) },
+            callback = { durable, failure ->
+                constructionStarts.remove(player.uniqueId)
+                constructionWrites.remove(activation.projectId)
+                if (failure != null || durable == null) {
+                    if (failure is BuilderConstructionProjectUnknownOutcomeException) {
+                        recoveryBlocked = true
+                        error("Builder construction initial durable commit has an unknown outcome for ${activation.projectId}", failure)
+                        if (player.isOnline) send(player, "construction.recovery-required")
+                    } else {
+                        books.releasePlanReservation(activation.plan)
+                        unlockConstruction(activation)
+                        error("Builder construction activation failed for ${activation.projectId}", failure)
+                        if (player.isOnline) send(player, "book.failed")
+                    }
+                    return@writeAsync
+                }
+                // The ordinary construction cycle owns receipt reconciliation and the
+                // asynchronous PREPARED -> ACTIVE commit, including disconnect recovery.
+                constructionProjects[durable.projectId] = durable
+                constructionSiteDisplays.upsert(durable)
+            },
+        )
     }
 
     private fun loadConstructionProjects() {

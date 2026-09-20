@@ -6,7 +6,6 @@ import org.bukkit.Color
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
-import org.bukkit.entity.BlockDisplay
 import org.bukkit.entity.Display
 import org.bukkit.entity.Entity
 import org.bukkit.entity.Interaction
@@ -25,6 +24,9 @@ import org.bukkit.util.Transformation
 import org.joml.Quaternionf
 import org.joml.Vector3f
 import ru.arc.autobuild.BuildBookItems
+import ru.arc.paper.display.PacketDisplay
+import ru.arc.paper.display.PacketTextDisplay
+import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.util.UUID
@@ -188,12 +190,14 @@ internal class BuilderConstructionSiteDisplayManager(
     private val messages: LocalizedMiniMessage,
     private val projectLookup: (UUID) -> BuilderConstructionProjectRecord?,
     private val onInspect: (Player, BuilderConstructionProjectRecord) -> Unit,
+    private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin),
 ) : Listener, AutoCloseable {
     private data class Scene(
         val project: BuilderConstructionProjectRecord,
         val model: BuilderConstructionSiteDisplayModel,
-        val entities: List<Entity>,
-        val panels: List<TextDisplay>,
+        val entities: List<PacketDisplay>,
+        val panels: List<PacketTextDisplay>,
+        var interaction: Interaction? = null,
     )
 
     private val projectKey = NamespacedKey(plugin, "construction_site_project")
@@ -224,7 +228,10 @@ internal class BuilderConstructionSiteDisplayManager(
     }
 
     fun remove(projectId: UUID) {
-        scenes.remove(projectId)?.entities?.forEach(Entity::remove)
+        scenes.remove(projectId)?.let { scene ->
+            scene.entities.forEach(PacketDisplay::remove)
+            scene.interaction?.remove()
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
@@ -246,6 +253,9 @@ internal class BuilderConstructionSiteDisplayManager(
     fun onChunkLoad(event: ChunkLoadEvent) {
         if (closed || !settings.enabled) return
         val chunk = event.chunk
+        chunk.entities.filter { it.persistentDataContainer.has(projectKey, PersistentDataType.STRING) }
+            .filter { entity -> scenes.values.none { it.interaction === entity } }
+            .forEach(Entity::remove)
         val projects = scenes.entries
             .asSequence()
             .filter { (_, scene) ->
@@ -261,29 +271,30 @@ internal class BuilderConstructionSiteDisplayManager(
         val previous = scenes[project.projectId]
         if (previous != null && previous.project.plan === project.plan && previous.project.steps === project.steps &&
             previous.project.siteAnchor == project.siteAnchor && previous.project.sitePanelFace == project.sitePanelFace &&
-            previous.entities.all(Entity::isValid)
+            previous.entities.all { it.isValid }
         ) {
             val text = panelText(project)
             previous.panels.forEach { it.text(text) }
+            ensureInteraction(previous)
             return
         }
         val model = BuilderConstructionSiteDisplayLayout.create(project, settings)
         val world = Bukkit.getWorld(model.worldId) ?: return
         val existing = scenes[project.projectId]
-            ?.takeIf { it.model == model && it.entities.all(Entity::isValid) }
+            ?.takeIf { it.model == model && it.entities.all { display -> display.isValid } }
         if (existing != null) {
             existing.panels.forEach { it.text(panelText(project)) }
+            ensureInteraction(existing)
             return
         }
         remove(project.projectId)
-        val spawned = mutableListOf<Entity>()
+        val spawned = mutableListOf<PacketDisplay>()
         try {
             if (settings.outlineEnabled) {
                 val blockData = settings.outlineMaterial.createBlockData()
                 model.edges.forEach { edge ->
-                    spawned += world.spawn(Location(world, edge.x, edge.y, edge.z), BlockDisplay::class.java) { display ->
-                        configure(display, project.projectId)
-                        display.block = blockData
+                    spawned += displays.spawnBlock(Location(world, edge.x, edge.y, edge.z), blockData).also { display ->
+                        configure(display)
                         display.transformation = Transformation(
                             Vector3f(),
                             Quaternionf(),
@@ -293,14 +304,17 @@ internal class BuilderConstructionSiteDisplayManager(
                     }
                 }
             }
-            val panels = mutableListOf<TextDisplay>()
+            val panels = mutableListOf<PacketTextDisplay>()
             if (settings.panelEnabled) {
                 val location = Location(world, model.panelX, model.panelY, model.panelZ)
                 for (yaw in listOf(model.panelYaw, model.panelYaw + 180f)) {
-                    val panel = world.spawn(location, TextDisplay::class.java) { display ->
-                        configure(display, project.projectId)
-                        display.text(panelText(project))
-                        BuilderConstructionSitePanelOrientation.apply(display, yaw)
+                    val panel = displays.spawnText(location.clone().apply { this.yaw = yaw }, panelText(project)).also { display ->
+                        configure(display)
+                        display.billboard = Display.Billboard.FIXED
+                        display.transformation = Transformation(
+                            Vector3f(0f, 0f, .02f), Quaternionf(),
+                            Vector3f(BuilderConstructionSitePanelOrientation.SCALE), Quaternionf(),
+                        )
                         display.lineWidth = settings.panelLineWidth
                         display.backgroundColor = settings.panelBackgroundColor
                         display.isShadowed = true
@@ -312,19 +326,12 @@ internal class BuilderConstructionSiteDisplayManager(
                     spawned += panel
                     panels += panel
                 }
-                spawned += world.spawn(
-                    location.clone().subtract(0.0, settings.panelInteractionHeight / 2.0, 0.0),
-                    Interaction::class.java,
-                ) { interaction ->
-                    configureEntity(interaction, project.projectId)
-                    interaction.interactionWidth = settings.panelInteractionWidth
-                    interaction.interactionHeight = settings.panelInteractionHeight
-                    interaction.isResponsive = true
-                }
             }
-            scenes[project.projectId] = Scene(project, model, spawned.toList(), panels.toList())
+            val scene = Scene(project, model, spawned.toList(), panels.toList())
+            scenes[project.projectId] = scene
+            ensureInteraction(scene)
         } catch (failure: Throwable) {
-            spawned.forEach(Entity::remove)
+            spawned.forEach(PacketDisplay::remove)
             throw failure
         }
     }
@@ -346,8 +353,25 @@ internal class BuilderConstructionSiteDisplayManager(
         )
     }
 
-    private fun configure(display: Display, projectId: UUID) {
-        configureEntity(display, projectId)
+    private fun ensureInteraction(scene: Scene) {
+        if (!settings.panelEnabled || scene.interaction?.isValid == true) return
+        val model = scene.model
+        val world = Bukkit.getWorld(model.worldId) ?: return
+        // A UI hitbox must never load a neighbouring chunk merely to show a plaque.
+        if (!world.isChunkLoaded(model.panelX.chunkCoordinate(), model.panelZ.chunkCoordinate())) return
+        scene.interaction?.remove()
+        scene.interaction = world.spawn(
+            Location(world, model.panelX, model.panelY - settings.panelInteractionHeight / 2.0, model.panelZ),
+            Interaction::class.java,
+        ) { interaction ->
+            configureEntity(interaction, scene.project.projectId)
+            interaction.interactionWidth = settings.panelInteractionWidth
+            interaction.interactionHeight = settings.panelInteractionHeight
+            interaction.isResponsive = true
+        }
+    }
+
+    private fun configure(display: PacketDisplay) {
         display.isGlowing = true
         display.glowColorOverride = settings.glowColor
         display.brightness = Display.Brightness(15, 15)
@@ -378,7 +402,7 @@ internal class BuilderConstructionSiteDisplayManager(
         if (closed) return
         closed = true
         HandlerList.unregisterAll(this)
-        scenes.values.flatMap(Scene::entities).forEach(Entity::remove)
-        scenes.clear()
+        scenes.keys.toList().forEach(::remove)
+        displays.close()
     }
 }

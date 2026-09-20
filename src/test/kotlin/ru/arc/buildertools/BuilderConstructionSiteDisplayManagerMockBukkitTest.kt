@@ -17,6 +17,10 @@ import org.bukkit.entity.Interaction
 import org.bukkit.entity.TextDisplay
 import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.inventory.ItemStack
+import ru.arc.paper.display.PacketDisplay
+import ru.arc.paper.display.PacketBlockDisplay
+import ru.arc.paper.display.PacketTextDisplay
+import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.config.ConfigManager
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
@@ -26,7 +30,7 @@ import java.util.UUID
 import java.util.function.Consumer
 
 class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
-    test("paused construction restores its site display when its chunk loads again") {
+    test("packet site visuals never spawn native displays or load chunks and restore only the loaded hitbox") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -42,7 +46,18 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                 val spawned = mutableListOf<Entity>()
                 val valid = IdentityHashMap<Entity, Boolean>()
                 val world = displayWorld(worldId, spawned, valid)
+                val packetVisuals = mutableListOf<PacketDisplay>()
+                val displays = mockk<PaperPacketDisplays>(relaxed = true)
+                every { displays.spawnBlock(any(), any()) } answers {
+                    mockk<PacketBlockDisplay>(relaxed = true) { every { isValid } returns true }
+                        .also { packetVisuals += it }
+                }
+                every { displays.spawnText(any(), any()) } answers {
+                    mockk<PacketTextDisplay>(relaxed = true) { every { isValid } returns true }
+                        .also { packetVisuals += it }
+                }
                 val chunk = mockk<Chunk> {
+                    every { entities } answers { spawned.filter { valid[it] == true }.toTypedArray() }
                     every { this@mockk.world } returns world
                     every { x } returns 0
                     every { z } returns 0
@@ -57,28 +72,33 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         messages = config.messages(),
                         projectLookup = { id -> project.takeIf { it.projectId == id } },
                         onInspect = { _, _ -> },
+                        displays = displays,
                     ).use { manager ->
                         manager.upsert(project)
-                        spawned.size shouldBe 15
-                        spawned.filterIsInstance<TextDisplay>().forEach { display ->
+                        spawned.size shouldBe 0
+                        packetVisuals.size shouldBe 14
+                        packetVisuals.filterIsInstance<PacketTextDisplay>().forEach { display ->
                             io.mockk.verify(exactly = 1) { display.displayWidth = 3f }
                             io.mockk.verify(exactly = 1) { display.displayHeight = 1.5f }
                         }
-                        spawned.filterIsInstance<Interaction>().single().also { interaction ->
-                            io.mockk.verify(exactly = 1) { interaction.interactionWidth = 3f }
-                            io.mockk.verify(exactly = 1) { interaction.interactionHeight = 1.5f }
-                        }
-
                         steps.reads = 0
                         manager.upsert(project.copy(updatedAtMillis = project.updatedAtMillis + 1))
-                        spawned.size shouldBe 15
+                        packetVisuals.size shouldBe 14
                         steps.reads shouldBe 0
 
+                        every { world.isChunkLoaded(0, 0) } returns true
+                        paper.callEvent(ChunkLoadEvent(chunk, false))
+                        spawned.size shouldBe 1
+                        spawned.single().also { interaction ->
+                            (interaction is Interaction) shouldBe true
+                            io.mockk.verify(exactly = 1) { (interaction as Interaction).interactionWidth = 3f }
+                        }
                         valid.replaceAll { _, _ -> false }
                         paper.callEvent(ChunkLoadEvent(chunk, false))
+                        spawned.size shouldBe 2
+                        packetVisuals.size shouldBe 14
+                        io.mockk.verify(exactly = 0) { world.getChunkAt(any<Int>(), any<Int>()) }
 
-                        spawned.size shouldBe 30
-                        spawned.takeLast(15).all { valid[it] == true } shouldBe true
                     }
                 } finally {
                     unmockkStatic(Bukkit::class)
