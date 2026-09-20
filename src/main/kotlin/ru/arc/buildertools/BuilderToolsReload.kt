@@ -292,6 +292,7 @@ internal object BuilderToolsReloadPreflight {
         "runtime.player-recovery-retry-period-ticks" to YamlValueType.LONG,
         "runtime.progress-every-batches" to YamlValueType.INT,
         "preview.period-ticks" to YamlValueType.LONG,
+        "preview.movement-period-ticks" to YamlValueType.LONG,
         "preview.radius" to YamlValueType.DOUBLE,
         "preview.outline-spacing" to YamlValueType.DOUBLE,
         "preview.max-selection-particles" to YamlValueType.INT,

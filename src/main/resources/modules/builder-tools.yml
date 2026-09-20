@@ -205,8 +205,10 @@ runtime:
   progress-every-batches: 10
 
 preview:
-  # Refresh twice per second, matching the persistent feel of the old Denizen outline.
+  # Recheck ordinary preview world surfaces twice per second.
   period-ticks: 10
+  # Capture movement every 100 ms; nearest-block selection runs asynchronously, without a distance dead zone.
+  movement-period-ticks: 2
   radius: 32
   outline-spacing: 0.75
   max-selection-particles: 512

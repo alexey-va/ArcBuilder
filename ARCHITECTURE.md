@@ -71,9 +71,21 @@ same ordered connection queue. Native book panels retain their text and clickabl
 Interaction entities in `BuilderBookPreviewPresentation`.
 
 Large preview windows select the nearest K blocks with a bounded heap and retain
-schematic order, avoiding a full sort and boxed coordinate triples on every
-guidance tick. Selection, clipboard, pending plan, and active operation are distinct
+schematic order. Both plan and book previews capture eye coordinates every
+`preview.movement-period-ticks` (2 ticks by default). `BuilderAsyncPreviewWindow`
+selects indices against copied coordinates off-thread, with one calculation in
+flight and only the latest pending position. Every positional change qualifies;
+there is no distance dead zone. Unchanged positions skip calculation, and an
+unchanged selected set skips scene work. Main-thread application reuses retained
+display specifications and prepares only newly selected blocks. World-surface
+checks and book guidance keep their separate, slower cadence. Closing, replacing
+or suspending a preview invalidates late calculations; lifecycle tokens also fence
+reload and shutdown. Selection, clipboard, pending plan, and active operation are distinct
 states and must not be collapsed into one session object.
+
+A model replacement keeps the last scene visible until the new selection is
+ready, then applies its delta in one ordered packet batch. A failed initial
+render clears that old scene so another plan cannot remain visible indefinitely.
 
 The completed-selection chat surface exposes only operations that consume the
 current selection. `copy` runs immediately because it only records a temporary
@@ -356,7 +368,7 @@ operator-tunable groups are:
 | `limits`, `timers` | Change caps, range, plan/clipboard/undo lifetimes, and journal retention. |
 | `construction` | Container search radius, online-inventory range, tick period, probe budget, bounded per-project container cache, per-call resolution budget, sampled sound/particle feedback, and the construction-site outline/panel presentation. |
 | `runtime` | In-memory health refresh period, player-recovery retry period, and progress cadence. Lifecycle health-log cadence remains platform-owned. |
-| `preview` | Preview cadence/radius, selection particle budget, nearest-block display budget, plan display range, guidance/recentering cadence, and plan-title timings. |
+| `preview` | World-surface refresh cadence/radius, asynchronous movement-window cadence, selection particle budget, nearest-block display budget, plan display range, guidance cadence, and plan-title timings. |
 | `shop` | Read-only quote and auto-buy gates/limits. |
 | `book-contracts` | Contract enablement/pricing, auction recovery retry, player-material summary limit, and MySQL settings. Contract enablement/pricing/SQL may be overlaid by the runtime file. |
 | `safety` | Lands/CoreProtect requirements and the replaceable-material allowlist. |

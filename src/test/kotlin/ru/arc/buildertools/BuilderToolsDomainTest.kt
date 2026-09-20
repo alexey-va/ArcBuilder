@@ -133,6 +133,7 @@ class BuilderToolsDomainTest : FunSpec({
             setDouble("preview.plan-display-range", 48.0)
             setDouble("preview.block-display-scale", 1.0)
             setInt("preview.max-plan-displays", 320)
+            setLong("preview.movement-period-ticks", 1L)
             setLong("preview.guidance-period-ticks", 15L)
             setInt("preview.plan-title.fade-in-ticks", 2)
             setInt("preview.plan-title.stay-ticks", 60)
@@ -179,6 +180,7 @@ class BuilderToolsDomainTest : FunSpec({
         configured.previewPlanDisplayRange shouldBe 48.0
         configured.previewBlockDisplayScale shouldBe 1.0f
         configured.previewMaxPlanDisplays shouldBe 320
+        configured.previewMovementPeriodTicks shouldBe 1L
         configured.previewGuidancePeriodTicks shouldBe 15L
         configured.previewPlanTitleFadeInTicks shouldBe 2
         configured.previewPlanTitleStayTicks shouldBe 60

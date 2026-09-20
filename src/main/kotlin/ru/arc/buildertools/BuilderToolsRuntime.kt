@@ -102,6 +102,7 @@ internal class BuilderToolsRuntime(
         config.previewGuidancePeriodTicks,
         config.messages(),
         taskScope,
+        movementPeriodTicks = config.previewMovementPeriodTicks,
     ),
     blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
     private val physicsUpdater: BuilderPhysicsUpdater = PaperBuilderPhysicsUpdater,

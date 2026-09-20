@@ -80,6 +80,7 @@ internal class BuilderBlockDisplayRenderer(
     private val guidancePeriodTicks: Long,
     private val messages: LocalizedMiniMessage,
     private val taskScope: LifecycleTaskScope,
+    movementPeriodTicks: Long = 2L,
     private val packets: BuilderPreviewPacketTransport = PacketEventsBuilderPreviewTransport(plugin.logger),
     private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
 ) : BuilderDisplayRenderer, Listener {
@@ -121,10 +122,12 @@ internal class BuilderBlockDisplayRenderer(
     private data class BookBlock(val location: Location, val blockData: BlockData)
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
+    private val movingPreviews = mutableMapOf<Pair<UUID, Layer>, MovingPreview>()
     private val bookSites = mutableMapOf<UUID, ConstructionSite>()
-    private val bookModels = mutableMapOf<UUID, BookModel>()
     private val bookBossBars = mutableMapOf<UUID, BossBar>()
     private var viewerRefresh: ScheduledTask? = null
+    private val movementTask: ScheduledTask
+    private val guidanceTask: ScheduledTask
     private val blockTransform = BuilderDisplayGeometry.blockTransform(blockDisplayScale)
     private var closed = false
 
@@ -132,17 +135,101 @@ internal class BuilderBlockDisplayRenderer(
         require(maxPlanDisplays in 32..4096)
         require(planDisplayRange.isFinite() && planDisplayRange in 8.0..128.0)
         require(guidancePeriodTicks in 5L..100L)
-        checkNotNull(
+        require(movementPeriodTicks in 1L..20L)
+        movementTask = checkNotNull(
+            taskScope.runTimer(0L, movementPeriodTicks) {
+                movingPreviews.values.toList().forEach(MovingPreview::update)
+            },
+        ) { "Builder preview movement task scope is inactive" }
+        guidanceTask = checkNotNull(
             taskScope.runTimer(0L, guidancePeriodTicks) {
                 bookSites.values.toList().forEach { site ->
                     if (site.player.isOnline) {
-                        renderBook(site)
+                        movingPreviews[site.player.uniqueId to Layer.BOOK]?.refreshSurface()
                         showBookActionBar(site)
                     }
                 }
             },
         ) { "Builder preview guidance task scope is inactive" }
         plugin.server.pluginManager.registerEvents(this, plugin)
+    }
+
+    /** Main-thread presentation owner; the window worker sees only copied coordinates. */
+    private inner class MovingPreview(
+        val player: Player,
+        val worldId: UUID,
+        val layer: Layer,
+        val sourceId: UUID?,
+        positions: List<BuilderBlockPos>,
+        private val decorations: List<DisplaySpec>,
+        private val createSpec: (Int) -> DisplaySpec?,
+    ) : AutoCloseable {
+        private var selected: List<Int>? = null
+        private var specs = emptyMap<Int, DisplaySpec?>()
+        private var suspended = false
+        private var failed = false
+        private var rendered = false
+        private val window = BuilderAsyncPreviewWindow(
+            taskScope,
+            positions.map { BuilderPreviewPoint(it.x + .5, it.y + .5, it.z + .5) },
+            maxPlanDisplays,
+            onChange = { indices ->
+                if (isVisible()) {
+                    selected = indices
+                    render(refresh = false)
+                } else suspend()
+            },
+            onFailure = { failure ->
+                // Keep the old scene until its replacement is ready, but never
+                // leave a failed replacement displaying another plan indefinitely.
+                if (!rendered) remove(player.uniqueId, layer)
+                if (!failed) {
+                    failed = true
+                    plugin.logger.warning("Builder preview window failed for ${player.uniqueId}: ${failure.message}")
+                }
+            },
+        )
+
+        private fun isVisible() = !closed && player.isOnline && player.world.uid == worldId
+
+        fun update() {
+            if (!isVisible()) {
+                suspend()
+                return
+            }
+            suspended = false
+            val eye = player.eyeLocation
+            window.update(BuilderPreviewPoint(eye.x, eye.y, eye.z))
+        }
+
+        fun refreshSurface() {
+            update()
+            if (!suspended) render(refresh = true)
+        }
+
+        fun suspend() {
+            if (!suspended) {
+                suspended = true
+                window.invalidate()
+                selected = null
+                specs = emptyMap()
+                rendered = false
+                remove(player.uniqueId, layer)
+            }
+        }
+
+        private fun render(refresh: Boolean) {
+            val indices = selected ?: return
+            val previous = specs
+            specs = indices.associateWith { index ->
+                if (!refresh && previous.containsKey(index)) previous[index] else createSpec(index)
+            }
+            replace(player, layer, specs.values.filterNotNull() + decorations)
+            rendered = true
+            failed = false
+        }
+
+        override fun close() = window.close()
     }
 
     override fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?) {
@@ -162,57 +249,51 @@ internal class BuilderBlockDisplayRenderer(
 
     override fun plan(player: Player, plan: BuilderPlan) {
         if (plan.changes.firstOrNull()?.position?.worldId != player.world.uid) {
-            remove(player.uniqueId, Layer.PLAN)
+            clearPlan(player.uniqueId)
             return
         }
-        val eye = player.eyeLocation
-        val visible = BuilderPreviewWindow.nearest(
-            values = plan.changes,
-            limit = maxPlanDisplays,
-        ) { change ->
-            val dx = change.position.x + .5 - eye.x
-            val dy = change.position.y + .5 - eye.y
-            val dz = change.position.z + .5 - eye.z
-            dx * dx + dy * dy + dz * dz
+        val key = player.uniqueId to Layer.PLAN
+        movingPreviews[key]?.takeIf { it.sourceId == plan.id }?.let {
+            it.refreshSurface()
+            return
         }
-        val specs = buildList {
-            visible.forEach { change ->
-                val after = Bukkit.createBlockData(change.afterBlockData)
-                val removal = after.material.isAir
-                val position = change.position
-                val blockTransform = previewTransform(player.world, position.x, position.y, position.z, after, removal)
-                    ?: return@forEach
-                add(
-                    DisplaySpec(
-                        x = change.position.x + blockTransform.offset.toDouble(),
-                        y = change.position.y + blockTransform.offset.toDouble(),
-                        z = change.position.z + blockTransform.offset.toDouble(),
-                        blockData = if (removal) Material.RED_STAINED_GLASS.createBlockData() else after,
-                        scaleX = blockTransform.scale,
-                        scaleY = blockTransform.scale,
-                        scaleZ = blockTransform.scale,
-                        glow = if (removal) Color.RED else Color.fromRGB(197, 116, 255),
-                    ),
+        val positions = plan.changes.map(BuilderBlockChange::position)
+        movingPreviews.remove(key)?.close()
+        movingPreviews[key] = MovingPreview(
+            player, player.world.uid, Layer.PLAN, plan.id, positions,
+            bounds(positions, Material.MAGENTA_STAINED_GLASS, Color.fromRGB(197, 116, 255)),
+        ) { index ->
+            val change = plan.changes[index]
+            val after = Bukkit.createBlockData(change.afterBlockData)
+            val removal = after.material.isAir
+            val position = change.position
+            previewTransform(player.world, position.x, position.y, position.z, after, removal)?.let { transform ->
+                DisplaySpec(
+                    x = position.x + transform.offset.toDouble(),
+                    y = position.y + transform.offset.toDouble(),
+                    z = position.z + transform.offset.toDouble(),
+                    blockData = if (removal) Material.RED_STAINED_GLASS.createBlockData() else after,
+                    scaleX = transform.scale,
+                    scaleY = transform.scale,
+                    scaleZ = transform.scale,
+                    glow = if (removal) Color.RED else Color.fromRGB(197, 116, 255),
                 )
             }
-            plan.changes.takeIf(List<*>::isNotEmpty)?.let { changes ->
-                addAll(bounds(changes.map(BuilderBlockChange::position), Material.MAGENTA_STAINED_GLASS, Color.fromRGB(197, 116, 255)))
-            }
-        }
-        replace(player, Layer.PLAN, specs)
+        }.also(MovingPreview::update)
     }
 
-    override fun clearPlan(playerId: UUID) = remove(playerId, Layer.PLAN)
+    override fun clearPlan(playerId: UUID) {
+        movingPreviews.remove(playerId to Layer.PLAN)?.close()
+        remove(playerId, Layer.PLAN)
+    }
 
     override fun open(site: ConstructionSite) {
-        bookModels[site.player.uniqueId] = bookModel(site)
-        renderBook(site)
+        openBookWindow(site)
         showBookGuidance(site, showTitle = true)
     }
 
     override fun refresh(site: ConstructionSite) {
-        bookModels[site.player.uniqueId] = bookModel(site)
-        renderBook(site)
+        openBookWindow(site)
         showBookGuidance(site, showTitle = false)
     }
 
@@ -267,53 +348,26 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun closeBookGuidance(playerId: UUID) {
         val player = bookSites.remove(playerId)?.player ?: Bukkit.getPlayer(playerId)
-        bookModels.remove(playerId)
+        movingPreviews.remove(playerId to Layer.BOOK)?.close()
         bookBossBars.remove(playerId)?.let { bar -> player?.hideBossBar(bar) }
         player?.sendActionBar(Component.empty())
     }
 
-    private fun renderBook(site: ConstructionSite) {
+    private fun openBookWindow(site: ConstructionSite) {
+        val key = site.player.uniqueId to Layer.BOOK
+        movingPreviews.remove(key)?.close()
         if (site.player.world.uid != site.world.uid) {
             remove(site.player.uniqueId, Layer.BOOK)
             return
         }
-        val model = bookModels[site.player.uniqueId] ?: bookModel(site).also {
-            bookModels[site.player.uniqueId] = it
-        }
-        val eye = site.player.eyeLocation
-        val visible = BuilderPreviewWindow.nearest(
-            values = model.blocks,
-            limit = maxPlanDisplays,
-        ) { block ->
-            val dx = block.location.blockX + .5 - eye.x
-            val dy = block.location.blockY + .5 - eye.y
-            val dz = block.location.blockZ + .5 - eye.z
-            dx * dx + dy * dy + dz * dz
-        }
-        val specs = buildList {
-            visible.forEach { block ->
-                val location = block.location
-                val blockTransform = previewTransform(site.world, location.blockX, location.blockY, location.blockZ, block.blockData)
-                    ?: return@forEach
-                add(
-                    DisplaySpec(
-                        block.location.blockX + blockTransform.offset.toDouble(),
-                        block.location.blockY + blockTransform.offset.toDouble(),
-                        block.location.blockZ + blockTransform.offset.toDouble(),
-                        block.blockData,
-                        blockTransform.scale,
-                        blockTransform.scale,
-                        blockTransform.scale,
-                        glow = Color.fromRGB(255, 177, 66),
-                    ),
-                )
-            }
+        val model = bookModel(site)
+        val decorations = buildList {
             model.bounds.takeIf(List<*>::isNotEmpty)?.let {
                 addAll(bounds(it, Material.ORANGE_STAINED_GLASS, Color.fromRGB(255, 177, 66)))
             }
-            val anchor = site.centerBlock.block
+            val anchor = site.centerBlock
             val origin = BuilderDisplayGeometry.originMarker(
-                BuilderBlockPos(site.world.uid, anchor.x, anchor.y, anchor.z),
+                BuilderBlockPos(site.world.uid, anchor.blockX, anchor.blockY, anchor.blockZ),
             )
             origin.forEach { edge ->
                 add(
@@ -330,7 +384,24 @@ internal class BuilderBlockDisplayRenderer(
                 )
             }
         }
-        replace(site.player, Layer.BOOK, specs)
+        movingPreviews[key] = MovingPreview(
+            site.player, site.world.uid, Layer.BOOK, null, model.bounds, decorations,
+        ) { index ->
+            val block = model.blocks[index]
+            val position = model.bounds[index]
+            previewTransform(site.world, position.x, position.y, position.z, block.blockData)?.let { transform ->
+                DisplaySpec(
+                    position.x + transform.offset.toDouble(),
+                    position.y + transform.offset.toDouble(),
+                    position.z + transform.offset.toDouble(),
+                    block.blockData,
+                    transform.scale,
+                    transform.scale,
+                    transform.scale,
+                    glow = Color.fromRGB(255, 177, 66),
+                )
+            }
+        }.also(MovingPreview::update)
     }
 
     private fun previewTransform(
@@ -482,6 +553,7 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun resetViewer(playerId: UUID) {
         scenes.values.forEach { it.audience.removeViewer(playerId) }
+        movingPreviews.filterKeys { it.first == playerId }.values.forEach(MovingPreview::suspend)
         refreshViewersNextTick()
     }
 
@@ -512,6 +584,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun clearPlayer(playerId: UUID) {
+        movingPreviews.keys.filter { it.first == playerId }.forEach { movingPreviews.remove(it)?.close() }
         Layer.entries.forEach { remove(playerId, it) }
         closeBookGuidance(playerId)
     }
@@ -520,11 +593,15 @@ internal class BuilderBlockDisplayRenderer(
         if (closed) return
         closed = true
         HandlerList.unregisterAll(this)
+        movementTask.cancel()
+        guidanceTask.cancel()
         viewerRefresh?.cancel()
         viewerRefresh = null
         bookBossBars.keys.toList().forEach(::closeBookGuidance)
         scenes.values.forEach { it.audience.close() }
         scenes.clear()
+        movingPreviews.values.forEach(MovingPreview::close)
+        movingPreviews.clear()
         packets.close()
     }
 }

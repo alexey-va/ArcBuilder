@@ -25,6 +25,28 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         candidate.constructionMaxContainerProbesPerTick shouldBe 512
         candidate.constructionBlocksPerCycle shouldBe 10
         candidate.constructionTickPeriod shouldBe 3L
+        candidate.previewMovementPeriodTicks shouldBe 2L
+    }
+
+    test("reload validates the movement cadence and preserves operator overrides") {
+        val root = configRoot()
+        val config = Config(root, "modules/builder-tools.yml")
+        for (invalid in listOf(0L, 21L)) {
+            config.setLong("preview.movement-period-ticks", invalid)
+            config.saveStrict()
+            shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+                .message.orEmpty() shouldContain "preview movement period"
+        }
+        config.setLong("preview.movement-period-ticks", 1L)
+        config.saveStrict()
+        BuilderToolsReloadPreflight.load(root).previewMovementPeriodTicks shouldBe 1L
+        BuilderToolsConfig.mergeBundledDefaults(root)
+        Config(root, "modules/builder-tools.yml").long("preview.movement-period-ticks") shouldBe 1L
+
+        config.setString("preview.movement-period-ticks", "quickly")
+        config.saveStrict()
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+            .message.orEmpty() shouldContain "preview.movement-period-ticks"
     }
 
     test("malformed YAML is rejected before Config can degrade it into default values") {
@@ -113,6 +135,7 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         val root = configRoot()
         val config = Config(root, "modules/builder-tools.yml").apply {
             removeKey("runtime.progress-every-batches")
+            removeKey("preview.movement-period-ticks")
             setString("operator-owned-note", "keep-me")
             saveStrict()
         }
@@ -123,6 +146,7 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         merged.integer("construction.blocks-per-cycle") shouldBe 10
         merged.long("construction.tick-period-ticks") shouldBe 3L
         merged.integer("preview.max-plan-displays") shouldBe 4096
+        merged.long("preview.movement-period-ticks") shouldBe 2L
         merged.double("preview.block-display-scale") shouldBe 1.0
         merged.integer("construction.effects.interval-blocks") shouldBe 4
         merged.string("construction.site.outline.material") shouldBe "ORANGE_STAINED_GLASS"

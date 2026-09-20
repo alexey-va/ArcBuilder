@@ -113,6 +113,7 @@ class BuilderToolsConfig(
     val playerRecoveryRetryPeriodTicks: Long get() = config.long("runtime.player-recovery-retry-period-ticks", 100L)
     val progressEveryBatches: Int get() = config.integer("runtime.progress-every-batches", 10)
     val previewPeriodTicks: Long get() = config.long("preview.period-ticks", 10L)
+    val previewMovementPeriodTicks: Long get() = config.long("preview.movement-period-ticks", 2L)
     val previewRadius: Double get() = config.double("preview.radius", 32.0)
     val previewSpacing: Double get() = config.double("preview.outline-spacing", 0.75)
     val previewMaxSelectionParticles: Int get() = config.integer("preview.max-selection-particles", 512)
@@ -296,6 +297,7 @@ class BuilderToolsConfig(
         require(playerRecoveryRetryPeriodTicks in 20L..1_200L) { "Builder-tools recovery retry period is invalid" }
         require(progressEveryBatches in 1..100) { "Builder-tools progress cadence is invalid" }
         require(previewPeriodTicks in 5L..40L) { "Builder-tools preview period is invalid" }
+        require(previewMovementPeriodTicks in 1L..20L) { "Builder-tools preview movement period is invalid" }
         require(previewRadius.isFinite() && previewRadius in 8.0..64.0) { "Builder-tools preview radius is invalid" }
         require(previewSpacing.isFinite() && previewSpacing in 0.25..2.0) { "Builder-tools preview spacing is invalid" }
         require(previewMaxSelectionParticles in 48..1_024) { "Builder-tools selection preview limit is invalid" }
