@@ -13,7 +13,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity
 import io.github.retrooper.packetevents.util.SpigotConversionUtil
-import io.github.retrooper.packetevents.util.SpigotReflectionUtil
+import org.bukkit.Bukkit
 import org.bukkit.block.data.BlockData
 import org.bukkit.entity.Player
 import java.util.Optional
@@ -73,7 +73,8 @@ internal class PacketEventsBuilderPreviewTransport(
     override fun blockStateId(blockData: BlockData): Int =
         SpigotConversionUtil.fromBukkitBlockData(blockData).globalId
 
-    override fun nextEntityId(): Int = SpigotReflectionUtil.generateEntityId()
+    @Suppress("DEPRECATION")
+    override fun nextEntityId(): Int = Bukkit.getUnsafe().nextEntityId()
 
     override fun connection(player: Player): BuilderPreviewConnection? {
         val channel = PacketEvents.getAPI().playerManager.getChannel(player) ?: return null

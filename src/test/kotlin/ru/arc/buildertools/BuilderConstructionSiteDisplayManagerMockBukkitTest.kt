@@ -33,7 +33,9 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
             BuilderToolsModule.shutdown()
             try {
                 val worldId = UUID.randomUUID()
-                val project = pausedProject(worldId)
+                val original = pausedProject(worldId)
+                val steps = CountingSiteSteps(original.steps)
+                val project = original.copy(steps = steps).validated()
                 val config = BuilderToolsConfig(
                     ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),
                 ).validated()
@@ -66,6 +68,11 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                             io.mockk.verify(exactly = 1) { interaction.interactionWidth = 3f }
                             io.mockk.verify(exactly = 1) { interaction.interactionHeight = 1.5f }
                         }
+
+                        steps.reads = 0
+                        manager.upsert(project.copy(updatedAtMillis = project.updatedAtMillis + 1))
+                        spawned.size shouldBe 15
+                        steps.reads shouldBe 0
 
                         valid.replaceAll { _, _ -> false }
                         paper.callEvent(ChunkLoadEvent(chunk, false))
@@ -172,4 +179,10 @@ private fun pausedProject(worldId: UUID): BuilderConstructionProjectRecord {
         createdAtMillis = now,
         updatedAtMillis = now + 1,
     ).validated()
+}
+
+private class CountingSiteSteps(private val values: List<BuilderConstructionStep>) : AbstractList<BuilderConstructionStep>() {
+    var reads = 0
+    override val size: Int get() = values.size
+    override fun get(index: Int): BuilderConstructionStep { reads++; return values[index] }
 }

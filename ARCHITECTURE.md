@@ -64,7 +64,8 @@ world. `BuilderPreviewPacketTransport` uses the installed PacketEvents 2.12.1
 to send client-only BlockDisplay entities instead of registering Bukkit entities.
 The renderer reads Bukkit state and converts block states on the server thread;
 immutable spawn/metadata/destroy batches are encoded and flushed on each captured
-connection's Netty event loop. `BuilderPacketScene` retains unchanged entity IDs,
+connection's Netty event loop. Entity IDs come directly from Paper's global
+`UnsafeValues.nextEntityId()` allocator; no reflection lookup or native spawn is needed. `BuilderPacketScene` retains unchanged entity IDs,
 tracks the owner and permitted book-preview observers, and replays displays after
 client chunk eviction, world changes, respawn, or reconnect. Cleanup uses the
 same ordered connection queue. Native book panels retain their text and clickable
@@ -577,3 +578,13 @@ an old response cannot confirm a newly opened session. Editing a prepared plan
 first restores its placement and discards the old confirmation. A paid draft
 calculates and displays its activation price in the same green button before
 a subsequent click may charge it; a changed quote must be displayed again.
+
+## Construction validation boundary
+
+Construction creation and the durable store retain full plan, exchange and
+transition validation. `tickValidated` consumes only records already checked by
+that boundary. In-memory transition proposals check changing progress, receipts,
+immutable identity and legal state transitions without rescanning every block;
+the store fully validates proposals before committing them. The site display
+consumes those checked records and reuses its layout while the plan, steps,
+anchor and orientation remain unchanged.

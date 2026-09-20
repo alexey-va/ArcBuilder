@@ -184,6 +184,21 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         }
     }
 
+    test("validated construction advances a bounded batch without scanning the remaining plan") {
+        val source = pureProject(10_000)
+        val changes = CountingConstructionList(source.plan.changes)
+        val steps = CountingConstructionList(source.steps)
+        val current = source.copy(plan = source.plan.copy(changes = changes), steps = steps).validated()
+        changes.reads = 0
+        steps.reads = 0
+        val target = BuilderConstructionProjectController.tickValidated(current, createdAt + 2, FakePort(), 4)!!
+        target.cursor shouldBe 4
+        changes.reads shouldBe 0
+        (steps.reads < 100) shouldBe true
+        BuilderConstructionProjectTransitionRules.validate(current, target)
+        (changes.reads >= 10_000) shouldBe true
+    }
+
     test("missing material pauses before mutating the block") {
         val port = FakePort(inputAvailable = false)
 
@@ -530,3 +545,9 @@ class BuilderConstructionProjectControllerTest : FunSpec({
         ) shouldBe false
     }
 })
+
+private class CountingConstructionList<T>(private val values: List<T>) : AbstractList<T>() {
+    var reads = 0
+    override val size: Int get() = values.size
+    override fun get(index: Int): T { reads++; return values[index] }
+}

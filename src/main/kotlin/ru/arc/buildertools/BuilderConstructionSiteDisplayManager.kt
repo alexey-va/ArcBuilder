@@ -190,6 +190,7 @@ internal class BuilderConstructionSiteDisplayManager(
     private val onInspect: (Player, BuilderConstructionProjectRecord) -> Unit,
 ) : Listener, AutoCloseable {
     private data class Scene(
+        val project: BuilderConstructionProjectRecord,
         val model: BuilderConstructionSiteDisplayModel,
         val entities: List<Entity>,
         val panels: List<TextDisplay>,
@@ -212,7 +213,7 @@ internal class BuilderConstructionSiteDisplayManager(
         }
         if (!reconciling.add(project.projectId)) return
         try {
-            runCatching { upsertChecked(project.validated()) }
+            runCatching { upsertChecked(project.validatedProgress()) }
                 .onFailure { failure ->
                     remove(project.projectId)
                     warn("Builder construction site display failed for {}: {}", project.projectId, failure.message)
@@ -257,6 +258,15 @@ internal class BuilderConstructionSiteDisplayManager(
     }
 
     private fun upsertChecked(project: BuilderConstructionProjectRecord) {
+        val previous = scenes[project.projectId]
+        if (previous != null && previous.project.plan === project.plan && previous.project.steps === project.steps &&
+            previous.project.siteAnchor == project.siteAnchor && previous.project.sitePanelFace == project.sitePanelFace &&
+            previous.entities.all(Entity::isValid)
+        ) {
+            val text = panelText(project)
+            previous.panels.forEach { it.text(text) }
+            return
+        }
         val model = BuilderConstructionSiteDisplayLayout.create(project, settings)
         val world = Bukkit.getWorld(model.worldId) ?: return
         val existing = scenes[project.projectId]
@@ -312,7 +322,7 @@ internal class BuilderConstructionSiteDisplayManager(
                     interaction.isResponsive = true
                 }
             }
-            scenes[project.projectId] = Scene(model, spawned.toList(), panels.toList())
+            scenes[project.projectId] = Scene(project, model, spawned.toList(), panels.toList())
         } catch (failure: Throwable) {
             spawned.forEach(Entity::remove)
             throw failure

@@ -114,12 +114,6 @@ internal data class BuilderConstructionProjectRecord(
             require(anchor.worldId == steps.first().change.position.worldId) { "Construction anchor crosses the project world" }
         }
         steps.forEach(BuilderConstructionStep::validated)
-        if (instantBuildRequestedBy != null) {
-            require(state in setOf(BuilderConstructionProjectState.WORLD_PREPARED,
-                BuilderConstructionProjectState.COMPLETED, BuilderConstructionProjectState.RECOVERY_REQUIRED,
-                BuilderConstructionProjectState.CANCELLED)) { "Instant construction has an invalid state" }
-            require(pendingResourceMutation == null && pendingOutput == null) { "Instant construction cannot own an item receipt" }
-        }
         bookCost.validated()
         require(bookCost.amount == 1) { "Builder construction project consumes exactly one book" }
         require(sameExchange(plan.costs, listOf(bookCost) + steps.mapNotNull(BuilderConstructionStep::requiredMaterial))) {
@@ -127,6 +121,17 @@ internal data class BuilderConstructionProjectRecord(
         }
         require(sameExchange(plan.rewards, steps.mapNotNull(BuilderConstructionStep::output))) {
             "Builder construction project output exchange does not match its plan"
+        }
+        validatedProgress()
+    }
+
+    /** Checks changing state of a plan already validated by the construction store. */
+    internal fun validatedProgress(): BuilderConstructionProjectRecord = apply {
+        if (instantBuildRequestedBy != null) {
+            require(state in setOf(BuilderConstructionProjectState.WORLD_PREPARED,
+                BuilderConstructionProjectState.COMPLETED, BuilderConstructionProjectState.RECOVERY_REQUIRED,
+                BuilderConstructionProjectState.CANCELLED)) { "Instant construction has an invalid state" }
+            require(pendingResourceMutation == null && pendingOutput == null) { "Instant construction cannot own an item receipt" }
         }
         require(cursor in 0..steps.size) { "Builder construction project cursor is outside its plan" }
         require(createdAtMillis == plan.createdAtMillis && updatedAtMillis >= createdAtMillis) {
@@ -387,7 +392,7 @@ internal data class BuilderConstructionProjectRecord(
     }
 
     private fun transitionTo(target: BuilderConstructionProjectRecord): BuilderConstructionProjectRecord =
-        target.also { BuilderConstructionProjectTransitionRules.validate(this, it) }
+        target.also { BuilderConstructionProjectTransitionRules.validateProgress(this, it) }
 
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1
@@ -411,8 +416,18 @@ internal object BuilderConstructionProjectTransitionRules {
         expected: BuilderConstructionProjectRecord,
         target: BuilderConstructionProjectRecord,
     ) {
-        val before = expected.validated()
-        val after = target.validated()
+        expected.validated()
+        target.validated()
+        validateProgress(expected, target)
+    }
+
+    /** Pure in-memory proposal; the store fully validates it again before committing. */
+    internal fun validateProgress(
+        expected: BuilderConstructionProjectRecord,
+        target: BuilderConstructionProjectRecord,
+    ) {
+        val before = expected.validatedProgress()
+        val after = target.validatedProgress()
         require(before.immutableIdentity() == after.immutableIdentity()) {
             "Builder construction project transition changed immutable data"
         }
