@@ -275,7 +275,7 @@ internal class BuilderShopCoordinator(
     private fun rejected(path: String, vararg values: Pair<String, Component>): BuilderShopConfirmation.Rejected =
         BuilderShopConfirmation.Rejected(path, values.toMap())
 
-    private fun locale(player: Player): String = player.locale().toLanguageTag()
+    private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     override fun close() {
         estimates.clear()

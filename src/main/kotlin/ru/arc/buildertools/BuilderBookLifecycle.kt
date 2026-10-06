@@ -1430,7 +1430,7 @@ internal class BuilderBookLifecycle(
         host.send(player, path, values)
     }
 
-    private fun locale(player: Player): String = player.locale().toLanguageTag()
+    private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun fail(path: String, values: Map<String, Component> = emptyMap()): Nothing =
         throw BuilderUserFailure(path, values)

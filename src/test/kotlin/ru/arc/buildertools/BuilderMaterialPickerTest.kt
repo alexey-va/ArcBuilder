@@ -12,6 +12,9 @@ import io.papermc.paper.connection.PlayerGameConnection
 import io.papermc.paper.dialog.DialogResponseView
 import io.papermc.paper.event.player.PlayerCustomClickEvent
 import net.kyori.adventure.key.Key
+import net.kyori.adventure.text.format.NamedTextColor
+import net.kyori.adventure.text.format.TextColor
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
@@ -130,7 +133,7 @@ class BuilderMaterialPickerTest : FunSpec({
         }
     }
 
-    test("explicit search keeps twelve choices per page and retains query on next") {
+    test("explicit search keeps twenty-four choices per page and retains query on next") {
         strictPickerRuntime { paper ->
             val player = spyk(paper.addPlayer("PickerPagination"))
             every { player.closeDialog() } just Runs
@@ -143,8 +146,13 @@ class BuilderMaterialPickerTest : FunSpec({
                     Material.CHISELED_STONE_BRICKS, Material.STONE_BRICK_SLAB,
                     Material.STONE_BRICK_STAIRS, Material.STONE_BRICK_WALL,
                     Material.MOSSY_STONE_BRICK_SLAB,
+                    Material.COBBLESTONE, Material.COBBLESTONE_SLAB, Material.COBBLESTONE_STAIRS,
+                    Material.COBBLESTONE_WALL, Material.MOSSY_COBBLESTONE,
+                    Material.MOSSY_COBBLESTONE_SLAB, Material.MOSSY_COBBLESTONE_STAIRS,
+                    Material.MOSSY_COBBLESTONE_WALL, Material.END_STONE, Material.END_STONE_BRICKS,
+                    Material.BLACKSTONE, Material.POLISHED_BLACKSTONE,
                 )
-                candidates.size shouldBe 13
+                candidates.size shouldBe 25
 
                 harness.picker.open(
                     player,
@@ -157,7 +165,7 @@ class BuilderMaterialPickerTest : FunSpec({
                 harness.click("find", "stone")
                 val firstPage = harness.presentations.last().screen
                 firstPage.inputs.single().initial shouldBe "stone"
-                firstPage.materialChoiceCount() shouldBe 12
+                firstPage.materialChoiceCount() shouldBe 24
                 firstPage.buttons.any { it.id.value == "next" } shouldBe true
 
                 harness.click("next", "stone")
@@ -169,13 +177,89 @@ class BuilderMaterialPickerTest : FunSpec({
             }
         }
     }
+
+    test("recent choices persist across picker flows, deduplicate, cap at six, and skip replace sources") {
+        strictPickerRuntime { paper ->
+            val player = spyk(paper.addPlayer("PickerRecent"))
+            every { player.closeDialog() } just Runs
+            val plugin = paper.createSimplePlugin("BuilderPickerRecentTest")
+            PickerHarness(plugin, player).use { harness ->
+                val chosen = listOf(
+                    Material.STONE,
+                    Material.DIRT,
+                    Material.OAK_PLANKS,
+                    Material.DIRT,
+                    Material.BRICKS,
+                    Material.GLASS,
+                    Material.GRASS_BLOCK,
+                    Material.COBBLESTONE,
+                    Material.MOSSY_STONE_BRICKS,
+                )
+                chosen.forEach { material ->
+                    harness.picker.open(
+                        player,
+                        FILL_TITLE,
+                        listOf(material),
+                        isCurrent = { true },
+                        onSelected = {},
+                    )
+                    harness.click("material_0")
+                }
+
+                harness.picker.open(
+                    player,
+                    SOURCE_TITLE,
+                    listOf(Material.BIRCH_LOG),
+                    isCurrent = { true },
+                    onSelected = {},
+                    closeOnSelect = false,
+                )
+                harness.click("material_0")
+
+                val recent = listOf(
+                    Material.MOSSY_STONE_BRICKS,
+                    Material.COBBLESTONE,
+                    Material.GRASS_BLOCK,
+                    Material.GLASS,
+                    Material.BRICKS,
+                    Material.DIRT,
+                )
+                val candidates = recent + listOf(
+                    Material.STONE,
+                    Material.OAK_PLANKS,
+                    Material.BIRCH_LOG,
+                )
+                harness.picker.open(
+                    player,
+                    FILL_TITLE,
+                    candidates,
+                    isCurrent = { true },
+                    onSelected = {},
+                )
+                val recentChoices = harness.presentations.last().screen.buttons
+                    .filter { it.id.value.startsWith("material_") }
+                recentChoices.take(6).map { PlainTextComponentSerializer.plainText().serialize(it.label) } shouldBe
+                    recent.map { "↻ ${checkNotNull(BuilderMaterialArguments.russianLabel(it))}" }
+                recentChoices.take(6).forEach { it.label.color() shouldBe TextColor.color(0xE8DFD2) }
+
+                val unselected = recentChoices.single {
+                    PlainTextComponentSerializer.plainText().serialize(it.label).contains("Берёз")
+                }
+                unselected.label.color() shouldBe NamedTextColor.WHITE
+                PlainTextComponentSerializer.plainText().serialize(unselected.label).startsWith("○ ") shouldBe true
+            }
+        }
+    }
 })
 
 private fun strictPickerRuntime(action: (MockBukkitTestRuntime) -> Unit) {
+    BuilderLocalePolicy.configure(defaultLocaleTag = "ru", followClientLocale = false)
     try {
         MockBukkitTestRuntime.open().use(action)
     } catch (failure: TestAbortedException) {
         throw AssertionError("Picker behavior must not silently skip an unsupported platform call", failure)
+    } finally {
+        BuilderLocalePolicy.configure(defaultLocaleTag = "ru", followClientLocale = false)
     }
 }
 

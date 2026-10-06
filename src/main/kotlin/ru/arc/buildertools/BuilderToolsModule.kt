@@ -71,7 +71,7 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
         }
         val active = runtime
         if (active == null) {
-            val locale = (sender as? Player)?.locale()?.toLanguageTag()
+            val locale = BuilderLocalePolicy.localeTag(sender as? Player)
             sender.sendMessage(checkNotNull(messages).render("errors.disabled", locale))
             return true
         }
@@ -107,7 +107,7 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
 
     private fun reload(sender: CommandSender, args: Array<out String>): Boolean {
         val catalog = checkNotNull(messages)
-        val locale = (sender as? Player)?.locale()?.toLanguageTag()
+        val locale = BuilderLocalePolicy.localeTag(sender as? Player)
         if (!sender.hasPermission(RELOAD_PERMISSION)) {
             sender.sendMessage(catalog.render("errors.no-permission", locale))
             return true
@@ -162,8 +162,10 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
         return true
     }
 
-    private fun createRuntime(config: BuilderToolsConfig): BuilderToolsRuntime? =
-        if (config.enabled) BuilderToolsRuntime(ARC.instance, config) else null
+    private fun createRuntime(config: BuilderToolsConfig): BuilderToolsRuntime? {
+        BuilderLocalePolicy.configure(config.defaultLocaleTag, config.followClientLocale)
+        return if (config.enabled) BuilderToolsRuntime(ARC.instance, config) else null
+    }
 
     private fun safeReloadReason(failure: Throwable): String =
         (failure.message ?: failure::class.simpleName ?: "unknown error")

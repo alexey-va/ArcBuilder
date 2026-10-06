@@ -2,6 +2,7 @@ package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.NamedTextColor
+import net.kyori.adventure.text.format.TextColor
 import net.kyori.adventure.text.format.TextDecoration
 import org.bukkit.Bukkit
 import org.bukkit.Material
@@ -46,6 +47,7 @@ internal class BuilderMaterialPicker(
     )
 
     private val flows = mutableMapOf<UUID, Flow>()
+    private val recentByPlayer = mutableMapOf<UUID, List<Material>>()
     private var closed = false
 
     init {
@@ -103,6 +105,7 @@ internal class BuilderMaterialPicker(
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         flows.remove(event.player.uniqueId)
+        recentByPlayer.remove(event.player.uniqueId)
     }
 
     @EventHandler
@@ -114,6 +117,7 @@ internal class BuilderMaterialPicker(
         if (closed) return
         closed = true
         flows.clear()
+        recentByPlayer.clear()
         dialogs.close()
         HandlerList.unregisterAll(this)
     }
@@ -125,8 +129,14 @@ internal class BuilderMaterialPicker(
             closeIfFlow(player, flow)
             return
         }
-        val locale = player.locale().toLanguageTag()
-        val results = BuilderMaterialArguments.search(screen.candidates, screen.query, screen.inventoryMaterials)
+        val locale = BuilderLocalePolicy.localeTag(player)
+        val recent = recentByPlayer[playerId].orEmpty()
+        val results = BuilderMaterialArguments.search(
+            screen.candidates,
+            screen.query,
+            screen.inventoryMaterials,
+            recent,
+        )
         val pageCount = maxOf(1, (results.size + PAGE_SIZE - 1) / PAGE_SIZE)
         val page = screen.page.coerceIn(0, pageCount - 1)
         if (page != screen.page) {
@@ -140,7 +150,7 @@ internal class BuilderMaterialPicker(
                 PaperDialogButton(
                     id = SEARCH_ACTION,
                     label = messages.render("material-picker.find", locale),
-                    width = 210,
+                    width = BUTTON_WIDTH,
                     onClick = { context ->
                         if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
                         refresh(
@@ -158,14 +168,15 @@ internal class BuilderMaterialPicker(
                 add(
                     PaperDialogButton(
                         id = PaperDialogActionId.of("material_$index"),
-                        label = choiceLabel(player, material),
-                        tooltip = Component.empty(),
-                        width = 210,
+                        label = choiceLabel(player, material, material in recent),
+                        tooltip = BuilderMaterialPresentation.label(player, material),
+                        width = BUTTON_WIDTH,
                         onClick = { context ->
                             if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
                             screen.query = context.text(SEARCH_INPUT).orEmpty().take(MAX_QUERY_LENGTH)
                             if (material !in screen.candidates) return@PaperDialogButton
                             if (screen.closeOnSelect) {
+                                remember(playerId, material)
                                 flows.remove(playerId, flow)
                                 dialogs.close(player)
                             }
@@ -178,8 +189,8 @@ internal class BuilderMaterialPicker(
                 add(
                     PaperDialogButton(
                         id = PREVIOUS_ACTION,
-                        label = messages.render("material-picker.previous", locale),
-                        width = 210,
+                        label = Component.text("<"),
+                        width = BUTTON_WIDTH,
                         onClick = { context ->
                             if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
                             refresh(
@@ -198,8 +209,8 @@ internal class BuilderMaterialPicker(
                 add(
                     PaperDialogButton(
                         id = NEXT_ACTION,
-                        label = messages.render("material-picker.next", locale),
-                        width = 210,
+                        label = Component.text(">"),
+                        width = BUTTON_WIDTH,
                         onClick = { context ->
                             if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
                             refresh(
@@ -249,13 +260,13 @@ internal class BuilderMaterialPicker(
                         id = SEARCH_INPUT,
                         label = messages.render("material-picker.search-label", locale),
                         initial = screen.query,
-                        width = 420,
+                        width = SEARCH_WIDTH,
                         maxLength = MAX_QUERY_LENGTH,
                     ),
                 ),
                 buttons = buttons,
                 exitButton = back,
-                columns = 2,
+                columns = 3,
             ),
             reopen = null,
             onDismiss = { dismiss(playerId, flow, screen) },
@@ -299,18 +310,29 @@ internal class BuilderMaterialPicker(
         if (flow.screens.isEmpty()) flows.remove(playerId, flow)
     }
 
-    private fun choiceLabel(player: Player, material: Material): Component =
-        Component.text("○ ", NamedTextColor.WHITE)
-            .append(BuilderMaterialPresentation.label(player, material).color(NamedTextColor.WHITE))
+    private fun remember(playerId: UUID, material: Material) {
+        recentByPlayer[playerId] = (listOf(material) + recentByPlayer[playerId].orEmpty().filterNot { it == material })
+            .take(BuilderMaterialArguments.RECENT_LIMIT)
+    }
+
+    private fun choiceLabel(player: Player, material: Material, recent: Boolean): Component {
+        val color = if (recent) RECENT_COLOR else NamedTextColor.WHITE
+        val marker = if (recent) "↻ " else "○ "
+        return Component.text(marker, color)
+            .append(BuilderMaterialPresentation.label(player, material).color(color))
             .decoration(TextDecoration.ITALIC, false)
+    }
 
     private fun current(isCurrent: () -> Boolean): Boolean = runCatching(isCurrent).getOrDefault(false)
 
     private companion object {
-        const val PAGE_SIZE = 12
+        const val PAGE_SIZE = 24
         const val MAX_QUERY_LENGTH = 64
         const val BODY_WIDTH = 420
+        const val BUTTON_WIDTH = 136
+        const val SEARCH_WIDTH = 420
         const val SCREEN_ID_PREFIX = "builder."
+        val RECENT_COLOR: TextColor = TextColor.color(0xE8DFD2)
         val TITLE_KEYS = setOf(
             "material-picker.fill-title",
             "material-picker.replace-source-title",

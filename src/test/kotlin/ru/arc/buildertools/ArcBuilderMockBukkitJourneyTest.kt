@@ -756,7 +756,20 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.performCommand("builder wand") shouldBe true
             val wand = player.inventory.itemInMainHand.clone()
             journey.select(player, journey.world, wand, 0, 64, 0, 1, 64, 0)
-            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.FILL) shouldBe true
+            journey.world.getBlockAt(0, 64, 0).type = Material.DIRT
+            journey.selectionPanelAction(player, BuilderPanelAction.COPY)
+            journey.world.getBlockAt(0, 64, 0).type = Material.AIR
+            val firstPage = checkNotNull(journey.selectionPanel(player)).actions
+            firstPage.contains(BuilderPanelAction.PASTE) shouldBe true
+            firstPage.count { it !in setOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE) } shouldBe 6
+            firstPage.containsAll(listOf(BuilderPanelAction.FILL, BuilderPanelAction.REPLACE, BuilderPanelAction.COPY,
+                BuilderPanelAction.DECONSTRUCT, BuilderPanelAction.DISCONNECT)) shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
+            val secondPage = checkNotNull(journey.selectionPanel(player)).actions
+            secondPage.contains(BuilderPanelAction.CLEAR) shouldBe true
+            secondPage.contains(BuilderPanelAction.FILL) shouldBe false
+            journey.selectionPanelAction(player, BuilderPanelAction.PREVIOUS_PAGE)
+            checkNotNull(journey.selectionPanel(player)).actions shouldBe firstPage
             player.inventory.addItem(ItemStack(Material.STONE, 2))
             player.performCommand("builder fill stone") shouldBe true
             checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.CONFIRM) shouldBe true
@@ -777,7 +790,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 (0..1).all { journey.world.getBlockAt(it, 64, 0).type == Material.STONE }
             }
             journey.amount(player, Material.STONE) shouldBe 0
-            journey.selectionPanelAction(player, BuilderPanelAction.MORE)
+            journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
             checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.UNDO) shouldBe true
             journey.selectionPanelAction(player, BuilderPanelAction.UNDO)
             journey.selectionPanelAction(player, BuilderPanelAction.CONFIRM)

@@ -207,7 +207,7 @@ internal class BuilderConstructionProjectsMenuManager(
         }
     }
 
-    private fun locale(player: Player): String = player.locale().toLanguageTag()
+    private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun loadConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
         ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),

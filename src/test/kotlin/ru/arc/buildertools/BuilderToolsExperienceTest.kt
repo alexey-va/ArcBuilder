@@ -5,7 +5,6 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
-import net.kyori.adventure.text.TranslatableComponent
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import ru.arc.config.Config
@@ -95,11 +94,11 @@ class BuilderToolsExperienceTest : FunSpec({
         }
     }
 
-    test("material labels use Russian catalog names and client translation elsewhere") {
+    test("material labels honor the selected fixed language") {
         val russian = BuilderMaterialPresentation.label(Material.OAK_PLANKS, "ru-RU") { "Дубовые доски" }
         PlainTextComponentSerializer.plainText().serialize(russian) shouldBe "Дубовые доски"
 
         val english = BuilderMaterialPresentation.label(Material.OAK_PLANKS, "en-US") { "не используется" }
-        (english as TranslatableComponent).key() shouldBe Material.OAK_PLANKS.translationKey()
+        PlainTextComponentSerializer.plainText().serialize(english) shouldBe "Oak Planks"
     }
 })

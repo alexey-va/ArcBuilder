@@ -37,4 +37,12 @@ class BuilderMaterialSearchTest : FunSpec({
         result.toSet() shouldBe candidates.toSet()
         BuilderMaterialArguments.search(candidates, "chest", setOf(Material.CHEST)) shouldBe emptyList()
     }
+
+    test("recent materials are promoted newest first only within the matching allowlist") {
+        BuilderMaterialArguments.search(
+            listOf(Material.STONE, Material.DIRT, Material.STONE_BRICKS, Material.MOSSY_STONE_BRICKS),
+            "stone",
+            recentMaterials = listOf(Material.MOSSY_STONE_BRICKS, Material.DIRT, Material.STONE),
+        ) shouldContainExactly listOf(Material.MOSSY_STONE_BRICKS, Material.STONE, Material.STONE_BRICKS)
+    }
 })

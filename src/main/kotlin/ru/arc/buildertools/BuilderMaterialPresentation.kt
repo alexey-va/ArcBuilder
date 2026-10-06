@@ -7,8 +7,13 @@ import java.util.Locale
 
 /** Keeps internal Bukkit material identifiers away from player-facing surfaces. */
 internal object BuilderMaterialPresentation {
-    fun label(@Suppress("UNUSED_PARAMETER") player: Player, material: Material): Component =
-        Component.translatable(material.translationKey())
+    fun label(@Suppress("UNUSED_PARAMETER") player: Player, material: Material): Component = label(material)
+
+    internal fun label(material: Material): Component {
+        val localeTag = BuilderLocalePolicy.fixedLocaleTagOrNull()
+            ?: return Component.translatable(material.translationKey())
+        return label(material, localeTag, BuilderMaterialArguments::russianLabel)
+    }
 
     internal fun label(
         material: Material,
@@ -16,9 +21,11 @@ internal object BuilderMaterialPresentation {
         russianTranslation: (Material) -> String?,
     ): Component {
         val language = Locale.forLanguageTag(localeTag.replace('_', '-')).language
-        if (language != "ru") return Component.translatable(material.translationKey())
-        val translated = russianTranslation(material)?.trim().takeUnless { it.isNullOrEmpty() }
-            ?: readableName(material)
+        val translated = if (language == "ru") {
+            russianTranslation(material)?.trim().takeUnless { it.isNullOrEmpty() } ?: readableName(material)
+        } else {
+            readableName(material)
+        }
         return Component.text(translated)
     }
 

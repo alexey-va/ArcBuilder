@@ -2,6 +2,9 @@
 enabled: false
 allowed-worlds: []
 default-locale: ru
+locale:
+  # false keeps the configured language even when the client uses another language.
+  follow-client: false
 
 storage:
   # Runtime may point this to the existing shared catalogue during migration.
@@ -209,13 +212,12 @@ selection-panel:
   distance: 2.4
   side-offset: 0.65
   height-offset: -0.25
-  row-spacing: 0.32
-  column-spacing: 1.25
-  button-width: 1.05
+  row-spacing: 0.26
+  column-spacing: 1.55
+  button-width: 1.50
   button-height: 0.23
-  label-scale: 0.55
+  label-scale: 0.80
   reach: 4.0
-  reposition-distance: 3.0
 
 preview:
   # Recheck ordinary preview world surfaces twice per second.
@@ -311,11 +313,11 @@ locales:
       find: '<#92bed8>Найти'
       no-results: '<#e8dfd2>Блоки не найдены. Попробуй другое название.'
       page: '<#e8dfd2>Страница <current> из <total>'
-      previous: '<white>← Предыдущая'
-      next: '<white>Следующая →'
+      previous: '<white>\<'
+      next: '<white>>'
       back: '<white>Назад'
     selection-panel:
-      selection: '<#e8dfd2><x> × <y> × <z><newline><white>ПКМ — выбрать действие'
+      selection: '<#e8dfd2><x> × <y> × <z> · <current>/<total><newline><white>ПКМ — выбрать действие'
       plan: '<#e8dfd2><kind> · <count> блоков<newline><white>Нужно: <cost>'
       progress: '<#e8dfd2>Выполняется: <done> / <count>'
       scanning: '<#e8dfd2>Определяем блоки в выделении…'
@@ -324,8 +326,8 @@ locales:
         replace: '<#92bed8>Заменить'
         copy: '<#92bed8>Скопировать'
         paste: '<#92bed8>Вставить'
-        more: '<#d48763>Ещё'
-        back: '<white>Назад'
+        previous-page: '<#92bed8>\<'
+        next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Разобрать'
         disconnect: '<#92bed8>Разъединить'
         draft: '<#92bed8>Черновик'
@@ -1246,11 +1248,11 @@ locales:
       find: '<#92bed8>Find'
       no-results: '<#e8dfd2>No matching blocks. Try another name.'
       page: '<#e8dfd2>Page <current> of <total>'
-      previous: '<white>← Previous'
-      next: '<white>Next →'
+      previous: '<white>\<'
+      next: '<white>>'
       back: '<white>Back'
     selection-panel:
-      selection: '<#e8dfd2><x> × <y> × <z><newline><white>Right click to choose an action'
+      selection: '<#e8dfd2><x> × <y> × <z> · <current>/<total><newline><white>Right click to choose an action'
       plan: '<#e8dfd2><kind> · <count> blocks<newline><white>Required: <cost>'
       progress: '<#e8dfd2>Working: <done> / <count>'
       scanning: '<#e8dfd2>Reading blocks in the selection…'
@@ -1259,8 +1261,8 @@ locales:
         replace: '<#92bed8>Replace'
         copy: '<#92bed8>Copy'
         paste: '<#92bed8>Paste'
-        more: '<#d48763>More'
-        back: '<white>Back'
+        previous-page: '<#92bed8>\<'
+        next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Deconstruct'
         disconnect: '<#92bed8>Disconnect'
         draft: '<#92bed8>Draft book'

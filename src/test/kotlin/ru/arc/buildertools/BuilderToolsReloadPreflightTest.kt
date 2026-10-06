@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
 import java.nio.file.Files
@@ -26,6 +27,10 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         candidate.constructionBlocksPerCycle shouldBe 10
         candidate.constructionTickPeriod shouldBe 3L
         candidate.previewMovementPeriodTicks shouldBe 2L
+        candidate.followClientLocale shouldBe false
+        val plain = PlainTextComponentSerializer.plainText()
+        plain.serialize(candidate.messages().render("selection-panel.actions.previous-page", "ru")) shouldBe "<"
+        plain.serialize(candidate.messages().render("selection-panel.actions.next-page", "ru")) shouldBe ">"
     }
 
     test("reload validates the movement cadence and preserves operator overrides") {
@@ -47,6 +52,18 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         config.saveStrict()
         shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
             .message.orEmpty() shouldContain "preview.movement-period-ticks"
+    }
+
+    test("client language can be re-enabled through validated configuration") {
+        val root = configRoot()
+        val config = Config(root, "modules/builder-tools.yml")
+        config.setBoolean("locale.follow-client", true)
+        config.saveStrict()
+        BuilderToolsReloadPreflight.load(root).followClientLocale shouldBe true
+        config.setString("locale.follow-client", "automatic")
+        config.saveStrict()
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+            .message.orEmpty() shouldContain "locale.follow-client"
     }
 
     test("selection panel geometry is checked before replacing the runtime") {

@@ -365,7 +365,7 @@ internal class BuilderConstructionMenuManager(
         .map { grouped -> grouped.first().copy(amount = grouped.sumOf(BuilderItemAmount::amount)).validated() }
         .sortedBy(BuilderItemAmount::materialKey)
 
-    private fun locale(player: Player): String = player.locale().toLanguageTag()
+    private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun loadConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
         ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),

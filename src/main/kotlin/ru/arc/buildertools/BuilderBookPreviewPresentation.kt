@@ -602,7 +602,7 @@ internal class BuilderBookPreviewPresentation(
         scene.entities.forEach(Entity::remove)
     }
 
-    private fun locale(player: Player): String = player.locale().toLanguageTag()
+    private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun loadMenuConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
         ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),

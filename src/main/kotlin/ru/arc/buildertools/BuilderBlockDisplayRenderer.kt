@@ -304,7 +304,7 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun showBookGuidance(site: ConstructionSite, showTitle: Boolean) {
         val player = site.player
-        val locale = player.locale().toLanguageTag()
+        val locale = BuilderLocalePolicy.localeTag(player)
         bookSites[player.uniqueId] = site
         val name = messages.literal(BuildBookItems.compactTitle(site.bookData.title, 16))
         val bossBar = bookBossBars[player.uniqueId] ?: BossBar.bossBar(
@@ -343,7 +343,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     private fun showBookActionBar(site: ConstructionSite) {
-        site.player.sendActionBar(messages.render("book.preview.actionbar", site.player.locale().toLanguageTag()))
+        site.player.sendActionBar(messages.render("book.preview.actionbar", BuilderLocalePolicy.localeTag(site.player)))
     }
 
     private fun closeBookGuidance(playerId: UUID) {

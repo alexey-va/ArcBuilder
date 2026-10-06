@@ -465,10 +465,10 @@ internal class BuilderToolsRuntime(
     private var closed = false
     private var selectionActionPanel: BuilderSelectionActionPanel? = null
     private var materialPicker: BuilderMaterialPicker? = null
-    private val expandedSelectionMenus = mutableSetOf<UUID>()
+    private val selectionPanelPages = mutableMapOf<UUID, Int>()
     private val materialScans = mutableMapOf<UUID, Any>()
     private val panelPlanSummaries = mutableMapOf<UUID, Pair<UUID, Component>>()
-    private val selectionUndoAvailable = mutableSetOf<UUID>()
+    private val selectionUndoAvailable = mutableMapOf<UUID, Pair<Long, Boolean>>()
     private var constructionSchedulerTick = 0L
     private val runtimeHealth = AtomicReference(
         RuntimeHealthContribution(state = RuntimeHealthState.STARTING),
@@ -875,7 +875,7 @@ internal class BuilderToolsRuntime(
             materialScans.remove(id)
             panelPlanSummaries.remove(id)
             selectionUndoAvailable.remove(id)
-            expandedSelectionMenus.remove(id)
+            selectionPanelPages.remove(id)
             materialPicker?.close(id)
             return null
         }
@@ -921,37 +921,52 @@ internal class BuilderToolsRuntime(
             )
         }
         panelPlanSummaries.remove(id)
-        val expanded = id in expandedSelectionMenus
-        val actions = buildList {
+        val available = buildList {
             fun offer(action: BuilderPanelAction, command: BuilderRootCommand) {
                 if (rootCommandAvailable(player, command)) add(action)
             }
-            if (expanded) {
-                offer(BuilderPanelAction.DECONSTRUCT, BuilderRootCommand.DECONSTRUCT)
-                offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
-                if (config.bookContractsEnabled && player.hasPermission("arcbuild.book.create") &&
-                    rootCommandAvailable(player, BuilderRootCommand.COPY) &&
-                    rootCommandAvailable(player, BuilderRootCommand.BOOK)
-                ) add(BuilderPanelAction.DRAFT)
-                if (id in selectionUndoAvailable) add(BuilderPanelAction.UNDO)
-                add(BuilderPanelAction.CLEAR)
-                add(BuilderPanelAction.BACK)
-            } else {
-                offer(BuilderPanelAction.FILL, BuilderRootCommand.FILL)
-                offer(BuilderPanelAction.REPLACE, BuilderRootCommand.REPLACE)
-                offer(BuilderPanelAction.COPY, BuilderRootCommand.COPY)
-                if (clipboardController.current(id) != null) offer(BuilderPanelAction.PASTE, BuilderRootCommand.PASTE)
-                add(BuilderPanelAction.MORE)
-            }
+            offer(BuilderPanelAction.FILL, BuilderRootCommand.FILL)
+            offer(BuilderPanelAction.REPLACE, BuilderRootCommand.REPLACE)
+            offer(BuilderPanelAction.COPY, BuilderRootCommand.COPY)
+            if (clipboardController.current(id) != null) offer(BuilderPanelAction.PASTE, BuilderRootCommand.PASTE)
+            offer(BuilderPanelAction.DECONSTRUCT, BuilderRootCommand.DECONSTRUCT)
+            offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
+            if (config.bookContractsEnabled && player.hasPermission("arcbuild.book.create") &&
+                rootCommandAvailable(player, BuilderRootCommand.COPY) &&
+                rootCommandAvailable(player, BuilderRootCommand.BOOK)
+            ) add(BuilderPanelAction.DRAFT)
+            if (selectionCanUndo(id)) add(BuilderPanelAction.UNDO)
+            add(BuilderPanelAction.CLEAR)
         }
+        val pageCount = (available.size + 5) / 6
+        val page = (selectionPanelPages[id] ?: 0).mod(pageCount)
+        selectionPanelPages[id] = page
+        val actions = available.drop(page * 6).take(6) + if (pageCount > 1) {
+            listOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE)
+        } else emptyList()
         return BuilderPanelView(
-            SelectionPanelContext(selection, expanded), selection,
+            SelectionPanelContext(selection, page), selection,
             text("selection", mapOf(
                 "x" to messages.literal(selection.sizeX),
                 "y" to messages.literal(selection.sizeY),
                 "z" to messages.literal(selection.sizeZ),
+                "current" to messages.literal(page + 1),
+                "total" to messages.literal(pageCount),
             )), actions,
         )
+    }
+
+    private fun selectionCanUndo(playerId: UUID): Boolean {
+        val now = System.currentTimeMillis()
+        val cached = selectionUndoAvailable[playerId]
+        if (cached != null && now - cached.first < 1000L) return cached.second
+        val available = committedRecords.values.any {
+            it.playerId == playerId && it.phase == BuilderJournalPhase.COMMITTED &&
+                it.plan.kind != BuilderPlanKind.UNDO && it.operationId !in consumedUndoSources &&
+                (it.committedAtMillis ?: 0L) + config.undoTtl.toMillis() > now
+        }
+        selectionUndoAvailable[playerId] = now to available
+        return available
     }
 
     internal fun onSelectionPanelAction(player: Player, action: BuilderPanelAction) = runBuilderAction(player) {
@@ -959,18 +974,8 @@ internal class BuilderToolsRuntime(
         if (action !in current.actions) return@runBuilderAction
         ensureAvailable(player)
         when (action) {
-            BuilderPanelAction.MORE -> {
-                val id = player.uniqueId
-                val now = System.currentTimeMillis()
-                val canUndo = committedRecords.values.any {
-                    it.playerId == id && it.phase == BuilderJournalPhase.COMMITTED &&
-                        it.plan.kind != BuilderPlanKind.UNDO && it.operationId !in consumedUndoSources &&
-                        (it.committedAtMillis ?: 0L) + config.undoTtl.toMillis() > now
-                }
-                if (canUndo) selectionUndoAvailable.add(id) else selectionUndoAvailable.remove(id)
-                expandedSelectionMenus.add(id)
-            }
-            BuilderPanelAction.BACK -> expandedSelectionMenus.remove(player.uniqueId)
+            BuilderPanelAction.PREVIOUS_PAGE -> selectionPanelPages.compute(player.uniqueId) { _, page -> (page ?: 0) - 1 }
+            BuilderPanelAction.NEXT_PAGE -> selectionPanelPages.compute(player.uniqueId) { _, page -> (page ?: 0) + 1 }
             BuilderPanelAction.FILL -> openFillMaterialPicker(player)
             BuilderPanelAction.REPLACE -> openReplaceMaterialPicker(player)
             BuilderPanelAction.COPY -> handleBuilder(player, arrayOf("copy"))
@@ -994,7 +999,7 @@ internal class BuilderToolsRuntime(
 
     private fun dismissSelectionControls(playerId: UUID) {
         materialScans.remove(playerId)
-        expandedSelectionMenus.remove(playerId)
+        selectionPanelPages.remove(playerId)
         materialPicker?.close(playerId)
         selectionActionPanel?.clear(playerId)
     }
@@ -1272,7 +1277,7 @@ internal class BuilderToolsRuntime(
     private fun setPosition(player: Player, location: Location, first: Boolean) {
         ensureAvailable(player)
         materialScans.remove(player.uniqueId)
-        expandedSelectionMenus.remove(player.uniqueId)
+        selectionPanelPages.remove(player.uniqueId)
         materialPicker?.close(player.uniqueId)
         require(location.world == player.world) { "Selection world mismatch" }
         val position = BuilderBlockPos(player.world.uid, location.blockX, location.blockY, location.blockZ).validated()
@@ -2395,6 +2400,7 @@ internal class BuilderToolsRuntime(
                 }
                 operation.record = durable
                 committedRecords[durable.operationId] = durable
+                selectionUndoAvailable.remove(durable.playerId)
                 durable.plan.sourceRecordId?.let { consumedUndoSources += it }
                 val instanceId = durable.plan.bookInstanceId
                 if (instanceId == null) {
@@ -2615,7 +2621,7 @@ internal class BuilderToolsRuntime(
         selectionActionPanel?.clear(player.uniqueId)
         materialPicker?.close(player.uniqueId)
         materialScans.remove(player.uniqueId)
-        expandedSelectionMenus.remove(player.uniqueId)
+        selectionPanelPages.remove(player.uniqueId)
         displayRenderer.clearSelection(player.uniqueId)
         BuildingManager.closePreview(player.uniqueId)
         crown.clearAnchor(player.uniqueId)
@@ -3063,7 +3069,7 @@ internal class BuilderToolsRuntime(
         )
     }
 
-    private fun locale(player: Player): String = player.locale().toLanguageTag()
+    private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun java.time.Duration.toTicks(): Long = (toMillis() / 50L).coerceAtLeast(1L)
 
@@ -3313,7 +3319,7 @@ internal class BuilderToolsRuntime(
         materialScans.remove(event.player.uniqueId)
         panelPlanSummaries.remove(event.player.uniqueId)
         selectionUndoAvailable.remove(event.player.uniqueId)
-        expandedSelectionMenus.remove(event.player.uniqueId)
+        selectionPanelPages.remove(event.player.uniqueId)
         discardPendingPlan(event.player.uniqueId)
         bookHoldHints.clear(event.player.uniqueId)
         selections.clear(event.player.uniqueId)
@@ -3406,7 +3412,7 @@ internal class BuilderToolsRuntime(
         materialScans.clear()
         panelPlanSummaries.clear()
         selectionUndoAvailable.clear()
-        expandedSelectionMenus.clear()
+        selectionPanelPages.clear()
         crown.close()
         previews.close()
         operationLocks.operations().forEach { operation ->

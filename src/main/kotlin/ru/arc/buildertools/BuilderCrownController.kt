@@ -335,7 +335,7 @@ internal class BuilderCrownController(
     private fun crownValueLabel(player: Player, key: String, value: String): Component =
         if (key == "radius") messages.literal(value) else messages.render("crown.labels.$key.$value", locale(player))
 
-    private fun locale(player: Player): String = player.locale().toLanguageTag()
+    private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun leafNames(): List<String> = Material.entries.asSequence()
         .filter(safety::isLeaf)

@@ -117,13 +117,12 @@ class BuilderToolsConfig(
         distance = config.double("selection-panel.distance", 2.4),
         sideOffset = config.double("selection-panel.side-offset", 0.65),
         heightOffset = config.double("selection-panel.height-offset", -0.25),
-        rowSpacing = config.double("selection-panel.row-spacing", 0.32),
-        columnSpacing = config.double("selection-panel.column-spacing", 1.25),
-        buttonWidth = config.double("selection-panel.button-width", 1.05).toFloat(),
+        rowSpacing = config.double("selection-panel.row-spacing", 0.26),
+        columnSpacing = config.double("selection-panel.column-spacing", 1.55),
+        buttonWidth = config.double("selection-panel.button-width", 1.50).toFloat(),
         buttonHeight = config.double("selection-panel.button-height", 0.23).toFloat(),
-        labelScale = config.double("selection-panel.label-scale", 0.55).toFloat(),
+        labelScale = config.double("selection-panel.label-scale", 0.80).toFloat(),
         reach = config.double("selection-panel.reach", 4.0),
-        repositionDistance = config.double("selection-panel.reposition-distance", 3.0),
     )
     val previewMovementPeriodTicks: Long get() = config.long("preview.movement-period-ticks", 2L)
     val previewRadius: Double get() = config.double("preview.radius", 32.0)
@@ -173,6 +172,7 @@ class BuilderToolsConfig(
     val replaceableMaterials: Set<String>
         get() = config.stringList("safety.replaceable-materials").map { it.uppercase(Locale.ROOT) }.toSet()
     val defaultLocaleTag: String get() = config.string("default-locale", "ru")
+    val followClientLocale: Boolean get() = config.boolean("locale.follow-client", false)
 
     fun allowsWorld(worldName: String): Boolean =
         "*" in allowedWorlds || worldName.lowercase(Locale.ROOT) in allowedWorlds

@@ -15,14 +15,19 @@ The plugin uses arc-core 2.7.17 and does not depend on the ARC monolith.
   click selects point 2. Distinct straight BlockDisplay outlines remain visible
   until the selection is cleared or expires.
 - Holding the selector with a completed selection shows a private world panel.
-  Aim at a button and right click to fill, replace, copy or paste; **More** opens
-  deconstruction, fence disconnection, draft creation, undo and selection reset.
-  A prepared plan shows its block count, materials and confirmation controls.
+  Aim and right click: up to six actions per page cover fill, replace, copy, paste,
+  deconstruction, fence disconnection, drafts, undo and selection reset. `<` / `>`
+  change pages. The larger, compact controls follow walking with native client
+  interpolation and stay anchored while aiming in place; blocked placements are
+  excluded. A prepared plan shows materials and confirmation controls.
 - Fill and replace open a native material picker. Search accepts Russian labels
-  and English IDs; **Find** updates twelve results per page, with inventory
-  materials first for an empty query. Replace first offers safe materials found
+  and English IDs; **Find** updates 24 results per page. The six most recently
+  selected materials appear first with a warm highlight, newest first, until logout; inventory
+  materials lead the remaining choices for an empty query. Replace first offers safe materials found
   in the selection. Search is submitted explicitly because the vanilla Dialog
   protocol does not send text changes while typing.
+- The configured language (`default-locale: ru`) is used regardless of the client.
+  Set `locale.follow-client: true` and reload to follow the client language again.
 - `/builder disconnect` previews an undoable plan that clears the connected
   sides of vanilla fences in the current selection. Add `confirm` to apply the
   same plan immediately without a preview. Later neighbor updates may reconnect
