@@ -49,6 +49,22 @@ class BuilderToolsReloadPreflightTest : FunSpec({
             .message.orEmpty() shouldContain "preview.movement-period-ticks"
     }
 
+    test("selection panel geometry is checked before replacing the runtime") {
+        val root = configRoot()
+        val config = Config(root, "modules/builder-tools.yml")
+        config.setDouble("selection-panel.distance", 0.0)
+        config.saveStrict()
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+
+        config.setDouble("selection-panel.distance", 2.5)
+        config.saveStrict()
+        BuilderToolsReloadPreflight.load(root).selectionPanelSettings().distance shouldBe 2.5
+        config.setString("selection-panel.distance", "nearby")
+        config.saveStrict()
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+            .message.orEmpty() shouldContain "selection-panel.distance"
+    }
+
     test("malformed YAML is rejected before Config can degrade it into default values") {
         val root = configRoot()
         Files.writeString(

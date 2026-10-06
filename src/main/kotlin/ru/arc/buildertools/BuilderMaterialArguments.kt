@@ -26,6 +26,33 @@ internal object BuilderMaterialArguments {
         listOfNotNull(russian, material.name.lowercase(Locale.ROOT))
     }
 
+    /** Searches only the supplied candidates by Russian display text or English material id. */
+    fun search(
+        materials: Iterable<Material>,
+        rawQuery: String,
+        inventoryMaterials: Set<Material> = emptySet(),
+    ): List<Material> {
+        val query = normalize(rawQuery)
+        return materials.distinct().mapNotNull { material ->
+            val russian = russianNames[material].orEmpty()
+            val english = material.name
+            val rank = if (query.isEmpty()) {
+                0
+            } else when {
+                sequenceOf(russian, english).any { normalize(it) == query } -> 0
+                sequenceOf(russian, english).any { normalize(it).startsWith(query) } -> 1
+                sequenceOf(russian, english).any { normalize(it).contains(query) } -> 2
+                else -> null
+            }
+            rank?.let { material to it }
+        }.sortedWith(
+            compareBy<Pair<Material, Int>> { if (query.isEmpty() && it.first in inventoryMaterials) 0 else 1 }
+                .thenBy { it.second }
+                .thenBy { normalize(russianNames[it.first].orEmpty()) }
+                .thenBy { it.first.name },
+        ).map { it.first }
+    }
+
     fun isRussianName(name: String): Boolean = name.firstOrNull()?.let { it in 'А'..'я' || it == 'Ё' || it == 'ё' } == true
 
     private fun camelCase(label: String): String = label.lowercase(Locale.ROOT)
@@ -34,6 +61,7 @@ internal object BuilderMaterialArguments {
         .mapIndexed { index, word -> if (index == 0) word else word.replaceFirstChar(Char::uppercaseChar) }
         .joinToString("")
 
-    private fun normalize(raw: String): String = raw.lowercase(Locale.ROOT)
+    private fun normalize(raw: String): String = raw.trim().lowercase(Locale.ROOT)
+        .removePrefix("minecraft:")
         .replace('ё', 'е').filter(Char::isLetterOrDigit)
 }

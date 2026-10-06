@@ -204,6 +204,19 @@ runtime:
   player-recovery-retry-period-ticks: 100
   progress-every-batches: 10
 
+# Private world controls while the selector is held. Reload rebuilds their geometry.
+selection-panel:
+  distance: 2.4
+  side-offset: 0.65
+  height-offset: -0.25
+  row-spacing: 0.32
+  column-spacing: 1.25
+  button-width: 1.05
+  button-height: 0.23
+  label-scale: 0.55
+  reach: 4.0
+  reposition-distance: 3.0
+
 preview:
   # Recheck ordinary preview world surfaces twice per second.
   period-ticks: 10
@@ -290,6 +303,38 @@ safety:
 locales:
   ru:
     prefix: "<white>🛠</white> "
+    material-picker:
+      fill-title: '<#d48763>Материал заполнения'
+      replace-source-title: '<#d48763>Какой блок заменить?'
+      replace-target-title: '<#d48763>На какой блок заменить?'
+      search-label: '<white>Поиск по названию — нажми «Найти»'
+      find: '<#92bed8>Найти'
+      no-results: '<#e8dfd2>Блоки не найдены. Попробуй другое название.'
+      page: '<#e8dfd2>Страница <current> из <total>'
+      previous: '<white>← Предыдущая'
+      next: '<white>Следующая →'
+      back: '<white>Назад'
+    selection-panel:
+      selection: '<#e8dfd2><x> × <y> × <z><newline><white>ПКМ — выбрать действие'
+      plan: '<#e8dfd2><kind> · <count> блоков<newline><white>Нужно: <cost>'
+      progress: '<#e8dfd2>Выполняется: <done> / <count>'
+      scanning: '<#e8dfd2>Определяем блоки в выделении…'
+      actions:
+        fill: '<#92bed8>Заполнить'
+        replace: '<#92bed8>Заменить'
+        copy: '<#92bed8>Скопировать'
+        paste: '<#92bed8>Вставить'
+        more: '<#d48763>Ещё'
+        back: '<white>Назад'
+        deconstruct: '<#ff9f0f>Разобрать'
+        disconnect: '<#92bed8>Разъединить'
+        draft: '<#92bed8>Черновик'
+        clear: '<#ff9f0f>Сбросить'
+        undo: '<#d48763>Откатить'
+        confirm: '<#2bba43>Применить'
+        cancel: '<#ff9f0f>Отменить'
+        rotate-left: '<#92bed8>↶ Повернуть'
+        rotate-right: '<#92bed8>Повернуть ↷'
     help:
       - "<prefix><#e6fff3>Инструменты строителя"
       - "<#8c8c8c>   <#d48763>/builder wand <#e6fff3>— выделить область"
@@ -1193,6 +1238,38 @@ locales:
       undo: "<hover:show_text:'Готовит обратный план для последней завершённой операции.'>Отмена</hover>"
   en:
     prefix: "<white>🛠</white> "
+    material-picker:
+      fill-title: '<#d48763>Fill material'
+      replace-source-title: '<#d48763>Which block to replace?'
+      replace-target-title: '<#d48763>Replace with which block?'
+      search-label: '<white>Search by name, then press Find'
+      find: '<#92bed8>Find'
+      no-results: '<#e8dfd2>No matching blocks. Try another name.'
+      page: '<#e8dfd2>Page <current> of <total>'
+      previous: '<white>← Previous'
+      next: '<white>Next →'
+      back: '<white>Back'
+    selection-panel:
+      selection: '<#e8dfd2><x> × <y> × <z><newline><white>Right click to choose an action'
+      plan: '<#e8dfd2><kind> · <count> blocks<newline><white>Required: <cost>'
+      progress: '<#e8dfd2>Working: <done> / <count>'
+      scanning: '<#e8dfd2>Reading blocks in the selection…'
+      actions:
+        fill: '<#92bed8>Fill'
+        replace: '<#92bed8>Replace'
+        copy: '<#92bed8>Copy'
+        paste: '<#92bed8>Paste'
+        more: '<#d48763>More'
+        back: '<white>Back'
+        deconstruct: '<#ff9f0f>Deconstruct'
+        disconnect: '<#92bed8>Disconnect'
+        draft: '<#92bed8>Draft book'
+        clear: '<#ff9f0f>Clear'
+        undo: '<#d48763>Undo'
+        confirm: '<#2bba43>Apply'
+        cancel: '<#ff9f0f>Cancel'
+        rotate-left: '<#92bed8>↶ Rotate'
+        rotate-right: '<#92bed8>Rotate ↷'
     help:
       - "<prefix><white>Builder tools"
       - "<dark_gray>   <white>/builder wand <gray>— prepare the selector"

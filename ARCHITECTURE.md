@@ -214,6 +214,25 @@ the normal plugin restart path rather than `/builder reload`.
 
 ## Exact block replacement
 
+`BuilderSelectionActionPanel` owns private selection controls while the selector
+is held. Text uses the shared `PaperPacketDisplays` owner; private Interaction
+targets and the same bounded, occlusion-checked aiming rule drive hover and
+clicks. An anchored panel remains still while the player aims. Context identity
+and a duplicate-click gate prevent old inputs from confirming a replacement
+plan. Changing a selection corner discards its pending ordinary plan. Tool,
+world, teleport, selection and runtime lifecycle changes clear the controls.
+Geometry lives under `selection-panel` in `builder-tools.yml` and is validated
+before reload activation.
+
+`BuilderMaterialPicker` uses `PaperDialogRuntime` and its shared navigation.
+Fill opens safe placement materials; replace collects safe source materials in
+1024-block server-thread slices before opening source and target screens. Search
+uses bundled Russian labels and English material IDs, explicit submission and
+twelve results per page. Query edits are not streamed by vanilla Dialogs.
+Callbacks revalidate the original selection, held selector and permissions.
+All world edits still enter the existing planners, preview, confirmation and
+durable operation transaction; the panel does not add a second mutation path.
+
 `/builder replace <old> <new>` scans the current selection for one exact vanilla
 material. The plain command prepares a preview; adding `confirm` as the final
 argument applies the same plan immediately. Both paths use the ordinary

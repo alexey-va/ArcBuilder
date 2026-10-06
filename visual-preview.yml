@@ -64,6 +64,8 @@ placeholders:
   count: '1 248'
   creator: 'AlexeyBuilder'
   density: 'естественная'
+  done: '256'
+  current: '1'
   full_price: '1 920.00 <white>💰</white>'
   hours: '7'
   items: '96'
@@ -530,6 +532,15 @@ surfaces:
           lore: autobuild:building-gui.fast-finish.lore
 
   world:
+    - id: selection-actions-status
+      text: builder:selection-panel.selection
+      placeholders: {x: '8', y: '4', z: '6'}
+    - id: selection-plan-status
+      text: builder:selection-panel.plan
+    - id: selection-operation-progress
+      text: builder:selection-panel.progress
+    - id: selection-material-scan
+      text: builder:selection-panel.scanning
     - id: builder-npc-confirmation
       text: autobuild:construction.npc-prompt
     - id: construction-site-panel
@@ -540,6 +551,9 @@ surfaces:
   fragments:
     - source: builder
       include:
+        # Runtime layouts compose these labels with live blocks and private hit targets.
+        - selection-panel.actions.*
+        - material-picker.*
         - crown.labels.*
         - book.quote-kind.*
         - book.state.*

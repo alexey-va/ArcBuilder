@@ -113,6 +113,18 @@ class BuilderToolsConfig(
     val playerRecoveryRetryPeriodTicks: Long get() = config.long("runtime.player-recovery-retry-period-ticks", 100L)
     val progressEveryBatches: Int get() = config.integer("runtime.progress-every-batches", 10)
     val previewPeriodTicks: Long get() = config.long("preview.period-ticks", 10L)
+    internal fun selectionPanelSettings() = BuilderPanelSettings(
+        distance = config.double("selection-panel.distance", 2.4),
+        sideOffset = config.double("selection-panel.side-offset", 0.65),
+        heightOffset = config.double("selection-panel.height-offset", -0.25),
+        rowSpacing = config.double("selection-panel.row-spacing", 0.32),
+        columnSpacing = config.double("selection-panel.column-spacing", 1.25),
+        buttonWidth = config.double("selection-panel.button-width", 1.05).toFloat(),
+        buttonHeight = config.double("selection-panel.button-height", 0.23).toFloat(),
+        labelScale = config.double("selection-panel.label-scale", 0.55).toFloat(),
+        reach = config.double("selection-panel.reach", 4.0),
+        repositionDistance = config.double("selection-panel.reposition-distance", 3.0),
+    )
     val previewMovementPeriodTicks: Long get() = config.long("preview.movement-period-ticks", 2L)
     val previewRadius: Double get() = config.double("preview.radius", 32.0)
     val previewSpacing: Double get() = config.double("preview.outline-spacing", 0.75)
@@ -172,6 +184,7 @@ class BuilderToolsConfig(
         Material.matchMaterial(config.string("construction.site.menu.materials.$path", fallback)) ?: Material.AIR
 
     fun validated(): BuilderToolsConfig = apply {
+        selectionPanelSettings()
         if (enabled) {
             require(allowedWorlds.isNotEmpty() && allowedWorlds.all { it == "*" || WORLD_NAME.matches(it) }) {
                 "Builder-tools allowed-worlds must contain safe world names or a wildcard"
@@ -373,6 +386,20 @@ class BuilderToolsConfig(
         private val MESSAGE_REQUIREMENTS = LocaleRequirements(
             scalarPaths = setOf(
                 "prefix",
+                "selection-panel.selection",
+                "selection-panel.plan",
+                "selection-panel.progress",
+                "selection-panel.scanning",
+                "material-picker.fill-title",
+                "material-picker.replace-source-title",
+                "material-picker.replace-target-title",
+                "material-picker.search-label",
+                "material-picker.find",
+                "material-picker.no-results",
+                "material-picker.page",
+                "material-picker.previous",
+                "material-picker.next",
+                "material-picker.back",
                 "errors.disabled",
                 "errors.player-only",
                 "errors.no-permission",
@@ -614,7 +641,9 @@ class BuilderToolsConfig(
                 "book.preview-menu.inspection.overview.name",
                 "book.preview-menu.inspection.mirror.yes",
                 "book.preview-menu.inspection.mirror.no",
-            ) + BuilderPlanKind.entries.map { kind ->
+            ) + BuilderPanelAction.entries.map { action ->
+                "selection-panel.actions.${action.name.lowercase(Locale.ROOT).replace('_', '-')}"
+            } + BuilderPlanKind.entries.map { kind ->
                 "kinds.${kind.name.lowercase(Locale.ROOT)}"
             } + BuilderConstructionProjectState.entries.map { state ->
                 "construction.states.${state.name.lowercase(Locale.ROOT)}"

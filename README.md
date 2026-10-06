@@ -14,6 +14,15 @@ The plugin uses arc-core 2.7.17 and does not depend on the ARC monolith.
 - `/builder wand` gives selection guidance. Left click selects point 1; right
   click selects point 2. Distinct straight BlockDisplay outlines remain visible
   until the selection is cleared or expires.
+- Holding the selector with a completed selection shows a private world panel.
+  Aim at a button and right click to fill, replace, copy or paste; **More** opens
+  deconstruction, fence disconnection, draft creation, undo and selection reset.
+  A prepared plan shows its block count, materials and confirmation controls.
+- Fill and replace open a native material picker. Search accepts Russian labels
+  and English IDs; **Find** updates twelve results per page, with inventory
+  materials first for an empty query. Replace first offers safe materials found
+  in the selection. Search is submitted explicitly because the vanilla Dialog
+  protocol does not send text changes while typing.
 - `/builder disconnect` previews an undoable plan that clears the connected
   sides of vanilla fences in the current selection. Add `confirm` to apply the
   same plan immediately without a preview. Later neighbor updates may reconnect
@@ -69,7 +78,7 @@ transitions, and fail-closed rollback), see
 ```
 
 For a focused change, run the relevant unit test explicitly, for example
-`./gradlew test --tests '*BuilderToolsReloadPreflightTest' shadowJar`. Consumer architecture
+`./gradlew test --tests 'ru.arc.buildertools.BuilderToolsReloadPreflightTest' shadowJar`. Consumer architecture
 verification is opt-in with `python3 ../arc-core/scripts/verify_consumer_architecture.py .`.
 Full `clean check shadowJar` verification and the disposable MySQL integration
 suite are intentionally CI-owned.

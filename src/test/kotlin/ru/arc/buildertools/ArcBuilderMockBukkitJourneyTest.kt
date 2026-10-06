@@ -748,6 +748,46 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("selection panel confirmation preserves the durable fill and held-tool boundary") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("PanelBuilder", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            val wand = player.inventory.itemInMainHand.clone()
+            journey.select(player, journey.world, wand, 0, 64, 0, 1, 64, 0)
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.FILL) shouldBe true
+            player.inventory.addItem(ItemStack(Material.STONE, 2))
+            player.performCommand("builder fill stone") shouldBe true
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.CONFIRM) shouldBe true
+
+            player.inventory.setItemInMainHand(ItemStack(Material.STICK))
+            journey.selectionPanelAction(player, BuilderPanelAction.CONFIRM)
+            journey.world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
+            journey.amount(player, Material.STONE) shouldBe 2
+            journey.activeLeases() shouldBe 0
+
+            player.inventory.setItemInMainHand(wand)
+            journey.select(player, journey.world, wand, 0, 64, 0, 1, 64, 0)
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.CONFIRM) shouldBe false
+            player.performCommand("builder fill stone") shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.CONFIRM)
+            journey.awaitSettled(player) {
+                (0..1).all { journey.world.getBlockAt(it, 64, 0).type == Material.STONE }
+            }
+            journey.amount(player, Material.STONE) shouldBe 0
+            journey.selectionPanelAction(player, BuilderPanelAction.MORE)
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.UNDO) shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.UNDO)
+            journey.selectionPanelAction(player, BuilderPanelAction.CONFIRM)
+            journey.awaitSettled(player) {
+                (0..1).all { journey.world.getBlockAt(it, 64, 0).type == Material.AIR }
+            }
+            journey.amount(player, Material.STONE) shouldBe 2
+        }
+    }
+
     test("runtime keeps feature permissions and plan contracts isolated") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             fun Player.grant(permission: String) {
@@ -1335,6 +1375,10 @@ private class ArcBuilderJourney private constructor(
     }
 
     fun activeLeases(): Int = runtime.runtimeHealthContribution().activeLeases
+
+    fun selectionPanel(player: Player) = runtime.selectionPanelView(player)
+
+    fun selectionPanelAction(player: Player, action: BuilderPanelAction) = runtime.onSelectionPanelAction(player, action)
 
     fun planBuildBookBlock(
         player: Player,

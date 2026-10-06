@@ -28,6 +28,10 @@ import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
+import org.bukkit.event.player.PlayerItemHeldEvent
+import org.bukkit.event.player.PlayerSwapHandItemsEvent
+import org.bukkit.event.player.PlayerDropItemEvent
+import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
@@ -459,6 +463,12 @@ internal class BuilderToolsRuntime(
     private var recovering = true
     private var recoveryBlocked = false
     private var closed = false
+    private var selectionActionPanel: BuilderSelectionActionPanel? = null
+    private var materialPicker: BuilderMaterialPicker? = null
+    private val expandedSelectionMenus = mutableSetOf<UUID>()
+    private val materialScans = mutableMapOf<UUID, Any>()
+    private val panelPlanSummaries = mutableMapOf<UUID, Pair<UUID, Component>>()
+    private val selectionUndoAvailable = mutableSetOf<UUID>()
     private var constructionSchedulerTick = 0L
     private val runtimeHealth = AtomicReference(
         RuntimeHealthContribution(state = RuntimeHealthState.STARTING),
@@ -767,8 +777,17 @@ internal class BuilderToolsRuntime(
                     ::tickConstructionProjects,
                 ),
             ) { "Builder construction project task was not scheduled" }
+            materialPicker = BuilderMaterialPicker(plugin, messages)
+            selectionActionPanel = BuilderSelectionActionPanel(
+                plugin, config.selectionPanelSettings(), messages, ::selectionPanelView, ::onSelectionPanelAction,
+            )
+            checkNotNull(taskScope.runTimer(1L, 1L) { selectionActionPanel?.tick() }) {
+                "Builder selection action panel task was not scheduled"
+            }
         } catch (failure: Throwable) {
             HandlerList.unregisterAll(this)
+            selectionActionPanel?.close()
+            materialPicker?.close()
             initializedPlayerRecoveries?.close()
             initializedBooks?.close()
             initializedCrown?.close()
@@ -823,8 +842,13 @@ internal class BuilderToolsRuntime(
             sender.sendMessage(messages.render("errors.player-only"))
             return true
         }
+        runBuilderAction(player) { handleBuilder(player, args) }
+        return true
+    }
+
+    private fun runBuilderAction(player: Player, action: () -> Unit) {
         try {
-            handleBuilder(player, args)
+            action()
         } catch (failure: BuilderUserFailure) {
             send(player, failure.path, failure.values)
         } catch (failure: IllegalArgumentException) {
@@ -834,7 +858,216 @@ internal class BuilderToolsRuntime(
             error("Builder-tools command failed for ${player.name}", failure)
             send(player, "errors.plan-failed")
         }
-        return true
+    }
+
+    private data class SelectionPanelContext(val selection: BuilderSelection, val state: Any?)
+
+    private fun canUseSelectionPanel(player: Player): Boolean =
+        !closed && player.isOnline && !recovering && !recoveryBlocked &&
+            isSelector(player.inventory.itemInMainHand) && hasUsePermission(player) &&
+            BuilderGameModePolicy.allows(player.gameMode) && config.allowsWorld(player.world.name) &&
+            !playerRecoveries.contains(player.uniqueId) && !books.health().recoveryBlocked
+
+    internal fun selectionPanelView(player: Player): BuilderPanelView? {
+        val id = player.uniqueId
+        val selection = selectionOrNull(player)
+        if (selection == null || !canUseSelectionPanel(player)) {
+            materialScans.remove(id)
+            panelPlanSummaries.remove(id)
+            selectionUndoAvailable.remove(id)
+            expandedSelectionMenus.remove(id)
+            materialPicker?.close(id)
+            return null
+        }
+        if (materialPicker?.isOpen(id) == true) return null
+        fun text(key: String, values: Map<String, Component> = emptyMap()) =
+            messages.render("selection-panel.$key", locale(player), values)
+        materialScans[id]?.let { token ->
+            return BuilderPanelView(
+                SelectionPanelContext(selection, token), selection, text("scanning"),
+                listOf(BuilderPanelAction.CANCEL),
+            )
+        }
+        operationLocks.operation(id)?.let { operation ->
+            return BuilderPanelView(
+                SelectionPanelContext(selection, operation.record.operationId), selection,
+                text("progress", mapOf(
+                    "done" to messages.literal(operation.appliedChanges),
+                    "count" to messages.literal(operation.record.plan.changes.size),
+                )),
+                emptyList(),
+            )
+        }
+        if (operationLocks.isPlayerLocked(id) || id in constructionStarts) return null
+        previews.plan(id)?.let { plan ->
+            if (plan.kind == BuilderPlanKind.BUILD_BOOK) return null
+            val summary = panelPlanSummaries[id]?.takeIf { it.first == plan.id }?.second
+                ?: text("plan", mapOf(
+                    "kind" to kindLabel(player, plan.kind),
+                    "count" to messages.literal(plan.changes.size),
+                    "cost" to itemsSummary(player, plan.costs),
+                )).also { panelPlanSummaries[id] = plan.id to it }
+            return BuilderPanelView(
+                SelectionPanelContext(selection, plan.id), selection,
+                summary,
+                buildList {
+                    add(BuilderPanelAction.CONFIRM)
+                    add(BuilderPanelAction.CANCEL)
+                    if (plan.kind == BuilderPlanKind.PASTE) {
+                        add(BuilderPanelAction.ROTATE_LEFT)
+                        add(BuilderPanelAction.ROTATE_RIGHT)
+                    }
+                },
+            )
+        }
+        panelPlanSummaries.remove(id)
+        val expanded = id in expandedSelectionMenus
+        val actions = buildList {
+            fun offer(action: BuilderPanelAction, command: BuilderRootCommand) {
+                if (rootCommandAvailable(player, command)) add(action)
+            }
+            if (expanded) {
+                offer(BuilderPanelAction.DECONSTRUCT, BuilderRootCommand.DECONSTRUCT)
+                offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
+                if (config.bookContractsEnabled && player.hasPermission("arcbuild.book.create") &&
+                    rootCommandAvailable(player, BuilderRootCommand.COPY) &&
+                    rootCommandAvailable(player, BuilderRootCommand.BOOK)
+                ) add(BuilderPanelAction.DRAFT)
+                if (id in selectionUndoAvailable) add(BuilderPanelAction.UNDO)
+                add(BuilderPanelAction.CLEAR)
+                add(BuilderPanelAction.BACK)
+            } else {
+                offer(BuilderPanelAction.FILL, BuilderRootCommand.FILL)
+                offer(BuilderPanelAction.REPLACE, BuilderRootCommand.REPLACE)
+                offer(BuilderPanelAction.COPY, BuilderRootCommand.COPY)
+                if (clipboardController.current(id) != null) offer(BuilderPanelAction.PASTE, BuilderRootCommand.PASTE)
+                add(BuilderPanelAction.MORE)
+            }
+        }
+        return BuilderPanelView(
+            SelectionPanelContext(selection, expanded), selection,
+            text("selection", mapOf(
+                "x" to messages.literal(selection.sizeX),
+                "y" to messages.literal(selection.sizeY),
+                "z" to messages.literal(selection.sizeZ),
+            )), actions,
+        )
+    }
+
+    internal fun onSelectionPanelAction(player: Player, action: BuilderPanelAction) = runBuilderAction(player) {
+        val current = selectionPanelView(player) ?: return@runBuilderAction
+        if (action !in current.actions) return@runBuilderAction
+        ensureAvailable(player)
+        when (action) {
+            BuilderPanelAction.MORE -> {
+                val id = player.uniqueId
+                val now = System.currentTimeMillis()
+                val canUndo = committedRecords.values.any {
+                    it.playerId == id && it.phase == BuilderJournalPhase.COMMITTED &&
+                        it.plan.kind != BuilderPlanKind.UNDO && it.operationId !in consumedUndoSources &&
+                        (it.committedAtMillis ?: 0L) + config.undoTtl.toMillis() > now
+                }
+                if (canUndo) selectionUndoAvailable.add(id) else selectionUndoAvailable.remove(id)
+                expandedSelectionMenus.add(id)
+            }
+            BuilderPanelAction.BACK -> expandedSelectionMenus.remove(player.uniqueId)
+            BuilderPanelAction.FILL -> openFillMaterialPicker(player)
+            BuilderPanelAction.REPLACE -> openReplaceMaterialPicker(player)
+            BuilderPanelAction.COPY -> handleBuilder(player, arrayOf("copy"))
+            BuilderPanelAction.PASTE -> handleBuilder(player, arrayOf("paste"))
+            BuilderPanelAction.DECONSTRUCT -> handleBuilder(player, arrayOf("deconstruct"))
+            BuilderPanelAction.DISCONNECT -> handleBuilder(player, arrayOf("disconnect"))
+            BuilderPanelAction.DRAFT -> handleBuilder(player, arrayOf("book", "draft"))
+            BuilderPanelAction.CLEAR -> handleBuilder(player, arrayOf("clear"))
+            BuilderPanelAction.UNDO -> handleBuilder(player, arrayOf("undo"))
+            BuilderPanelAction.CONFIRM -> handleBuilder(player, arrayOf("confirm"))
+            BuilderPanelAction.CANCEL -> if (materialScans.remove(player.uniqueId) == null) handleBuilder(player, arrayOf("cancel")) else Unit
+            BuilderPanelAction.ROTATE_LEFT -> handleBuilder(player, arrayOf("paste", "left"))
+            BuilderPanelAction.ROTATE_RIGHT -> handleBuilder(player, arrayOf("paste", "right"))
+        }
+    }
+
+    private fun materialPickerCurrent(player: Player, selection: BuilderSelection, feature: BuilderFeature): Boolean =
+        canUseSelectionPanel(player) && selectionOrNull(player) == selection &&
+            !operationLocks.isPlayerLocked(player.uniqueId) && !previews.contains(player.uniqueId) &&
+            player.uniqueId !in constructionStarts && BuilderPermissionPolicy.canUse(feature, player::hasPermission)
+
+    private fun dismissSelectionControls(playerId: UUID) {
+        materialScans.remove(playerId)
+        expandedSelectionMenus.remove(playerId)
+        materialPicker?.close(playerId)
+        selectionActionPanel?.clear(playerId)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onSelectionToolSlotChange(event: PlayerItemHeldEvent) = dismissSelectionControls(event.player.uniqueId)
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onSelectionToolSwap(event: PlayerSwapHandItemsEvent) = dismissSelectionControls(event.player.uniqueId)
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onSelectionToolDrop(event: PlayerDropItemEvent) = dismissSelectionControls(event.player.uniqueId)
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onSelectionTeleport(event: PlayerTeleportEvent) = dismissSelectionControls(event.player.uniqueId)
+
+    private fun openFillMaterialPicker(player: Player) {
+        ensureFeaturePermission(player, BuilderFeature.FILL)
+        val selection = requiredSelection(player)
+        materialPicker?.open(player, "material-picker.fill-title", placementMaterials,
+            { materialPickerCurrent(player, selection, BuilderFeature.FILL) },
+            { material -> runBuilderAction(player) { preparePlan(player, fillController.plan(player, material)) } },
+        )
+    }
+
+    private fun openReplaceMaterialPicker(player: Player) {
+        ensureFeaturePermission(player, BuilderFeature.REPLACE)
+        val selection = requiredSelection(player)
+        val id = player.uniqueId
+        val token = Any()
+        materialScans[id] = token
+        val positions = selection.positionsBottomUp().iterator()
+        val materials = linkedSetOf<Material>()
+        val world = player.world
+        fun scan() {
+            if (materialScans[id] !== token || !materialPickerCurrent(player, selection, BuilderFeature.REPLACE)) {
+                materialScans.remove(id, token)
+                return
+            }
+            runBuilderAction(player) {
+                try {
+                    var count = 0
+                    while (positions.hasNext() && count++ < 1024) {
+                        val position = positions.next()
+                        val block = world.getBlockAt(position.x, position.y, position.z)
+                        ensureInRangeAndLoaded(player, block)
+                        if (safety.isSafeExisting(block, allowAir = true) && !BuilderReplaceController.isCoupledMultiBlock(block.blockData)) {
+                            materials += if (block.type.isAir) Material.AIR else block.type
+                        }
+                    }
+                    if (positions.hasNext()) {
+                        checkNotNull(taskScope.runLater(1L, ::scan)) { "Builder material scan was not scheduled" }
+                        return@runBuilderAction
+                    }
+                    materialScans.remove(id, token)
+                    materialPicker?.open(player, "material-picker.replace-source-title", materials.toList(),
+                        { materialPickerCurrent(player, selection, BuilderFeature.REPLACE) },
+                        { source ->
+                            materialPicker?.open(player, "material-picker.replace-target-title", replaceMaterials.filter { it != source },
+                                { materialPickerCurrent(player, selection, BuilderFeature.REPLACE) },
+                                { target -> runBuilderAction(player) { preparePlan(player, replaceController.plan(player, source, target)) } },
+                                beginFlow = false,
+                            )
+                        },
+                        closeOnSelect = false,
+                    )
+                } catch (failure: Throwable) {
+                    materialScans.remove(id, token)
+                    throw failure
+                }
+            }
+        }
+        scan()
     }
 
     override fun onTabComplete(
@@ -1038,8 +1271,13 @@ internal class BuilderToolsRuntime(
 
     private fun setPosition(player: Player, location: Location, first: Boolean) {
         ensureAvailable(player)
+        materialScans.remove(player.uniqueId)
+        expandedSelectionMenus.remove(player.uniqueId)
+        materialPicker?.close(player.uniqueId)
         require(location.world == player.world) { "Selection world mismatch" }
         val position = BuilderBlockPos(player.world.uid, location.blockX, location.blockY, location.blockZ).validated()
+        previews.plan(player.uniqueId)?.takeIf { it.kind != BuilderPlanKind.BUILD_BOOK }
+            ?.let { discardPendingPlan(player.uniqueId) }
         val update = selections.set(player.uniqueId, position, first)
         if (update.worldReset) send(player, "selection.world-reset")
         send(
@@ -2374,6 +2612,10 @@ internal class BuilderToolsRuntime(
         if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
         discardPendingPlan(player.uniqueId)
         selections.clear(player.uniqueId)
+        selectionActionPanel?.clear(player.uniqueId)
+        materialPicker?.close(player.uniqueId)
+        materialScans.remove(player.uniqueId)
+        expandedSelectionMenus.remove(player.uniqueId)
         displayRenderer.clearSelection(player.uniqueId)
         BuildingManager.closePreview(player.uniqueId)
         crown.clearAnchor(player.uniqueId)
@@ -2832,13 +3074,15 @@ internal class BuilderToolsRuntime(
     }
 
     private val safeMaterials by lazy { Material.entries.filter(safety::isSafeMaterial) }
+    private val placementMaterials by lazy { safeMaterials.filter { safety.isSafePlacement(it.createBlockData()) } }
     private val safeMaterialNames by lazy { BuilderMaterialArguments.names(safeMaterials) }
-    private val replaceMaterialNames by lazy {
-        BuilderMaterialArguments.names(safeMaterials.filter { material ->
+    private val replaceMaterials by lazy {
+        safeMaterials.filter { material ->
             val data = material.createBlockData()
             safety.isSafePlacement(data) && !BuilderReplaceController.isCoupledMultiBlock(data)
-        })
+        }
     }
+    private val replaceMaterialNames by lazy { BuilderMaterialArguments.names(replaceMaterials) }
     private val replaceSourceMaterialNames by lazy {
         BuilderMaterialArguments.names(listOf(Material.AIR, Material.CAVE_AIR, Material.VOID_AIR)) + replaceMaterialNames
     }
@@ -2867,6 +3111,13 @@ internal class BuilderToolsRuntime(
             }
         }
         if (!isSelector(item)) return
+        if (event.hand != EquipmentSlot.HAND) return
+        if (event.action == org.bukkit.event.block.Action.RIGHT_CLICK_AIR || event.action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
+            if (selectionActionPanel?.intercept(player) == true) {
+                event.isCancelled = true
+                return
+            }
+        }
         val clicked = event.clickedBlock ?: return
         val first = when (event.action) {
             org.bukkit.event.block.Action.LEFT_CLICK_BLOCK -> true
@@ -3057,6 +3308,12 @@ internal class BuilderToolsRuntime(
 
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
+        selectionActionPanel?.clear(event.player.uniqueId)
+        materialPicker?.close(event.player.uniqueId)
+        materialScans.remove(event.player.uniqueId)
+        panelPlanSummaries.remove(event.player.uniqueId)
+        selectionUndoAvailable.remove(event.player.uniqueId)
+        expandedSelectionMenus.remove(event.player.uniqueId)
         discardPendingPlan(event.player.uniqueId)
         bookHoldHints.clear(event.player.uniqueId)
         selections.clear(event.player.uniqueId)
@@ -3144,6 +3401,12 @@ internal class BuilderToolsRuntime(
         closed = true
         publishRuntimeHealth()
         HandlerList.unregisterAll(this)
+        selectionActionPanel?.close()
+        materialPicker?.close()
+        materialScans.clear()
+        panelPlanSummaries.clear()
+        selectionUndoAvailable.clear()
+        expandedSelectionMenus.clear()
         crown.close()
         previews.close()
         operationLocks.operations().forEach { operation ->
