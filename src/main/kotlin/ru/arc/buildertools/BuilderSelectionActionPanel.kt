@@ -397,7 +397,7 @@ internal class BuilderSelectionActionPanel(
     private val messages: LocalizedMiniMessage,
     private val view: (Player) -> BuilderPanelView?,
     private val onAction: (Player, BuilderPanelAction) -> Unit,
-    private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin),
+    private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "selection-action-panel"),
 ) : Listener, AutoCloseable {
     private data class Button(
         val action: BuilderPanelAction,

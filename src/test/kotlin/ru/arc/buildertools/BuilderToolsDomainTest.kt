@@ -498,6 +498,14 @@ class BuilderToolsDomainTest : FunSpec({
         pluginDescriptor.contains("aliases: [buildtools]") shouldBe false
     }
 
+    test("plugin descriptor requires ARC for the shared visual packet budget") {
+        val description = checkNotNull(javaClass.classLoader.getResourceAsStream("plugin.yml"))
+            .use(::PluginDescriptionFile)
+
+        ("ARC" in description.depend) shouldBe true
+        ("ARC" in description.softDepend) shouldBe false
+    }
+
     test("bundled builder safety is Lands-first and has no WorldGuard requirement") {
         val bundled = checkNotNull(javaClass.classLoader.getResourceAsStream("modules/builder-tools.yml"))
             .bufferedReader()
