@@ -51,6 +51,7 @@ import ru.arc.hooks.HookRegistry
 import ru.arc.observability.RuntimeHealthContribution
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.observability.StructuredDebugLine
+import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.playerstate.PaperPlayerStateCodec
 import ru.arc.paper.playerstate.PaperPlayerStateService
 import ru.arc.text.LocalizedMiniMessage
@@ -465,6 +466,7 @@ internal class BuilderToolsRuntime(
     private var closed = false
     private var selectionActionPanel: BuilderSelectionActionPanel? = null
     private var materialPicker: BuilderMaterialPicker? = null
+    private var crownSelectionDialog: BuilderCrownSelectionDialog? = null
     private val selectionPanelPages = mutableMapOf<UUID, Int>()
     private val materialScans = mutableMapOf<UUID, Any>()
     private val panelPlanSummaries = mutableMapOf<UUID, Pair<UUID, Component>>()
@@ -611,6 +613,7 @@ internal class BuilderToolsRuntime(
                 safety = safety,
                 selections = selections,
                 maximumChanges = config.maxChanges,
+                maximumScanVolume = config.maxScanVolume,
                 host = object : BuilderCrownHost {
                     override fun operationLocked(playerId: UUID): Boolean = operationLocks.isPlayerLocked(playerId)
 
@@ -619,6 +622,13 @@ internal class BuilderToolsRuntime(
                     override fun ensurePermission(player: Player) = ensureFeaturePermission(player, BuilderFeature.CROWN)
 
                     override fun ensureMutable(player: Player, block: Block) = this@BuilderToolsRuntime.ensureMutable(player, block)
+
+                    override fun ensureScannable(player: Player, block: Block) {
+                        ensureInRangeAndLoaded(player, block)
+                        if (!block.world.worldBorder.isInside(block.location)) {
+                            throw BuilderUserFailure("errors.protection")
+                        }
+                    }
 
                     override fun ensurePlacement(player: Player, block: Block, material: Material) =
                         this@BuilderToolsRuntime.ensureMutable(player, block, material)
@@ -777,7 +787,16 @@ internal class BuilderToolsRuntime(
                     ::tickConstructionProjects,
                 ),
             ) { "Builder construction project task was not scheduled" }
-            materialPicker = BuilderMaterialPicker(plugin, messages)
+            val nativeDialogs = PaperDialogRuntime(plugin)
+            materialPicker = BuilderMaterialPicker(plugin, messages, nativeDialogs)
+            crownSelectionDialog = BuilderCrownSelectionDialog(
+                messages = messages,
+                dialogs = nativeDialogs,
+                materialPicker = checkNotNull(materialPicker),
+                leafMaterials = Material.entries.filter(safety::isLeaf).sortedBy(Material::name),
+                isCurrent = ::crownSelectionDialogCurrent,
+                onPreview = ::prepareSelectionCrown,
+            )
             selectionActionPanel = BuilderSelectionActionPanel(
                 plugin, config.selectionPanelSettings(), messages, ::selectionPanelView, ::onSelectionPanelAction,
                 onSelectionGlowSuppression = displayRenderer::suppressSelectionGlow,
@@ -788,6 +807,7 @@ internal class BuilderToolsRuntime(
         } catch (failure: Throwable) {
             HandlerList.unregisterAll(this)
             selectionActionPanel?.close()
+            crownSelectionDialog?.close()
             materialPicker?.close()
             initializedPlayerRecoveries?.close()
             initializedBooks?.close()
@@ -877,13 +897,14 @@ internal class BuilderToolsRuntime(
             panelPlanSummaries.remove(id)
             selectionUndoAvailable.remove(id)
             selectionPanelPages.remove(id)
+            crownSelectionDialog?.close(id)
             materialPicker?.close(id)
             return null
         }
         val location = player.location
         val maxDistance = config.selectionPanelMaxSelectionDistance
         if (selection.distanceSquaredTo(location.x, location.y, location.z) > maxDistance * maxDistance) return null
-        if (materialPicker?.isOpen(id) == true) return null
+        if (materialPicker?.isOpen(id) == true || crownSelectionDialog?.isOpen(id) == true) return null
         fun text(key: String, values: Map<String, Component> = emptyMap()) =
             messages.render("selection-panel.$key", locale(player), values)
         materialScans[id]?.let { token ->
@@ -917,6 +938,9 @@ internal class BuilderToolsRuntime(
                 buildList {
                     add(BuilderPanelAction.CONFIRM)
                     add(BuilderPanelAction.CANCEL)
+                    if (plan.kind == BuilderPlanKind.CROWN &&
+                        rootCommandAvailable(player, BuilderRootCommand.CROWN)
+                    ) add(BuilderPanelAction.CROWN)
                     if (plan.kind == BuilderPlanKind.PASTE) {
                         add(BuilderPanelAction.ROTATE_LEFT)
                         add(BuilderPanelAction.ROTATE_RIGHT)
@@ -941,6 +965,7 @@ internal class BuilderToolsRuntime(
             if (selectionCanUndo(id)) add(BuilderPanelAction.UNDO)
             add(BuilderPanelAction.CLEAR)
             offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
+            offer(BuilderPanelAction.CROWN, BuilderRootCommand.CROWN)
         }
         val pageCount = (available.size + 5) / 6
         val page = (selectionPanelPages[id] ?: 0).mod(pageCount)
@@ -988,6 +1013,7 @@ internal class BuilderToolsRuntime(
             BuilderPanelAction.PASTE -> handleBuilder(player, arrayOf("paste"))
             BuilderPanelAction.DECONSTRUCT -> handleBuilder(player, arrayOf("deconstruct"))
             BuilderPanelAction.DISCONNECT -> handleBuilder(player, arrayOf("disconnect"))
+            BuilderPanelAction.CROWN -> openSelectionCrownDialog(player)
             BuilderPanelAction.DRAFT -> {
                 clipboardController.copy(player)
                 books.createSelectionDraft(player)
@@ -1006,9 +1032,68 @@ internal class BuilderToolsRuntime(
             !operationLocks.isPlayerLocked(player.uniqueId) && !previews.contains(player.uniqueId) &&
             player.uniqueId !in constructionStarts && BuilderPermissionPolicy.canUse(feature, player::hasPermission)
 
+    private fun openSelectionCrownDialog(player: Player) {
+        ensureAvailable(player)
+        ensureFeaturePermission(player, BuilderFeature.CROWN)
+        val selection = requiredSelection(player)
+        val pending = previews.plan(player.uniqueId)
+        if (pending != null && pending.kind != BuilderPlanKind.CROWN) throw BuilderUserFailure("errors.expired")
+        val settings = crown.settings(player.uniqueId)
+        val initial = BuilderCrownSelectionOptions(
+            density = settings.density,
+            materialName = settings.palette.firstOrNull()?.materialName ?: "oak_leaves",
+        )
+        crownSelectionDialog?.open(player, selection, pending?.id, initial)
+            ?: throw IllegalStateException("Selection crown dialog is unavailable")
+    }
+
+    private fun crownSelectionDialogCurrent(
+        player: Player,
+        selection: BuilderSelection,
+        expectedPlanId: UUID?,
+    ): Boolean {
+        if (!canUseSelectionPanel(player) || !BuilderPermissionPolicy.canUse(BuilderFeature.CROWN, player::hasPermission)) {
+            return false
+        }
+        if (operationLocks.isPlayerLocked(player.uniqueId) || player.uniqueId in constructionStarts) return false
+        val current = runCatching { requiredSelection(player) }.getOrNull() ?: return false
+        if (current != selection) return false
+        val pending = previews.plan(player.uniqueId)
+        return if (expectedPlanId == null) {
+            pending == null
+        } else {
+            pending?.id == expectedPlanId && pending.kind == BuilderPlanKind.CROWN
+        }
+    }
+
+    private fun prepareSelectionCrown(
+        player: Player,
+        selection: BuilderSelection,
+        expectedPlanId: UUID?,
+        options: BuilderCrownSelectionOptions,
+    ): Boolean {
+        if (!crownSelectionDialogCurrent(player, selection, expectedPlanId)) return false
+        return try {
+            crown.prepareSelection(player, selection, options)
+            true
+        } catch (failure: BuilderUserFailure) {
+            send(player, failure.path, failure.values)
+            false
+        } catch (failure: IllegalArgumentException) {
+            warn("Builder-tools rejected crown selection for {}: {}", player.name, failure.message)
+            send(player, "errors.plan-failed")
+            false
+        } catch (failure: Throwable) {
+            error("Builder-tools crown selection failed for ${player.name}", failure)
+            send(player, "errors.plan-failed")
+            false
+        }
+    }
+
     private fun dismissSelectionControls(playerId: UUID) {
         materialScans.remove(playerId)
         selectionPanelPages.remove(playerId)
+        crownSelectionDialog?.close(playerId)
         materialPicker?.close(playerId)
         selectionActionPanel?.clear(playerId)
     }
@@ -1287,6 +1372,7 @@ internal class BuilderToolsRuntime(
         ensureAvailable(player)
         materialScans.remove(player.uniqueId)
         selectionPanelPages.remove(player.uniqueId)
+        crownSelectionDialog?.close(player.uniqueId)
         materialPicker?.close(player.uniqueId)
         require(location.world == player.world) { "Selection world mismatch" }
         val position = BuilderBlockPos(player.world.uid, location.blockX, location.blockY, location.blockZ).validated()
@@ -2628,6 +2714,7 @@ internal class BuilderToolsRuntime(
         discardPendingPlan(player.uniqueId)
         selections.clear(player.uniqueId)
         selectionActionPanel?.clear(player.uniqueId)
+        crownSelectionDialog?.close(player.uniqueId)
         materialPicker?.close(player.uniqueId)
         materialScans.remove(player.uniqueId)
         selectionPanelPages.remove(player.uniqueId)
@@ -3327,6 +3414,7 @@ internal class BuilderToolsRuntime(
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
         selectionActionPanel?.clear(event.player.uniqueId)
+        crownSelectionDialog?.clearPlayer(event.player.uniqueId)
         materialPicker?.close(event.player.uniqueId)
         materialScans.remove(event.player.uniqueId)
         panelPlanSummaries.remove(event.player.uniqueId)
@@ -3420,6 +3508,7 @@ internal class BuilderToolsRuntime(
         publishRuntimeHealth()
         HandlerList.unregisterAll(this)
         selectionActionPanel?.close()
+        crownSelectionDialog?.close()
         materialPicker?.close()
         materialScans.clear()
         panelPlanSummaries.clear()

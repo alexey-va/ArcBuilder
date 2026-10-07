@@ -170,9 +170,70 @@ class BuilderCrownControllerTest : FunSpec({
             }
         }
     }
+
+    test("selection crown fills replaceable core air, preserves occupied blocks, and keeps material costs exact") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderCrownSelectionCostsTest")
+            val world = paper.addSimpleWorld("crown-selection-costs")
+            val player = paper.addPlayer("CrownSelectionOwner")
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+            val harness = CrownHarness(plugin)
+            harness.controller.use { controller ->
+                val selection = harness.select(player.uniqueId, world.uid, 0, 64, 0, 2, 64, 0)
+
+                player.gameMode = GameMode.SURVIVAL
+                controller.prepareSelection(
+                    player,
+                    selection,
+                    BuilderCrownSelectionOptions(thickness = 1, density = BuilderCrownDensity.DENSE),
+                )
+                val survival = harness.preparedPlans.single()
+                survival.kind shouldBe BuilderPlanKind.CROWN
+                survival.changes.none { it.position == BuilderBlockPos(world.uid, 1, 64, 0) } shouldBe true
+                survival.changes.any { it.position == BuilderBlockPos(world.uid, 0, 64, 0) } shouldBe true
+                survival.costs.sumOf { it.amount } shouldBe survival.changes.size
+                survival.costs.single().materialKey shouldBe "minecraft:oak_leaves"
+
+                harness.preparedPlans.clear()
+                player.gameMode = GameMode.CREATIVE
+                controller.prepareSelection(
+                    player,
+                    selection,
+                    BuilderCrownSelectionOptions(thickness = 1, density = BuilderCrownDensity.DENSE),
+                )
+                harness.preparedPlans.single().costs shouldBe emptyList()
+            }
+        }
+    }
+
+    test("selection crown rejects a stale captured selection and an oversized expanded scan") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderCrownSelectionGuardTest")
+            val world = paper.addSimpleWorld("crown-selection-guards")
+            val player = paper.addPlayer("CrownSelectionGuard")
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            val harness = CrownHarness(plugin, maximumScanVolume = 100L)
+            harness.controller.use { controller ->
+                val captured = harness.select(player.uniqueId, world.uid, 0, 64, 0, 1, 64, 0)
+                harness.select(player.uniqueId, world.uid, 8, 64, 0, 8, 64, 0)
+                val stale = shouldThrow<CrownFailure> {
+                    controller.prepareSelection(player, captured, BuilderCrownSelectionOptions(thickness = 1))
+                }
+                stale.path shouldBe "errors.expired"
+
+                val large = harness.select(player.uniqueId, world.uid, 0, 64, 0, 8, 64, 8)
+                val rejected = shouldThrow<CrownFailure> {
+                    controller.prepareSelection(player, large, BuilderCrownSelectionOptions(thickness = 3))
+                }
+                rejected.path shouldBe "errors.selection-too-large"
+                harness.preparedPlans shouldBe emptyList()
+            }
+        }
+    }
 })
 
-private class CrownHarness(plugin: Plugin) {
+private class CrownHarness(plugin: Plugin, maximumScanVolume: Long = 1_000_000L) {
     val preparedPlans = mutableListOf<BuilderPlan>()
     val failures = mutableListOf<String>()
     var confirmedPlans = 0
@@ -191,6 +252,7 @@ private class CrownHarness(plugin: Plugin) {
         safety = safety,
         selections = selections,
         maximumChanges = BuilderPlan.ABSOLUTE_MAX_CHANGES,
+        maximumScanVolume = maximumScanVolume,
         host = object : BuilderCrownHost {
             override fun operationLocked(playerId: UUID): Boolean = false
 
@@ -262,6 +324,12 @@ private class CrownHarness(plugin: Plugin) {
             override fun fail(path: String, values: Map<String, Component>): Nothing = throw CrownFailure(path)
         },
     )
+
+    fun select(playerId: UUID, worldId: UUID, x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int): BuilderSelection {
+        selections.set(playerId, BuilderBlockPos(worldId, x1, y1, z1), first = true)
+        selections.set(playerId, BuilderBlockPos(worldId, x2, y2, z2), first = false)
+        return checkNotNull(selections.selection(playerId, worldId))
+    }
 }
 
 private class CrownFailure(val path: String) : RuntimeException(path)

@@ -794,6 +794,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             val secondPage = checkNotNull(journey.selectionPanel(player)).actions
             secondPage.contains(BuilderPanelAction.CLEAR) shouldBe true
             secondPage.contains(BuilderPanelAction.DISCONNECT) shouldBe true
+            secondPage.indexOf(BuilderPanelAction.CROWN) shouldBe secondPage.indexOf(BuilderPanelAction.DISCONNECT) + 1
+            secondPage.last { it !in setOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE) } shouldBe
+                BuilderPanelAction.CROWN
             secondPage.contains(BuilderPanelAction.FILL) shouldBe false
             journey.selectionPanelAction(player, BuilderPanelAction.PREVIOUS_PAGE)
             checkNotNull(journey.selectionPanel(player)).actions shouldBe firstPage

@@ -102,6 +102,16 @@ internal class BuilderMaterialPicker(
 
     fun isOpen(playerId: UUID): Boolean = !closed && playerId in flows
 
+    /** Retire picker state after a caller handles a selected material in the shared dialog flow. */
+    fun forgetFlow(playerId: UUID) {
+        flows.remove(playerId)
+    }
+
+    /** Attach a native picker child to a dialog flow owned by another builder screen. */
+    fun joinCurrentFlow(player: Player) {
+        if (!closed && player.isOnline && player.uniqueId !in flows) flows[player.uniqueId] = Flow()
+    }
+
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         flows.remove(event.player.uniqueId)
@@ -175,8 +185,8 @@ internal class BuilderMaterialPicker(
                             if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
                             screen.query = context.text(SEARCH_INPUT).orEmpty().take(MAX_QUERY_LENGTH)
                             if (material !in screen.candidates) return@PaperDialogButton
+                            if (screen.titleKey != "material-picker.replace-source-title") remember(playerId, material)
                             if (screen.closeOnSelect) {
-                                remember(playerId, material)
                                 flows.remove(playerId, flow)
                                 dialogs.close(player)
                             }
@@ -337,6 +347,7 @@ internal class BuilderMaterialPicker(
             "material-picker.fill-title",
             "material-picker.replace-source-title",
             "material-picker.replace-target-title",
+            "material-picker.crown-leaf-title",
         )
         val SEARCH_INPUT = PaperDialogInputId.of("query")
         val SEARCH_ACTION = PaperDialogActionId.of("find")

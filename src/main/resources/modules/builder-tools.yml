@@ -317,6 +317,7 @@ locales:
       fill-title: '<#d48763>Материал заполнения'
       replace-source-title: '<#d48763>Какой блок заменить?'
       replace-target-title: '<#d48763>На какой блок заменить?'
+      crown-leaf-title: '<#d48763>Материал листвы'
       search-label: '<white>Поиск по названию — нажми «Найти»'
       find: '<#92bed8>Найти'
       no-results: '<#e8dfd2>Блоки не найдены. Попробуй другое название.'
@@ -339,6 +340,7 @@ locales:
         next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Разобрать'
         disconnect: '<#92bed8>Разъединить'
+        crown: '<#92bed8>Крона'
         draft: '<#92bed8>Создать книгу'
         clear: '<#ff9f0f>Сбросить'
         undo: '<#d48763>Откатить'
@@ -346,6 +348,18 @@ locales:
         cancel: '<#ff9f0f>Отменить'
         rotate-left: '<#92bed8>↶ Повернуть'
         rotate-right: '<#92bed8>Повернуть ↷'
+    crown-selection:
+      title: '<#d48763>Настроить крону'
+      body: '<#e8dfd2>Область <x> × <y> × <z> · толщина кроны <thickness> блока. Занятые блоки сохраняются.'
+      thickness-label: "<hover:show_text:'Расстояние от выделения до внешнего края кроны.'><white>Толщина / радиус</hover>"
+      density-option: '<#92bed8><density>'
+      density-selected: '<#2bba43><density> ✓'
+      density-help: "<hover:show_text:'Воздушная крона оставляет больше просветов; густая — меньше.'><#e8dfd2>Плотность листьев</hover>"
+      material-button: '<#d48763>Листва: <material>'
+      material-help: "<hover:show_text:'Выбери один тип листвы для всей новой кроны.'><#e8dfd2>Материал листвы</hover>"
+      preview: '<#2bba43>Предпросмотр'
+      preview-help: "<hover:show_text:'Покажет точные блоки и расход до строительства.'><#e8dfd2>Посмотреть план</hover>"
+      cancel: '<#e8dfd2>Назад'
     help:
       - "<prefix><#e6fff3>Инструменты строителя"
       - "<#8c8c8c>   <#d48763>/builder wand <#e6fff3>— выделить область"
@@ -1254,6 +1268,7 @@ locales:
       fill-title: '<#d48763>Fill material'
       replace-source-title: '<#d48763>Which block to replace?'
       replace-target-title: '<#d48763>Replace with which block?'
+      crown-leaf-title: '<#d48763>Foliage material'
       search-label: '<white>Search by name, then press Find'
       find: '<#92bed8>Find'
       no-results: '<#e8dfd2>No matching blocks. Try another name.'
@@ -1276,6 +1291,7 @@ locales:
         next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Deconstruct'
         disconnect: '<#92bed8>Disconnect'
+        crown: '<#92bed8>Crown'
         draft: '<#92bed8>Create book'
         clear: '<#ff9f0f>Clear'
         undo: '<#d48763>Undo'
@@ -1283,6 +1299,18 @@ locales:
         cancel: '<#ff9f0f>Cancel'
         rotate-left: '<#92bed8>↶ Rotate'
         rotate-right: '<#92bed8>Rotate ↷'
+    crown-selection:
+      title: '<#d48763>Set up crown'
+      body: '<#e8dfd2>Selection <x> × <y> × <z> · foliage thickness <thickness>. Existing blocks are preserved.'
+      thickness-label: "<hover:show_text:'Distance from the selection to the outer crown edge.'><white>Thickness / radius</hover>"
+      density-option: '<#92bed8><density>'
+      density-selected: '<#2bba43><density> ✓'
+      density-help: "<hover:show_text:'Airy foliage leaves more gaps; dense foliage leaves fewer.'><#e8dfd2>Foliage density</hover>"
+      material-button: '<#d48763>Leaves: <material>'
+      material-help: "<hover:show_text:'Choose one foliage type for the whole new crown.'><#e8dfd2>Leaf material</hover>"
+      preview: '<#2bba43>Preview'
+      preview-help: "<hover:show_text:'Shows exact block changes and material cost before building.'><#e8dfd2>Review plan</hover>"
+      cancel: '<#e8dfd2>Back'
     help:
       - "<prefix><white>Builder tools"
       - "<dark_gray>   <white>/builder wand <gray>— prepare the selector"

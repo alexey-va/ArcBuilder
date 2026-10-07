@@ -844,6 +844,62 @@ class BuilderToolsDomainTest : FunSpec({
         dense.all { (x, y, z) -> x in -6..6 && y in -6..6 && z in -6..6 } shouldBe true
     }
 
+    test("selection crown rounds a point, capsules a line, and rounds a cuboid") {
+        val options = BuilderCrownSelectionOptions(thickness = 3, density = BuilderCrownDensity.DENSE)
+        fun positions(first: BuilderBlockPos, second: BuilderBlockPos) = BuilderCrownGeometry.selectionPositions(
+            BuilderSelection(first, second), options, seed = 93L, maxScanVolume = 10_000L,
+        ).toSet()
+
+        val point = BuilderBlockPos(worldId, 10, 70, -4)
+        val rounded = positions(point, point)
+        rounded.contains(point) shouldBe true
+        rounded.contains(BuilderBlockPos(worldId, 11, 70, -4)) shouldBe true
+        rounded.contains(BuilderBlockPos(worldId, 13, 73, -4)) shouldBe false
+
+        val line = positions(
+            BuilderBlockPos(worldId, 0, 70, 0),
+            BuilderBlockPos(worldId, 4, 70, 0),
+        )
+        line.contains(BuilderBlockPos(worldId, 2, 70, 0)) shouldBe true
+        line.contains(BuilderBlockPos(worldId, 2, 71, 0)) shouldBe true
+        line.contains(BuilderBlockPos(worldId, 6, 73, 0)) shouldBe false
+
+        val cuboid = positions(
+            BuilderBlockPos(worldId, 0, 70, 0),
+            BuilderBlockPos(worldId, 1, 71, 1),
+        )
+        cuboid.contains(BuilderBlockPos(worldId, 0, 70, 0)) shouldBe true
+        cuboid.contains(BuilderBlockPos(worldId, 1, 71, 1)) shouldBe true
+        cuboid.contains(BuilderBlockPos(worldId, 4, 74, 4)) shouldBe false
+    }
+
+    test("selection crown density and scan bounds are deterministic") {
+        val selection = BuilderSelection(
+            BuilderBlockPos(worldId, -2, 70, 1),
+            BuilderBlockPos(worldId, 2, 70, 1),
+        )
+        fun positions(density: BuilderCrownDensity) = BuilderCrownGeometry.selectionPositions(
+            selection,
+            BuilderCrownSelectionOptions(thickness = 4, density = density),
+            seed = 817L,
+            maxScanVolume = 100_000L,
+        ).toList()
+
+        val airy = positions(BuilderCrownDensity.AIRY)
+        val dense = positions(BuilderCrownDensity.DENSE)
+        positions(BuilderCrownDensity.DENSE) shouldBe dense
+        (airy.size <= dense.size) shouldBe true
+        dense.size shouldNotBe 0
+        shouldThrow<IllegalArgumentException> {
+            BuilderCrownGeometry.selectionPositions(
+                selection,
+                BuilderCrownSelectionOptions(thickness = 4),
+                seed = 817L,
+                maxScanVolume = 100L,
+            )
+        }
+    }
+
     test("crown sessions keep a stable preview seed and advance only on reroll") {
         val sessions = BuilderCrownSessions()
         val center = BuilderBlockPos(worldId, 12, 80, -7)

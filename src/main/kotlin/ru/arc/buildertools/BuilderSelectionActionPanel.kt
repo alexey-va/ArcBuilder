@@ -42,7 +42,7 @@ import kotlin.math.sqrt
 import kotlin.math.tan
 
 internal enum class BuilderPanelAction {
-    FILL, REPLACE, COPY, PASTE, PREVIOUS_PAGE, NEXT_PAGE, DECONSTRUCT, DISCONNECT,
+    FILL, REPLACE, COPY, PASTE, PREVIOUS_PAGE, NEXT_PAGE, DECONSTRUCT, DISCONNECT, CROWN,
     DRAFT, CLEAR, UNDO, CONFIRM, CANCEL, ROTATE_LEFT, ROTATE_RIGHT;
 
     val localeKey: String get() = name.lowercase(java.util.Locale.ROOT).replace('_', '-')

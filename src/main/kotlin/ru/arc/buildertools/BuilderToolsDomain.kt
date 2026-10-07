@@ -366,6 +366,23 @@ enum class BuilderCrownDensity { AIRY, NATURAL, DENSE }
 
 enum class BuilderCrownNoise { SMOOTH, NATURAL, WILD }
 
+/** Compact settings for the selection-driven foliage operation. */
+data class BuilderCrownSelectionOptions(
+    val thickness: Int = 3,
+    val density: BuilderCrownDensity = BuilderCrownDensity.NATURAL,
+    val materialName: String = "oak_leaves",
+) {
+    fun validated(): BuilderCrownSelectionOptions = apply {
+        require(thickness in MINIMUM_THICKNESS..MAXIMUM_THICKNESS) { "Crown thickness must be between 1 and 10" }
+        require(materialName.matches(Regex("[a-z0-9_]{1,64}"))) { "Crown material name is invalid" }
+    }
+
+    companion object {
+        const val MINIMUM_THICKNESS = 1
+        const val MAXIMUM_THICKNESS = 10
+    }
+}
+
 data class BuilderCrownPaletteEntry(
     val materialName: String,
     val weight: Int,
@@ -456,11 +473,7 @@ object BuilderCrownGeometry {
             BuilderCrownNoise.NATURAL -> 0.24 to 3.5
             BuilderCrownNoise.WILD -> 0.38 to 2.4
         }
-        val holeThreshold = when (checked.density) {
-            BuilderCrownDensity.AIRY -> -0.05
-            BuilderCrownDensity.NATURAL -> -0.45
-            BuilderCrownDensity.DENSE -> -0.80
-        }
+        val holeThreshold = densityHoleThreshold(checked.density)
         val boundX = ceil(radiusX).toInt()
         val boundY = ceil(radiusY).toInt()
         val boundZ = ceil(radiusZ).toInt()
@@ -484,6 +497,72 @@ object BuilderCrownGeometry {
             }
         }
         return result.sortedWith(compareBy<Triple<Int, Int, Int>> { it.second }.thenBy { it.first }.thenBy { it.third })
+    }
+
+    /**
+     * Bounded, lazy rounded dilation of a selected block cuboid. The scan bound
+     * is checked before the returned sequence can read any world blocks.
+     */
+    fun selectionPositions(
+        selection: BuilderSelection,
+        options: BuilderCrownSelectionOptions,
+        seed: Long,
+        maxScanVolume: Long,
+    ): Sequence<BuilderBlockPos> {
+        val checked = options.validated()
+        require(maxScanVolume > 0L) { "Crown selection scan limit must be positive" }
+        val minX = Math.subtractExact(selection.minX, checked.thickness)
+        val minY = Math.subtractExact(selection.minY, checked.thickness)
+        val minZ = Math.subtractExact(selection.minZ, checked.thickness)
+        val maxX = Math.addExact(selection.maxX, checked.thickness)
+        val maxY = Math.addExact(selection.maxY, checked.thickness)
+        val maxZ = Math.addExact(selection.maxZ, checked.thickness)
+        BuilderBlockPos(selection.worldId, minX, minY, minZ).validated()
+        BuilderBlockPos(selection.worldId, maxX, maxY, maxZ).validated()
+        val scanVolume = Math.multiplyExact(
+            Math.multiplyExact(maxX.toLong() - minX + 1L, maxY.toLong() - minY + 1L),
+            maxZ.toLong() - minZ + 1L,
+        )
+        require(scanVolume <= maxScanVolume) { "Crown selection expanded volume exceeds its scan limit" }
+
+        val thicknessSquared = checked.thickness.toDouble() * checked.thickness
+        val holeThreshold = densityHoleThreshold(checked.density)
+        return sequence {
+            for (y in minY..maxY) {
+                for (x in minX..maxX) {
+                    for (z in minZ..maxZ) {
+                        val dx = when {
+                            x < selection.minX -> selection.minX - x
+                            x > selection.maxX -> x - selection.maxX
+                            else -> 0
+                        }
+                        val dy = when {
+                            y < selection.minY -> selection.minY - y
+                            y > selection.maxY -> y - selection.maxY
+                            else -> 0
+                        }
+                        val dz = when {
+                            z < selection.minZ -> selection.minZ - z
+                            z > selection.maxZ -> z - selection.maxZ
+                            else -> 0
+                        }
+                        val distance = dx.toDouble() * dx + dy.toDouble() * dy + dz.toDouble() * dz
+                        val normalized = distance / thicknessSquared
+                        if (normalized > 1.5) continue
+                        val localX = (x - selection.minX).toDouble()
+                        val localY = (y - selection.minY).toDouble()
+                        val localZ = (z - selection.minZ).toDouble()
+                        val edge = 1.0 + coherentNoise(localX / 3.5, localY / 3.5, localZ / 3.5, seed) * 0.24
+                        if (normalized > edge) continue
+                        if (normalized > 0.38) {
+                            val hole = coherentNoise(localX / 1.7, localY / 1.7, localZ / 1.7, seed xor HOLE_SALT)
+                            if (hole < holeThreshold) continue
+                        }
+                        yield(BuilderBlockPos(selection.worldId, x, y, z))
+                    }
+                }
+            }
+        }
     }
 
     internal fun unitNoise(x: Int, y: Int, z: Int, seed: Long): Double {
@@ -512,6 +591,12 @@ object BuilderCrownGeometry {
     }
 
     private fun smooth(value: Double): Double = value * value * (3.0 - 2.0 * value)
+
+    private fun densityHoleThreshold(density: BuilderCrownDensity): Double = when (density) {
+        BuilderCrownDensity.AIRY -> -0.05
+        BuilderCrownDensity.NATURAL -> -0.45
+        BuilderCrownDensity.DENSE -> -0.80
+    }
 
     private fun lerp(first: Double, second: Double, amount: Double): Double = first + (second - first) * amount
 

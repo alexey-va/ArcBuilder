@@ -95,6 +95,18 @@ forms. Commands that require material arguments (`fill` and `replace`) use
 `suggest_command` with a trailing space so the player finishes the command;
 the surface never clicks an immediate-confirm variant.
 
+The native selection action panel appends `CROWN` after `DISCONNECT` on its
+paginated action list. It opens a Paper dialog for shell thickness, the existing
+crown density choices, and one searchable leaf material. The selection is
+captured when the dialog opens and rechecked with the selector, permission, and
+pending crown plan before planning. A rounded dilation covers one-block,
+line, and cuboid selections, including replaceable air inside the selected
+volume; occupied blocks are preserved. The expanded scan is bounded before
+world reads. Preview and confirmation then use the ordinary `CROWN` plan
+transaction, with one selected leaf per changed block in survival and no
+material cost in creative. The legacy point-command and brush continue to use
+their radius, noise, and palette settings.
+
 ## Plan and mutation transaction
 
 All ordinary world changes use `BuilderPlan` and `BuilderBlockChange` from

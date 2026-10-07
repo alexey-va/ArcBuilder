@@ -28,6 +28,7 @@ internal interface BuilderCrownHost {
     fun ensureAvailable(player: Player)
     fun ensurePermission(player: Player)
     fun ensureMutable(player: Player, block: Block)
+    fun ensureScannable(player: Player, block: Block) = ensureMutable(player, block)
     fun ensurePlacement(player: Player, block: Block, material: Material) = ensureMutable(player, block)
     fun placementData(material: Material): BlockData
     fun materialLabel(player: Player, material: Material): Component
@@ -56,6 +57,7 @@ internal class BuilderCrownController(
     private val safety: BuilderBlockSafety,
     private val selections: BuilderSelectionController,
     private val maximumChanges: Int,
+    private val maximumScanVolume: Long = 1_000_000L,
     private val host: BuilderCrownHost,
 ) : Listener, AutoCloseable {
     private val brushKey = NamespacedKey(plugin, "crown_brush")
@@ -67,7 +69,54 @@ internal class BuilderCrownController(
         require(maximumChanges in 1..BuilderPlan.ABSOLUTE_MAX_CHANGES) {
             "Builder crown maximum changes must stay inside the absolute plan bound"
         }
+        require(maximumScanVolume > 0L) { "Builder crown scan volume must be positive" }
         Bukkit.getPluginManager().registerEvents(this, plugin)
+    }
+
+    /** Plans foliage around the exact selection captured by the native settings dialog. */
+    fun prepareSelection(
+        player: Player,
+        capturedSelection: BuilderSelection,
+        rawOptions: BuilderCrownSelectionOptions,
+    ) {
+        host.ensureAvailable(player)
+        host.ensurePermission(player)
+        if (host.operationLocked(player.uniqueId)) failure("errors.busy")
+        val current = selections.selection(player.uniqueId, player.world.uid) ?: failure("errors.selection-missing")
+        if (current != capturedSelection) failure("errors.expired")
+        val options = try {
+            rawOptions.validated()
+        } catch (_: IllegalArgumentException) {
+            failure("errors.crown-setting")
+        }
+        val material = Material.matchMaterial(options.materialName) ?: failure("errors.crown-material")
+        if (!safety.isLeaf(material)) failure("errors.crown-material")
+        val seed = selectionSeed(player.uniqueId, current, options)
+        val positions = try {
+            BuilderCrownGeometry.selectionPositions(current, options, seed, maximumScanVolume)
+        } catch (_: ArithmeticException) {
+            failure("errors.selection-too-large")
+        } catch (_: IllegalArgumentException) {
+            failure("errors.selection-too-large")
+        }
+        val world = Bukkit.getWorld(current.worldId) ?: failure("errors.world-not-allowed")
+        val after = host.placementData(material)
+        val changes = ArrayList<BuilderBlockChange>(minOf(maximumChanges, 512))
+        val costs = ArrayList<ItemStack>(minOf(maximumChanges, 512))
+        for (position in positions) {
+            // Minecraft block coordinates above or below this world's build height are simply clipped.
+            if (position.y !in world.minHeight until world.maxHeight) continue
+            val block = world.getBlockAt(position.x, position.y, position.z)
+            host.ensureScannable(player, block)
+            val before = block.blockData
+            if (before.asString == after.asString || !safety.isReplaceable(block)) continue
+            host.ensurePlacement(player, block, material)
+            changes += BuilderBlockChange(position, before.asString, after.asString)
+            if (BuilderGameModePolicy.usesInventory(player.gameMode)) costs += ItemStack(material)
+            if (changes.size > maximumChanges) failure("errors.selection-too-large")
+        }
+        if (changes.isEmpty()) failure("errors.nothing-to-change")
+        host.preparePlan(player, host.createPlan(player, changes, BuilderItemCodec.aggregate(costs)))
     }
 
     fun tabComplete(args: Array<out String>): List<String> {
@@ -285,6 +334,17 @@ internal class BuilderCrownController(
         clearAnchor(player.uniqueId)
         host.preparePlan(player, plan(player, center, settings, seed))
     }
+
+    private fun selectionSeed(
+        playerId: UUID,
+        selection: BuilderSelection,
+        options: BuilderCrownSelectionOptions,
+    ): Long = playerId.mostSignificantBits xor
+        playerId.leastSignificantBits xor
+        selection.worldId.mostSignificantBits xor
+        selection.worldId.leastSignificantBits xor
+        selection.hashCode().toLong().shl(1) xor
+        options.hashCode().toLong().shl(17)
 
     private fun plan(
         player: Player,
