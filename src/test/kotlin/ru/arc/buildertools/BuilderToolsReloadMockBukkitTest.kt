@@ -123,6 +123,7 @@ private fun withReloadPlugin(block: (MockBukkitTestRuntime, ArcBuilderPlugin) ->
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(plugin)
             try {
                 block(paper, plugin)
             } finally {

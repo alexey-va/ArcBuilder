@@ -316,6 +316,7 @@ private fun withCommandFixture(block: (CommandFixture) -> Unit) {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(plugin)
             try {
                 val config = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml").apply {
                     setBoolean("enabled", true)

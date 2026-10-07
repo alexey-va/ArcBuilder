@@ -1524,6 +1524,7 @@ private class ArcBuilderJourney private constructor(
             val paper = MockBukkitTestRuntime.open()
             try {
                 val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+                installArcVisualPacketBudgetFixture(plugin)
                 val config = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml").apply {
                     setBoolean("enabled", true)
                     setStringList("allowed-worlds", listOf("*"))
