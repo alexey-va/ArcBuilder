@@ -879,6 +879,9 @@ internal class BuilderToolsRuntime(
             materialPicker?.close(id)
             return null
         }
+        val location = player.location
+        val maxDistance = config.selectionPanelMaxSelectionDistance
+        if (selection.distanceSquaredTo(location.x, location.y, location.z) > maxDistance * maxDistance) return null
         if (materialPicker?.isOpen(id) == true) return null
         fun text(key: String, values: Map<String, Component> = emptyMap()) =
             messages.render("selection-panel.$key", locale(player), values)
@@ -930,13 +933,13 @@ internal class BuilderToolsRuntime(
             offer(BuilderPanelAction.COPY, BuilderRootCommand.COPY)
             if (clipboardController.current(id) != null) offer(BuilderPanelAction.PASTE, BuilderRootCommand.PASTE)
             offer(BuilderPanelAction.DECONSTRUCT, BuilderRootCommand.DECONSTRUCT)
-            offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
-            if (config.bookContractsEnabled && player.hasPermission("arcbuild.book.create") &&
+            if (player.hasPermission("arcbuild.book.create") &&
                 rootCommandAvailable(player, BuilderRootCommand.COPY) &&
                 rootCommandAvailable(player, BuilderRootCommand.BOOK)
             ) add(BuilderPanelAction.DRAFT)
             if (selectionCanUndo(id)) add(BuilderPanelAction.UNDO)
             add(BuilderPanelAction.CLEAR)
+            offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
         }
         val pageCount = (available.size + 5) / 6
         val page = (selectionPanelPages[id] ?: 0).mod(pageCount)
@@ -950,9 +953,11 @@ internal class BuilderToolsRuntime(
                 "x" to messages.literal(selection.sizeX),
                 "y" to messages.literal(selection.sizeY),
                 "z" to messages.literal(selection.sizeZ),
+            )), actions,
+            pagination = if (pageCount > 1) text("pagination", mapOf(
                 "current" to messages.literal(page + 1),
                 "total" to messages.literal(pageCount),
-            )), actions,
+            )) else Component.empty(),
         )
     }
 
@@ -982,7 +987,10 @@ internal class BuilderToolsRuntime(
             BuilderPanelAction.PASTE -> handleBuilder(player, arrayOf("paste"))
             BuilderPanelAction.DECONSTRUCT -> handleBuilder(player, arrayOf("deconstruct"))
             BuilderPanelAction.DISCONNECT -> handleBuilder(player, arrayOf("disconnect"))
-            BuilderPanelAction.DRAFT -> handleBuilder(player, arrayOf("book", "draft"))
+            BuilderPanelAction.DRAFT -> {
+                clipboardController.copy(player)
+                books.createSelectionDraft(player)
+            }
             BuilderPanelAction.CLEAR -> handleBuilder(player, arrayOf("clear"))
             BuilderPanelAction.UNDO -> handleBuilder(player, arrayOf("undo"))
             BuilderPanelAction.CONFIRM -> handleBuilder(player, arrayOf("confirm"))
@@ -3118,7 +3126,10 @@ internal class BuilderToolsRuntime(
         }
         if (!isSelector(item)) return
         if (event.hand != EquipmentSlot.HAND) return
-        if (event.action == org.bukkit.event.block.Action.RIGHT_CLICK_AIR || event.action == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
+        if (event.action in listOf(
+                org.bukkit.event.block.Action.LEFT_CLICK_AIR, org.bukkit.event.block.Action.LEFT_CLICK_BLOCK,
+                org.bukkit.event.block.Action.RIGHT_CLICK_AIR, org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK,
+            )) {
             if (selectionActionPanel?.intercept(player) == true) {
                 event.isCancelled = true
                 return

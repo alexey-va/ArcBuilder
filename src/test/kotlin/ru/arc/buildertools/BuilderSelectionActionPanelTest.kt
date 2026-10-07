@@ -2,27 +2,53 @@ package ru.arc.buildertools
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.mockk.every
+import io.mockk.mockk
+import io.papermc.paper.event.player.PrePlayerAttackEntityEvent
 import net.kyori.adventure.text.Component
+import org.bukkit.FluidCollisionMode
+import org.bukkit.Location
+import org.bukkit.World
+import org.bukkit.entity.Interaction
+import org.bukkit.entity.Player
+import org.bukkit.util.Vector
+import ru.arc.paper.display.PacketTextDisplay
+import ru.arc.paper.display.PaperPacketDisplays
+import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.sqrt
 
 class BuilderSelectionActionPanelTest : StringSpec({
-    "all two-column controls stay inside reach at an oblique selection angle" {
+    "all two-column controls stay inside reach on an oblique eye ray with obstruction pullback" {
         val settings = BuilderPanelSettings()
         val eye = BuilderPanelPoint3(0.5, 65.62, 0.5)
-        val anchor = BuilderPanelGeometry.anchor(
-            eye = eye,
-            target = BuilderPanelPoint3(13.5, 48.0, 7.5),
-            settings = settings,
-            actionCount = BuilderPanelAction.entries.size,
-        )
+        val direction = BuilderPanelPoint3(0.25, -0.15, 0.95)
+        val directionLength = sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+        val yaw = Math.toDegrees(atan2(direction.x, -direction.z)).toFloat()
         val layout = BuilderPanelGeometry.layout(BuilderPanelAction.entries.size, settings)
+        val anchor = BuilderPanelGeometry.anchorOnRay(
+            eye, direction, yaw, settings, layout, visibleBlockDistance = 1.4,
+        )
 
         BuilderPanelGeometry.MAX_COLUMNS shouldBe 2
         layout.rows shouldBe 8
         (anchor.yaw % 90f == 0f) shouldBe false
         BuilderPanelGeometry.controlsReachable(eye, anchor, layout, settings) shouldBe true
-        (anchor.point.y + layout.buttons.minOf(BuilderPanelButtonOffset::y) - settings.buttonHeight / 2.0 > 64.0) shouldBe true
+        val center = BuilderPanelPoint3(
+            anchor.point.x,
+            anchor.point.y + BuilderPanelGeometry.centerY(layout, settings),
+            anchor.point.z,
+        )
+        val requestedCenter = BuilderPanelPoint3(
+            eye.x + direction.x / directionLength * settings.distance,
+            eye.y + direction.y / directionLength * settings.distance,
+            eye.z + direction.z / directionLength * settings.distance,
+        )
+        (center.distance(eye) < settings.distance) shouldBe true
+        (center.distance(requestedCenter) > 0.1) shouldBe true
     }
 
     "the two-line plan summary has clearance above the top button row" {
@@ -48,27 +74,51 @@ class BuilderSelectionActionPanelTest : StringSpec({
             shortPage.buttons.takeLast(2).map(BuilderPanelButtonOffset::y)
         (fullPage.buttons.take(6).maxOf(BuilderPanelButtonOffset::y) >
             fullPage.buttons.takeLast(2).maxOf(BuilderPanelButtonOffset::y)) shouldBe true
+
+        BuilderPanelGeometry.controlWidth(BuilderPanelAction.CONFIRM, settings) shouldBe settings.buttonWidth
+        BuilderPanelGeometry.controlWidth(BuilderPanelAction.PREVIOUS_PAGE, settings) shouldBe
+            BuilderPanelGeometry.NAVIGATION_HITBOX_WIDTH
+        BuilderPanelGeometry.controlWidth(fullPage, fullPage.buttons.last().index, settings) shouldBe
+            BuilderPanelGeometry.NAVIGATION_HITBOX_WIDTH
+        val navCenterDistance = fullPage.buttons.last().x - fullPage.buttons[fullPage.buttons.size - 2].x
+        val textHalfWidth = 0.5
+        val navHalfWidth = BuilderPanelGeometry.NAVIGATION_HITBOX_WIDTH / 2.0
+        (navCenterDistance / 2.0 - navHalfWidth - textHalfWidth >= 0.04) shouldBe true
     }
 
-    "walking changes the anchor continuously and near-center bearing cannot flip it" {
+    "whole panel center stays on the latched eye ray across pages and body movement" {
         val settings = BuilderPanelSettings()
-        val target = BuilderPanelPoint3(12.5, 65.62, 9.5)
-        val stationary = BuilderPanelPoint3(0.5, 65.62, 0.5)
-        val first = BuilderPanelGeometry.anchor(stationary, target, settings, actionCount = 8, navigationCount = 2)
-        val nextStep = BuilderPanelGeometry.anchor(
-            BuilderPanelPoint3(0.6, 65.62, 0.5), target, settings, 8, 2, previousYaw = first.yaw,
-        )
-        (first.point.distance(nextStep.point) < 0.2) shouldBe true
-        (first.point.distance(nextStep.point) > 0.0) shouldBe true
+        val eye = BuilderPanelPoint3(2.0, 70.0, -3.0)
+        val look = BuilderPanelPoint3(0.25, -0.15, 0.95)
+        val fullPage = BuilderPanelGeometry.layout(8, settings, navigationCount = 2)
+        val shortPage = BuilderPanelGeometry.layout(3, settings, navigationCount = 2)
 
-        val nearPositive = BuilderPanelGeometry.anchor(
-            stationary, BuilderPanelPoint3(0.6, 65.62, 0.5), settings, 8, 2, previousYaw = 180f,
+        fun panelCenter(origin: BuilderPanelPoint3, layout: BuilderPanelLayout): BuilderPanelPoint3 {
+            val anchor = BuilderPanelGeometry.anchorOnRay(origin, look, 165.26f, settings, layout)
+            return BuilderPanelPoint3(anchor.point.x, anchor.point.y + BuilderPanelGeometry.centerY(layout, settings), anchor.point.z)
+        }
+
+        val normalizedLength = kotlin.math.sqrt(look.x * look.x + look.y * look.y + look.z * look.z)
+        val normalized = BuilderPanelPoint3(look.x / normalizedLength, look.y / normalizedLength, look.z / normalizedLength)
+        val center = panelCenter(eye, fullPage)
+        val expected = BuilderPanelPoint3(
+            eye.x + normalized.x * settings.distance,
+            eye.y + normalized.y * settings.distance,
+            eye.z + normalized.z * settings.distance,
         )
-        val nearNegative = BuilderPanelGeometry.anchor(
-            stationary, BuilderPanelPoint3(0.4, 65.62, 0.5), settings, 8, 2, previousYaw = 180f,
+        (center.distance(expected) < 1e-9) shouldBe true
+        panelCenter(eye, shortPage) shouldBe center
+
+        val movement = BuilderPanelPoint3(0.2, 0.1, -0.3)
+        val movedCenter = panelCenter(
+            BuilderPanelPoint3(eye.x + movement.x, eye.y + movement.y, eye.z + movement.z),
+            shortPage,
         )
-        nearPositive.yaw shouldBe nearNegative.yaw
-        nearPositive.point shouldBe nearNegative.point
+        (movedCenter.distance(BuilderPanelPoint3(
+            center.x + movement.x,
+            center.y + movement.y,
+            center.z + movement.z,
+        )) < 1e-9) shouldBe true
     }
 
     "conservative world bounds contain the complete angled label and control footprint" {
@@ -139,6 +189,34 @@ class BuilderSelectionActionPanelTest : StringSpec({
         )) shouldBe true
     }
 
+    "same-yaw swept bounds follow the thin panel depth during vertical motion" {
+        val settings = BuilderPanelSettings()
+        val layout = BuilderPanelGeometry.layout(8, settings, navigationCount = 2)
+        val from = BuilderPanelAnchor(BuilderPanelPoint3(0.0, 70.0, 0.0), 0f)
+        val to = BuilderPanelAnchor(BuilderPanelPoint3(0.0, 70.2, 0.1), 0f)
+        val swept = BuilderPanelGeometry.sweptBounds(from, to, layout, settings)
+
+        swept.overlaps(BuilderPanelBounds(-0.2, 68.0, 0.45, 0.2, 72.0, 0.6)) shouldBe false
+        swept.overlaps(BuilderPanelBounds(-0.2, 68.0, 0.08, 0.2, 72.0, 0.12)) shouldBe true
+    }
+
+    "stable placement distance suppresses near-wall jitter and follows clearances gradually" {
+        val chosen = checkNotNull(BuilderPanelGeometry.stableDistance(2.4, null) { it <= 1.60 })
+        (chosen in 1.45..1.60) shouldBe true
+
+        val jittered = listOf(1.59, 1.61, 1.60, 1.61).map { limit ->
+            checkNotNull(BuilderPanelGeometry.stableDistance(2.4, chosen) { it <= limit })
+        }
+        jittered.all { abs(it - chosen) < 1e-9 } shouldBe true
+
+        val inward = checkNotNull(BuilderPanelGeometry.stableDistance(2.4, chosen) { it <= 1.25 })
+        (inward <= 1.25) shouldBe true
+        (1.25 - inward <= 0.11) shouldBe true
+
+        val opening = checkNotNull(BuilderPanelGeometry.stableDistance(2.4, chosen) { it <= 2.4 })
+        (opening - chosen in 0.0..0.061) shouldBe true
+    }
+
     "plane hover uses the visible button rectangle and honors block occlusion" {
         val control = BuilderPanelControlPlane(
             action = BuilderPanelAction.CONFIRM,
@@ -160,6 +238,7 @@ class BuilderSelectionActionPanelTest : StringSpec({
     "a stale plan context and duplicate click cannot dispatch confirmation" {
         val selection = selection()
         val current = BuilderPanelView("plan-2", selection, Component.text("new plan"), listOf(BuilderPanelAction.CONFIRM))
+        BuilderPanelView("plain", selection, Component.empty(), listOf(BuilderPanelAction.CONFIRM)).pagination shouldBe Component.empty()
         BuilderPanelInputPolicy.accepts(
             renderedContext = "plan-1",
             renderedSelection = selection,
@@ -185,7 +264,130 @@ class BuilderSelectionActionPanelTest : StringSpec({
         now = 250_000_000L
         gate.accept() shouldBe true
     }
+
+    "native left attack cancels owned hitboxes, accepts engine no-attack events, and honors external cancellation" {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("BuilderSelectionAttackTest")
+            val world = mockk<World>(relaxed = true)
+            val playerId = UUID.randomUUID()
+            val player = mockk<Player>(relaxed = true)
+            val feet = Location(world, 0.5, 64.0, 0.5, 0f, 0f)
+            val eye = Location(world, 0.5, 65.62, 0.5, 0f, 0f)
+            every { player.uniqueId } returns playerId
+            every { player.world } returns world
+            every { player.location } returns feet
+            every { player.eyeLocation } returns eye
+            every { player.isOnline } returns true
+            every {
+                world.rayTraceBlocks(
+                    any<Location>(), any<Vector>(), any<Double>(), any<FluidCollisionMode>(), any<Boolean>(),
+                )
+            } returns null
+            val unowned = mockk<Interaction>(relaxed = true) {
+                every { uniqueId } returns UUID.randomUUID()
+            }
+            val current = BuilderPanelView("attack-test", selection(), Component.empty(), listOf(BuilderPanelAction.CONFIRM))
+            val hitbox = mockk<Interaction>(relaxed = true)
+            every { hitbox.uniqueId } returns UUID.randomUUID()
+            every { hitbox.isValid } returns true
+            every { hitbox.world } returns world
+            every { hitbox.location } returns Location(world, eye.x, eye.y - BuilderPanelSettings().buttonHeight / 2.0, eye.z + 2.0)
+            val label = mockk<PacketTextDisplay>(relaxed = true) { every { isValid } returns true }
+            var actions = 0
+            val panel = BuilderSelectionActionPanel(
+                plugin,
+                BuilderPanelSettings(),
+                mockk<LocalizedMiniMessage>(relaxed = true),
+                view = { current },
+                onAction = { _, action -> if (action == BuilderPanelAction.CONFIRM) actions++ },
+                displays = mockk<PaperPacketDisplays>(relaxed = true),
+            )
+            try {
+                installButtonState(panel, player, hitbox, label, current)
+
+                val unrelatedAttack = PrePlayerAttackEntityEvent(player, unowned, true)
+                panel.onPrePlayerAttack(unrelatedAttack)
+                unrelatedAttack.isCancelled shouldBe false
+                actions shouldBe 0
+
+                val nonOwner = mockk<Player>(relaxed = true) {
+                    every { uniqueId } returns UUID.randomUUID()
+                }
+                val nonOwnerAttack = PrePlayerAttackEntityEvent(nonOwner, hitbox, false)
+                nonOwnerAttack.isCancelled shouldBe true
+                panel.onPrePlayerAttack(nonOwnerAttack)
+                actions shouldBe 0
+
+                val noAttack = PrePlayerAttackEntityEvent(player, hitbox, false)
+                noAttack.isCancelled shouldBe true
+                panel.onPrePlayerAttack(noAttack)
+                noAttack.isCancelled shouldBe true
+                actions shouldBe 1
+
+                val externallyCancelled = PrePlayerAttackEntityEvent(player, hitbox, true).also { it.isCancelled = true }
+                panel.onPrePlayerAttack(externallyCancelled)
+                externallyCancelled.isCancelled shouldBe true
+                actions shouldBe 1
+            } finally {
+                panel.close()
+            }
+        }
+    }
 })
+
+private fun installButtonState(
+    panel: BuilderSelectionActionPanel,
+    player: org.bukkit.entity.Player,
+    hitbox: Interaction,
+    label: PacketTextDisplay,
+    view: BuilderPanelView,
+) {
+    val panelClass = BuilderSelectionActionPanel::class.java.declaredClasses.single { it.simpleName == "Panel" }
+    val buttonClass = BuilderSelectionActionPanel::class.java.declaredClasses.single { it.simpleName == "Button" }
+    val eye = player.eyeLocation
+    val anchor = Location(player.world, eye.x, eye.y, eye.z + 2.0, 180f, 0f)
+    val feet = player.location
+    val panelConstructor = panelClass.declaredConstructors.single { it.parameterCount == 18 }.apply { isAccessible = true }
+    val state = panelConstructor.newInstance(
+        player.uniqueId,
+        player.world,
+        view.context,
+        view.selection,
+        0L,
+        anchor,
+        180f,
+        feet,
+        BuilderPanelViewFrame(
+            BuilderPanelPoint3(eye.x - feet.x, eye.y - feet.y, eye.z - feet.z),
+            BuilderPanelPoint3(0.0, 0.0, 1.0),
+            180f,
+        ),
+        2.4,
+        BuilderPanelClickGate(),
+        linkedMapOf<BuilderPanelAction, Any>(),
+        view.actions,
+        null,
+        null,
+        null,
+        null,
+        2,
+    )
+    val buttonConstructor = buttonClass.declaredConstructors.single { it.parameterCount == 6 }.apply { isAccessible = true }
+    val button = buttonConstructor.newInstance(BuilderPanelAction.CONFIRM, label, hitbox, 0L, null, false)
+    @Suppress("UNCHECKED_CAST")
+    val buttons = panelClass.getDeclaredField("buttons").apply { isAccessible = true }
+        .get(state) as MutableMap<BuilderPanelAction, Any>
+    buttons[BuilderPanelAction.CONFIRM] = button
+
+    @Suppress("UNCHECKED_CAST")
+    val panels = BuilderSelectionActionPanel::class.java.getDeclaredField("panels").apply { isAccessible = true }
+        .get(panel) as MutableMap<UUID, Any>
+    panels[player.uniqueId] = state
+    @Suppress("UNCHECKED_CAST")
+    val owners = BuilderSelectionActionPanel::class.java.getDeclaredField("hitboxOwners").apply { isAccessible = true }
+        .get(panel) as MutableMap<UUID, UUID>
+    owners[hitbox.uniqueId] = player.uniqueId
+}
 
 private fun selection(): BuilderSelection {
     val world = UUID.fromString("11111111-2222-3333-4444-555555555555")

@@ -217,15 +217,24 @@ the normal plugin restart path rather than `/builder reload`.
 `BuilderSelectionActionPanel` owns private selection controls while the selector
 is held. Text uses the shared `PaperPacketDisplays` owner; private Interaction
 targets and the same bounded, occlusion-checked aiming rule drive hover and
-clicks. A compact two-column panel shows six actions per page and arrow navigation.
+both mouse buttons. A compact two-column panel shows six actions per page and
+arrow navigation with a separate page caption. The initial actual eye ray centers
+the full panel envelope; its direction and eye offset remain latched for that panel.
 Body translation drives continuous placement updates with client interpolation;
 head rotation and eye-height changes alone leave its anchor stationary. Candidate
-placement checks the full panel footprint against loaded world geometry. Context identity
+placement checks the full panel footprint against loaded world geometry. Fixed-yaw
+interpolation checks the thin swept footprint; obstacle clearance retains a safe
+distance and restores it gradually with hysteresis. Context identity
 and a duplicate-click gate prevent old inputs from confirming a replacement
 plan. Changing a selection corner discards its pending ordinary plan. Tool,
 world, teleport, selection and runtime lifecycle changes clear the controls.
 Geometry lives under `selection-panel` in `builder-tools.yml` and is validated
-before reload activation.
+before reload activation. Rendering and action callbacks share the configured
+eight-block maximum distance to the nearest selection face; leaving range hides
+controls without clearing the selection or pending plan.
+The book action copies the current selection before draft creation. It snapshots
+the chosen inventory book slot and revalidates that stack before durable delivery;
+the command's existing main-hand source and journal recovery remain available.
 
 `BuilderMaterialPicker` uses `PaperDialogRuntime` and its shared navigation.
 Fill opens safe placement materials; replace collects safe source materials in

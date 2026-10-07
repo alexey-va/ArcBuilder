@@ -163,11 +163,12 @@ internal object BuilderToolsReloadPreflight {
 
     private fun requireYamlMapping(path: Path, label: String): MappingNode {
         require(Files.isRegularFile(path)) { "$label is missing" }
-        return Files.newBufferedReader(path).use { reader ->
-            val document = Compose(LoadSettings.builder().build()).composeReader(reader).orElse(null)
-            require(document is MappingNode) { "$label must contain a YAML mapping" }
-            document
-        }
+        val content = Files.readString(path)
+        // SnakeYAML Engine 3.0.1 can overrun its reader buffer at a split surrogate pair.
+        val settings = LoadSettings.builder().setBufferSize(maxOf(1024, content.length + 1)).build()
+        val document = Compose(settings).composeString(content).orElse(null)
+        require(document is MappingNode) { "$label must contain a YAML mapping" }
+        return document
     }
 
     private fun validateTypes(root: MappingNode, schema: Map<String, YamlValueType>, label: String) {
@@ -294,6 +295,7 @@ internal object BuilderToolsReloadPreflight {
         "runtime.progress-every-batches" to YamlValueType.INT,
         "preview.period-ticks" to YamlValueType.LONG,
         "selection-panel.distance" to YamlValueType.DOUBLE,
+        "selection-panel.max-selection-distance" to YamlValueType.DOUBLE,
         "selection-panel.side-offset" to YamlValueType.DOUBLE,
         "selection-panel.height-offset" to YamlValueType.DOUBLE,
         "selection-panel.row-spacing" to YamlValueType.DOUBLE,

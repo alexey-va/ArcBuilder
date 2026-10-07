@@ -251,6 +251,12 @@ internal class BuilderBookLifecycle(
         }
     }
 
+    /** Creates a selection-panel draft using one plain book from storage inventory in Survival. */
+    fun createSelectionDraft(player: Player) {
+        host.ensureOperationalContext(player)
+        drafts.createDraft(player, emptyList(), fromInventory = true)
+    }
+
     fun verifySchematic(data: BuildBookData) {
         if (!schematicVerifier.matches(data)) fail("book.invalid")
     }

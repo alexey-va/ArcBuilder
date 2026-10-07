@@ -748,6 +748,27 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("selection panel stays near the nearest selection edge and returns without losing selection") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("LocalPanelBuilder", GameMode.CREATIVE)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 12, 64, 0)
+            val selected = checkNotNull(journey.selectionPanel(player)).selection
+
+            player.teleport(Location(journey.world, 21.0, 64.0, 0.5))
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
+            player.teleport(Location(journey.world, 21.1, 64.0, 0.5))
+            journey.selectionPanel(player) shouldBe null
+            journey.selectionPanelAction(player, BuilderPanelAction.CLEAR)
+            player.teleport(Location(journey.world, 0.5, 74.0, 0.5))
+            journey.selectionPanel(player) shouldBe null
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
+        }
+    }
+
     test("selection panel confirmation preserves the durable fill and held-tool boundary") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("PanelBuilder", GameMode.SURVIVAL)
@@ -760,13 +781,19 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.selectionPanelAction(player, BuilderPanelAction.COPY)
             journey.world.getBlockAt(0, 64, 0).type = Material.AIR
             val firstPage = checkNotNull(journey.selectionPanel(player)).actions
+            val panelText = PlainTextComponentSerializer.plainText()
+            panelText.serialize(checkNotNull(journey.selectionPanel(player)).status) shouldNotContain "1/2"
+            panelText.serialize(checkNotNull(journey.selectionPanel(player)).status) shouldContain "ЛКМ / ПКМ"
+            panelText.serialize(checkNotNull(journey.selectionPanel(player)).pagination) shouldBe "Стр. 1 из 2"
             firstPage.contains(BuilderPanelAction.PASTE) shouldBe true
             firstPage.count { it !in setOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE) } shouldBe 6
             firstPage.containsAll(listOf(BuilderPanelAction.FILL, BuilderPanelAction.REPLACE, BuilderPanelAction.COPY,
-                BuilderPanelAction.DECONSTRUCT, BuilderPanelAction.DISCONNECT)) shouldBe true
+                BuilderPanelAction.DECONSTRUCT, BuilderPanelAction.DRAFT)) shouldBe true
+            firstPage.contains(BuilderPanelAction.DISCONNECT) shouldBe false
             journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
             val secondPage = checkNotNull(journey.selectionPanel(player)).actions
             secondPage.contains(BuilderPanelAction.CLEAR) shouldBe true
+            secondPage.contains(BuilderPanelAction.DISCONNECT) shouldBe true
             secondPage.contains(BuilderPanelAction.FILL) shouldBe false
             journey.selectionPanelAction(player, BuilderPanelAction.PREVIOUS_PAGE)
             checkNotNull(journey.selectionPanel(player)).actions shouldBe firstPage
@@ -1155,6 +1182,41 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.renderer.selections.containsKey(owner.uniqueId) shouldBe false
             owner.performCommand("builder paste") shouldBe true
             journey.renderer.plans.containsKey(owner.uniqueId) shouldBe false
+        }
+    }
+
+    test("panel creates books from the current selection and consumes inventory books while retaining the selector") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("PanelDraft", GameMode.SURVIVAL)
+            player.addAttachment(journey.plugin, "arcbuild.book.use", false)
+            player.recalculatePermissions()
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            val wand = player.inventory.itemInMainHand.clone()
+            player.inventory.setItem(10, ItemStack(Material.BOOK, 2))
+            journey.world.getBlockAt(0, 64, 0).type = Material.STONE
+            journey.select(player, journey.world, wand, 0, 64, 0, 0, 64, 0)
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.DRAFT) shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.DRAFT)
+            journey.await("draft from selection without a prior copy") {
+                player.inventory.storageContents.filterNotNull().any { BuildBookCodec.read(it)?.blockCount == 1 } &&
+                    journey.selectionPanel(player) != null
+            }
+            player.inventory.getItem(10)?.amount shouldBe 1
+            player.inventory.itemInMainHand shouldBe wand
+
+            journey.world.getBlockAt(2, 64, 0).type = Material.OAK_PLANKS
+            journey.world.getBlockAt(3, 64, 0).type = Material.DEEPSLATE
+            journey.select(player, journey.world, wand, 2, 64, 0, 3, 64, 0)
+            journey.selectionPanelAction(player, BuilderPanelAction.DRAFT)
+            journey.await("draft replaces the stale clipboard with the new selection") {
+                player.inventory.storageContents.filterNotNull().any { BuildBookCodec.read(it)?.blockCount == 2 } &&
+                    journey.selectionPanel(player) != null
+            }
+            BuildBookCodec.read(checkNotNull(player.inventory.getItem(10)))?.blockCount shouldBe 2
+            player.inventory.storageContents.filterNotNull().count { BuildBookCodec.read(it) != null } shouldBe 2
+            player.inventory.itemInMainHand shouldBe wand
         }
     }
 

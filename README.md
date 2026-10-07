@@ -15,11 +15,16 @@ The plugin uses arc-core 2.7.17 and does not depend on the ARC monolith.
   click selects point 2. Distinct straight BlockDisplay outlines remain visible
   until the selection is cleared or expires.
 - Holding the selector with a completed selection shows a private world panel.
-  Aim and right click: up to six actions per page cover fill, replace, copy, paste,
+  Aim and left or right click: up to six actions per page cover fill, replace, copy, paste,
   deconstruction, fence disconnection, drafts, undo and selection reset. `<` / `>`
-  change pages. The larger, compact controls follow walking with native client
-  interpolation and stay anchored while aiming in place; blocked placements are
-  excluded. A prepared plan shows materials and confirmation controls.
+  change pages, with a page caption between them. The panel initially centers on
+  the look ray, follows walking with native client interpolation and stays
+  anchored while aiming in place; blocked placements are excluded. It hides
+  beyond eight blocks from the nearest selection edge and returns without losing
+  the selection. A prepared plan shows materials and confirmation controls.
+  Create book captures the current selection and, in survival, consumes one plain
+  book from inventory while keeping the selector held. Fence disconnection follows
+  the common actions on later pages.
 - Fill and replace open a native material picker. Search accepts Russian labels
   and English IDs; **Find** updates 24 results per page. The six most recently
   selected materials appear first with a warm highlight, newest first, until logout; inventory

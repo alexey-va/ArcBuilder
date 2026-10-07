@@ -28,6 +28,9 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         candidate.constructionTickPeriod shouldBe 3L
         candidate.previewMovementPeriodTicks shouldBe 2L
         candidate.followClientLocale shouldBe false
+        candidate.selectionPanelMaxSelectionDistance shouldBe 8.0
+        candidate.selectionPanelSettings().sideOffset shouldBe 0.0
+        candidate.selectionPanelSettings().heightOffset shouldBe 0.0
         val plain = PlainTextComponentSerializer.plainText()
         plain.serialize(candidate.messages().render("selection-panel.actions.previous-page", "ru")) shouldBe "<"
         plain.serialize(candidate.messages().render("selection-panel.actions.next-page", "ru")) shouldBe ">"
@@ -52,6 +55,22 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         config.saveStrict()
         shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
             .message.orEmpty() shouldContain "preview.movement-period-ticks"
+    }
+
+    test("panel selection distance is validated and retains a reload override") {
+        val root = configRoot()
+        val config = Config(root, "modules/builder-tools.yml")
+        for (invalid in listOf(0.0, 65.0)) {
+            config.setDouble("selection-panel.max-selection-distance", invalid)
+            config.saveStrict()
+            shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+                .message.orEmpty() shouldContain "selection distance"
+        }
+        config.setDouble("selection-panel.max-selection-distance", 12.0)
+        config.saveStrict()
+        BuilderToolsReloadPreflight.load(root).selectionPanelMaxSelectionDistance shouldBe 12.0
+        BuilderToolsConfig.mergeBundledDefaults(root)
+        Config(root, "modules/builder-tools.yml").double("selection-panel.max-selection-distance") shouldBe 12.0
     }
 
     test("client language can be re-enabled through validated configuration") {
@@ -105,6 +124,13 @@ class BuilderToolsReloadPreflightTest : FunSpec({
 
         failure.message.orEmpty() shouldContain "blocks-per-tick"
         base.integer("limits.blocks-per-tick") shouldBe 0
+    }
+
+    test("valid config accepts an emoji across the YAML reader buffer boundary") {
+        val root = configRoot()
+        val path = root.resolve("modules/builder-tools.yml")
+        Files.writeString(path, "#" + "x".repeat(1023) + "🛠\n" + Files.readString(path))
+        BuilderToolsReloadPreflight.load(root).selectionPanelMaxSelectionDistance shouldBe 8.0
     }
 
     test("malformed auto-build YAML is rejected even while builder tools are disabled") {

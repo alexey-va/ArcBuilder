@@ -292,6 +292,13 @@ data class BuilderSelection(
     val sizeZ: Int get() = maxZ - minZ + 1
     val volume: Long get() = Math.multiplyExact(Math.multiplyExact(sizeX.toLong(), sizeY.toLong()), sizeZ.toLong())
 
+    fun distanceSquaredTo(x: Double, y: Double, z: Double): Double {
+        val dx = x - x.coerceIn(minX.toDouble(), maxX + 1.0)
+        val dy = y - y.coerceIn(minY.toDouble(), maxY + 1.0)
+        val dz = z - z.coerceIn(minZ.toDouble(), maxZ + 1.0)
+        return dx * dx + dy * dy + dz * dz
+    }
+
     fun positionsTopDown(): Sequence<BuilderBlockPos> = sequence {
         for (y in maxY downTo minY) {
             for (x in minX..maxX) {

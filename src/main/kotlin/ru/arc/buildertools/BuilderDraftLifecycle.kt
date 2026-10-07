@@ -144,20 +144,35 @@ internal class BuilderDraftLifecycle(
         send(player, if (player.uniqueId in conflictedPlayers) "book.manual-review" else "book.status.draft-recovery")
     }
 
-    fun createDraft(player: Player, rawTitle: List<String>) {
+    fun createDraft(player: Player, rawTitle: List<String>, fromInventory: Boolean = false) {
         host.ensureCopyPermission(player)
         if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
         if (!ready) fail(if (failed) "book.failed" else "book.draft-recovery-starting")
         if (player.uniqueId in conflictedPlayers) fail("book.manual-review")
-        if (pending[player.uniqueId] != null) {
-            recover(player, allowDelivery = true, announce = true, createdNow = false)
+        pending[player.uniqueId]?.let { record ->
+            val sourceBookSlot = if (fromInventory && record.requiresSourceBook) {
+                plainStorageBookSlot(player) ?: fail("book.inventory-material-required")
+            } else null
+            val expectedBook = sourceBookSlot?.let { player.inventory.getItem(it)?.clone() }
+            recover(
+                player,
+                allowDelivery = true,
+                announce = true,
+                expectedBook = expectedBook,
+                sourceBookSlot = sourceBookSlot,
+                createdNow = false,
+            )
             return
         }
         val clipboard = host.currentClipboard(player.uniqueId) ?: fail("errors.expired")
         val held = player.inventory.itemInMainHand
         val sourceBookRequired = BuilderGameModePolicy.usesInventory(player.gameMode)
-        if (sourceBookRequired && !isPlainBook(held)) fail("book.material-required")
-        if (sourceBookRequired && held.amount > 1 && player.inventory.firstEmpty() == -1) fail("book.inventory-full")
+        val sourceBookSlot = if (fromInventory && sourceBookRequired) {
+            plainStorageBookSlot(player) ?: fail("book.inventory-material-required")
+        } else null
+        val sourceBook = sourceBookSlot?.let { player.inventory.getItem(it) } ?: held
+        if (sourceBookRequired && !isPlainBook(sourceBook)) fail("book.material-required")
+        if (sourceBookRequired && sourceBook.amount > 1 && player.inventory.firstEmpty() == -1) fail("book.inventory-full")
         if (!sourceBookRequired && !held.type.isAir && player.inventory.firstEmpty() == -1) fail("book.inventory-full")
         val title = rawTitle.joinToString(" ").trim().ifEmpty { BuildBookSettings.defaultTitle }
         if (title.length > 48 || title.any(Char::isISOControl)) fail("book.invalid-name")
@@ -167,7 +182,7 @@ internal class BuilderDraftLifecycle(
             error("Could not prepare player build book for ${player.name}: type=${BuilderToolsFailureType.of(failure)}")
             fail("book.failed")
         }
-        val expectedBook = held.clone().takeIf { sourceBookRequired }
+        val expectedBook = sourceBook.clone().takeIf { sourceBookRequired }
         val now = System.currentTimeMillis()
         val record = BuilderDraftRecord(
             operationId = UUID.randomUUID(),
@@ -216,6 +231,7 @@ internal class BuilderDraftLifecycle(
                                     allowDelivery = true,
                                     announce = true,
                                     expectedBook = expectedBook,
+                                    sourceBookSlot = sourceBookSlot,
                                     createdNow = true,
                                 )
                             } else {
@@ -236,6 +252,7 @@ internal class BuilderDraftLifecycle(
                                     allowDelivery = true,
                                     announce = true,
                                     expectedBook = expectedBook,
+                                    sourceBookSlot = sourceBookSlot,
                                     createdNow = true,
                                 )
                             } else {
@@ -324,6 +341,7 @@ internal class BuilderDraftLifecycle(
         allowDelivery: Boolean,
         announce: Boolean,
         expectedBook: ItemStack? = null,
+        sourceBookSlot: Int? = null,
         createdNow: Boolean,
     ) {
         val playerId = player.uniqueId
@@ -401,6 +419,7 @@ internal class BuilderDraftLifecycle(
                         allowDelivery,
                         announce,
                         expectedBook,
+                        sourceBookSlot,
                         createdNow,
                     )
                     BuilderDraftRecoveryAction.AWAIT_SOURCE_BOOK -> awaitOrDeliver(
@@ -409,6 +428,7 @@ internal class BuilderDraftLifecycle(
                         allowDelivery,
                         announce,
                         expectedBook,
+                        sourceBookSlot,
                         createdNow,
                     )
                     BuilderDraftRecoveryAction.ACK_DELIVERED -> acknowledgeDelivered(
@@ -430,6 +450,7 @@ internal class BuilderDraftLifecycle(
         allowDelivery: Boolean,
         announce: Boolean,
         expectedBook: ItemStack?,
+        sourceBookSlot: Int?,
         createdNow: Boolean,
     ) {
         val target = record.ready(schematicSha256, transitionTime(record))
@@ -453,7 +474,7 @@ internal class BuilderDraftLifecycle(
                     finishRecovery(player.uniqueId)
                     return@writeAsync
                 }
-                awaitOrDeliver(player, durable, allowDelivery, announce, expectedBook, createdNow)
+                awaitOrDeliver(player, durable, allowDelivery, announce, expectedBook, sourceBookSlot, createdNow)
             },
         )
     }
@@ -464,6 +485,7 @@ internal class BuilderDraftLifecycle(
         allowDelivery: Boolean,
         announce: Boolean,
         expectedBook: ItemStack?,
+        sourceBookSlot: Int?,
         createdNow: Boolean,
     ) {
         if (!player.isOnline) {
@@ -475,13 +497,15 @@ internal class BuilderDraftLifecycle(
             if (announce) send(player, "book.draft-pending")
             return
         }
-        val held = player.inventory.itemInMainHand
+        val sourceSlot = sourceBookSlot ?: player.inventory.heldItemSlot
+        val sourceBook = player.inventory.getItem(sourceSlot)
+        val source = sourceBook ?: ItemStack(Material.AIR)
         val sourceMatches = if (!record.requiresSourceBook) {
             true
         } else if (expectedBook == null) {
-            isPlainBook(held)
+            isPlainBook(source)
         } else {
-            isPlainBook(held) && held.amount == expectedBook.amount && held.isSimilar(expectedBook)
+            isPlainBook(source) && source.amount == expectedBook.amount && source.isSimilar(expectedBook)
         }
         if (!sourceMatches) {
             finishRecovery(player.uniqueId)
@@ -489,7 +513,7 @@ internal class BuilderDraftLifecycle(
             send(player, "book.draft-pending")
             return
         }
-        if (record.requiresSourceBook && held.amount > 1 && player.inventory.firstEmpty() == -1) {
+        if (record.requiresSourceBook && source.amount > 1 && player.inventory.firstEmpty() == -1) {
             finishRecovery(player.uniqueId)
             send(player, "book.inventory-full")
             return
@@ -503,7 +527,11 @@ internal class BuilderDraftLifecycle(
             return
         }
         try {
-            if (record.requiresSourceBook) replaceOneHeldBook(player, held, output) else deliverCreatedBook(player, output)
+            if (record.requiresSourceBook) {
+                replaceOneSourceBook(player, sourceSlot, source, output)
+            } else {
+                deliverCreatedBook(player, output)
+            }
             runCatching { storage.register(template(record)) }
                 .onFailure { failure ->
                     warn(
@@ -623,13 +651,21 @@ internal class BuilderDraftLifecycle(
         return item.clone().also { it.amount = 1 }.isSimilar(ItemStack(Material.BOOK))
     }
 
-    private fun replaceOneHeldBook(player: Player, held: ItemStack, replacement: ItemStack) {
-        if (held.amount == 1) {
-            player.inventory.setItemInMainHand(replacement)
+    private fun plainStorageBookSlot(player: Player): Int? {
+        val inventory = player.inventory
+        val heldSlot = inventory.heldItemSlot
+        return inventory.storageContents.indices.firstOrNull { slot ->
+            slot != heldSlot && inventory.getItem(slot)?.let(::isPlainBook) == true
+        }
+    }
+
+    private fun replaceOneSourceBook(player: Player, slot: Int, source: ItemStack, replacement: ItemStack) {
+        if (source.amount == 1) {
+            player.inventory.setItem(slot, replacement)
             return
         }
         if (player.inventory.firstEmpty() == -1) fail("book.inventory-full")
-        player.inventory.setItemInMainHand(held.clone().also { it.amount = held.amount - 1 })
+        player.inventory.setItem(slot, source.clone().also { it.amount = source.amount - 1 })
         check(player.inventory.addItem(replacement).isEmpty()) { "Durable builder draft did not fit after preflight" }
     }
 

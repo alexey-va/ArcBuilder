@@ -210,8 +210,10 @@ runtime:
 # Private world controls while the selector is held. Reload rebuilds their geometry.
 selection-panel:
   distance: 2.4
-  side-offset: 0.65
-  height-offset: -0.25
+  side-offset: 0.0
+  height-offset: 0.0
+  # Distance from the nearest point of the selected cuboid; reload applies it.
+  max-selection-distance: 8.0
   row-spacing: 0.26
   column-spacing: 1.55
   button-width: 1.50
@@ -317,7 +319,8 @@ locales:
       next: '<white>>'
       back: '<white>Назад'
     selection-panel:
-      selection: '<#e8dfd2><x> × <y> × <z> · <current>/<total><newline><white>ПКМ — выбрать действие'
+      selection: '<#e8dfd2><x> × <y> × <z><newline><white>ЛКМ / ПКМ — выбрать действие'
+      pagination: '<#e8dfd2>Стр. <current> из <total>'
       plan: '<#e8dfd2><kind> · <count> блоков<newline><white>Нужно: <cost>'
       progress: '<#e8dfd2>Выполняется: <done> / <count>'
       scanning: '<#e8dfd2>Определяем блоки в выделении…'
@@ -330,7 +333,7 @@ locales:
         next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Разобрать'
         disconnect: '<#92bed8>Разъединить'
-        draft: '<#92bed8>Черновик'
+        draft: '<#92bed8>Создать книгу'
         clear: '<#ff9f0f>Сбросить'
         undo: '<#d48763>Откатить'
         confirm: '<#2bba43>Применить'
@@ -689,6 +692,7 @@ locales:
         <#8c8c8c>   <#e6fff3>Блоков: <#d48763><count> <#8c8c8c>— <#969696>оплаты не было
         <#8c8c8c>   <#e6fff3>ПКМ по земле — проверить превью.
       material-required: "<prefix><#ff9f0f>В выживании держите обычную книгу в основной руке."
+      inventory-material-required: "<prefix><#ff9f0f>Для чертежа нужна одна обычная книга в инвентаре."
       inventory-full: "<prefix><#ff9f0f>Освободите один слот для книги строительства."
       invalid-name: "<prefix><#c42323>Название: от 1 до 48 обычных символов."
       limit: "<prefix><#ff9f0f>Достигнут лимит постоянных чертежей."
@@ -1252,7 +1256,8 @@ locales:
       next: '<white>>'
       back: '<white>Back'
     selection-panel:
-      selection: '<#e8dfd2><x> × <y> × <z> · <current>/<total><newline><white>Right click to choose an action'
+      selection: '<#e8dfd2><x> × <y> × <z><newline><white>Left / right click to choose'
+      pagination: '<#e8dfd2>Page <current> of <total>'
       plan: '<#e8dfd2><kind> · <count> blocks<newline><white>Required: <cost>'
       progress: '<#e8dfd2>Working: <done> / <count>'
       scanning: '<#e8dfd2>Reading blocks in the selection…'
@@ -1265,7 +1270,7 @@ locales:
         next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Deconstruct'
         disconnect: '<#92bed8>Disconnect'
-        draft: '<#92bed8>Draft book'
+        draft: '<#92bed8>Create book'
         clear: '<#ff9f0f>Clear'
         undo: '<#d48763>Undo'
         confirm: '<#2bba43>Apply'
@@ -1604,6 +1609,7 @@ locales:
         <dark_gray>   <gray><count> blocks — no charge
         <dark_gray>   <gray>Right-click ground to inspect its preview.
       material-required: "<prefix><yellow>In survival, hold a plain book in your main hand."
+      inventory-material-required: "<prefix><yellow>Keep one plain book in your inventory to create a blueprint."
       inventory-full: "<prefix><yellow>Free one slot or hold a single plain book."
       invalid-name: "<prefix><red>Use 1–48 ordinary characters for the name."
       limit: |-

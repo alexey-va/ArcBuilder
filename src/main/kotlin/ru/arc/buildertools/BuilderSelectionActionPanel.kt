@@ -1,6 +1,7 @@
 package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
+import io.papermc.paper.event.player.PrePlayerAttackEntityEvent
 import org.bukkit.Color
 import org.bukkit.FluidCollisionMode
 import org.bukkit.Location
@@ -30,7 +31,6 @@ import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
 import java.util.logging.Level
 import kotlin.math.abs
-import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
@@ -52,12 +52,13 @@ internal data class BuilderPanelView(
     val selection: BuilderSelection,
     val status: Component,
     val actions: List<BuilderPanelAction>,
+    val pagination: Component = Component.empty(),
 )
 
 internal data class BuilderPanelSettings(
     val distance: Double = 2.4,
-    val sideOffset: Double = 0.65,
-    val heightOffset: Double = -0.25,
+    val sideOffset: Double = 0.0,
+    val heightOffset: Double = 0.0,
     val rowSpacing: Double = 0.26,
     val columnSpacing: Double = 1.55,
     val buttonWidth: Float = 1.5f,
@@ -100,6 +101,11 @@ internal data class BuilderPanelBounds(
 }
 
 internal data class BuilderPanelAnchor(val point: BuilderPanelPoint3, val yaw: Float)
+internal data class BuilderPanelViewFrame(
+    val eyeOffset: BuilderPanelPoint3,
+    val direction: BuilderPanelPoint3,
+    val yaw: Float,
+)
 internal data class BuilderPanelButtonOffset(val index: Int, val x: Double, val y: Double)
 internal data class BuilderPanelControlPlane(
     val action: BuilderPanelAction,
@@ -120,13 +126,10 @@ internal object BuilderPanelGeometry {
     const val MAX_COLUMNS = 2
     const val STATUS_HEIGHT = 0.24
     const val STATUS_GAP = 0.04
-    const val STANDING_EYE_HEIGHT = 1.62
     const val STATUS_DISPLAY_WIDTH = 3.0
     const val SURFACE_CLEARANCE = 0.035
-    const val BEARING_DEAD_ZONE = 0.75
+    const val NAVIGATION_HITBOX_WIDTH = 0.45f
     private const val EPSILON = 1e-8
-    private const val DEGREES_PER_RADIAN = 180.0 / Math.PI
-    private const val MAX_BEARING_TURN_PER_TICK = 30f
 
     fun layout(actionCount: Int, settings: BuilderPanelSettings, navigationCount: Int = 0): BuilderPanelLayout {
         require(actionCount in 0..BuilderPanelAction.entries.size)
@@ -171,51 +174,64 @@ internal object BuilderPanelGeometry {
         return BuilderPanelLayout(buttons, rows, highestButtonTop + STATUS_GAP + STATUS_HEIGHT / 2.0, navigationCount)
     }
 
-    fun anchor(
+    fun controlWidth(action: BuilderPanelAction, settings: BuilderPanelSettings): Float =
+        if (action == BuilderPanelAction.PREVIOUS_PAGE || action == BuilderPanelAction.NEXT_PAGE) {
+            NAVIGATION_HITBOX_WIDTH
+        } else settings.buttonWidth
+
+    fun controlWidth(layout: BuilderPanelLayout, index: Int, settings: BuilderPanelSettings): Float =
+        if (layout.navigationCount == 2 && index >= layout.buttons.size - 2) NAVIGATION_HITBOX_WIDTH
+        else settings.buttonWidth
+
+    fun centerY(layout: BuilderPanelLayout, settings: BuilderPanelSettings): Double {
+        val minimum = min(
+            layout.statusY - STATUS_HEIGHT / 2.0,
+            layout.buttons.minOfOrNull { it.y - settings.buttonHeight / 2.0 } ?: 0.0,
+        )
+        val maximum = max(
+            layout.statusY + STATUS_HEIGHT / 2.0,
+            layout.buttons.maxOfOrNull { it.y + settings.buttonHeight / 2.0 } ?: 0.0,
+        )
+        return (minimum + maximum) / 2.0
+    }
+
+    fun anchorOnRay(
         eye: BuilderPanelPoint3,
-        target: BuilderPanelPoint3,
+        direction: BuilderPanelPoint3,
+        yaw: Float,
         settings: BuilderPanelSettings,
-        actionCount: Int,
-        navigationCount: Int = 0,
+        layout: BuilderPanelLayout,
         visibleBlockDistance: Double? = null,
-        previousYaw: Float? = null,
     ): BuilderPanelAnchor {
-        require(listOf(eye.x, eye.y, eye.z, target.x, target.y, target.z).all(Double::isFinite))
-        val dx = target.x - eye.x
-        val dz = target.z - eye.z
-        val length = hypot(dx, dz)
-        val targetDirection = if (length > EPSILON) {
-            BuilderPanelPoint3(dx / length, 0.0, dz / length)
-        } else {
-            BuilderPanelPoint3(0.0, 0.0, 1.0)
-        }
-        val targetYaw = normalizeYaw((atan2(targetDirection.x, -targetDirection.z) * DEGREES_PER_RADIAN).toFloat())
-        val yaw = previousYaw?.takeIf(Float::isFinite)?.let { prior ->
-            if (length <= BEARING_DEAD_ZONE) normalizeYaw(prior)
-            else turnToward(prior, targetYaw, MAX_BEARING_TURN_PER_TICK)
-        } ?: targetYaw
-        val yawRadians = Math.toRadians(yaw.toDouble())
-        val direction = BuilderPanelPoint3(sin(yawRadians), 0.0, -cos(yawRadians))
+        require(listOf(eye.x, eye.y, eye.z, direction.x, direction.y, direction.z, yaw.toDouble()).all(Double::isFinite))
+        val length = sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+        require(length > EPSILON)
+        val unit = BuilderPanelPoint3(direction.x / length, direction.y / length, direction.z / length)
+        val normalizedYaw = normalizeYaw(yaw)
+        val yawRadians = Math.toRadians(normalizedYaw.toDouble())
         val rightX = cos(yawRadians)
         val rightZ = sin(yawRadians)
-        val layout = layout(actionCount, settings, navigationCount)
         val obstructionLimit = visibleBlockDistance
             ?.takeIf { it.isFinite() && it > 0.0 }
             ?.let { (it - 0.35).coerceAtLeast(0.25) }
             ?: Double.POSITIVE_INFINITY
         val requestedDistance = min(settings.distance, obstructionLimit)
 
-        fun at(forward: Double) = BuilderPanelAnchor(
-            BuilderPanelPoint3(
-                eye.x + direction.x * forward + rightX * settings.sideOffset,
-                eye.y + settings.heightOffset,
-                eye.z + direction.z * forward + rightZ * settings.sideOffset,
-            ),
-            yaw,
-        )
+        fun at(forward: Double): BuilderPanelAnchor {
+            val centerX = eye.x + unit.x * forward
+            val rayCenterY = eye.y + unit.y * forward
+            val centerZ = eye.z + unit.z * forward
+            return BuilderPanelAnchor(
+                BuilderPanelPoint3(
+                    centerX + rightX * settings.sideOffset,
+                    rayCenterY - centerY(layout, settings) + settings.heightOffset,
+                    centerZ + rightZ * settings.sideOffset,
+                ),
+                normalizedYaw,
+            )
+        }
 
-        fun reachable(candidate: BuilderPanelAnchor): Boolean = controlsReachable(eye, candidate, layout, settings)
-
+        fun reachable(candidate: BuilderPanelAnchor) = controlsReachable(eye, candidate, layout, settings)
         val requested = at(requestedDistance)
         if (reachable(requested)) return requested
         var low = 0.0
@@ -266,6 +282,14 @@ internal object BuilderPanelGeometry {
         padding: Double = SURFACE_CLEARANCE,
     ): BuilderPanelBounds {
         require(padding.isFinite() && padding >= 0.0)
+        if (abs(((to.yaw - from.yaw + 540f) % 360f) - 180f) < 1e-5) {
+            val first = panelBounds(from, layout, settings, padding)
+            val last = panelBounds(to, layout, settings, padding)
+            return BuilderPanelBounds(
+                min(first.minX, last.minX), min(first.minY, last.minY), min(first.minZ, last.minZ),
+                max(first.maxX, last.maxX), max(first.maxY, last.maxY), max(first.maxZ, last.maxZ),
+            )
+        }
         val radius = panelHalfWidth(layout, settings) + padding
         val minY = min(
             layout.statusY - STATUS_HEIGHT / 2.0,
@@ -287,8 +311,34 @@ internal object BuilderPanelGeometry {
 
     private fun panelHalfWidth(layout: BuilderPanelLayout, settings: BuilderPanelSettings) = max(
         STATUS_DISPLAY_WIDTH / 2.0,
-        layout.buttons.maxOfOrNull { abs(it.x) + settings.buttonWidth / 2.0 } ?: 0.0,
+        layout.buttons.maxOfOrNull { abs(it.x) + controlWidth(layout, it.index, settings) / 2.0 } ?: 0.0,
     )
+
+    /** Retain a safe offset near obstacles; restore distance only with extra clearance. */
+    fun stableDistance(maximum: Double, previous: Double?, clear: (Double) -> Boolean): Double? {
+        val retained = previous?.coerceAtMost(maximum)
+        if (retained != null && clear(retained)) {
+            val outward = min(maximum, retained + 0.06)
+            val probe = min(maximum, outward + 0.12)
+            return if (outward > retained && clear(probe) && clear(outward)) outward else retained
+        }
+        var blocked = maximum
+        for (factor in listOf(1.0, 0.82, 0.64, 0.46, 0.3)) {
+            val candidate = maximum * factor
+            if (clear(candidate)) {
+                if (factor == 1.0) return candidate
+                var safe = candidate
+                repeat(6) {
+                    val middle = (safe + blocked) / 2.0
+                    if (clear(middle)) safe = middle else blocked = middle
+                }
+                val inset = max(candidate, safe - 0.10)
+                return if (clear(inset)) inset else candidate
+            }
+            blocked = candidate
+        }
+        return null
+    }
 
     fun controlsReachable(
         eye: BuilderPanelPoint3,
@@ -302,9 +352,9 @@ internal object BuilderPanelGeometry {
         return layout.buttons.all { button ->
             listOf(-1.0, 1.0).all { xSide -> listOf(-1.0, 1.0).all { ySide ->
                 val corner = BuilderPanelPoint3(
-                    anchor.point.x + rightX * (button.x + xSide * settings.buttonWidth / 2.0),
+                    anchor.point.x + rightX * (button.x + xSide * controlWidth(layout, button.index, settings) / 2.0),
                     anchor.point.y + button.y + ySide * settings.buttonHeight / 2.0,
-                    anchor.point.z + rightZ * (button.x + xSide * settings.buttonWidth / 2.0),
+                    anchor.point.z + rightZ * (button.x + xSide * controlWidth(layout, button.index, settings) / 2.0),
                 )
                 eye.distance(corner) <= settings.reach + 1e-6
             } }
@@ -356,11 +406,6 @@ internal object BuilderPanelGeometry {
     private const val OCCLUSION_EPSILON = 1e-4
 
     private fun normalizeYaw(yaw: Float): Float = ((yaw % 360f) + 360f) % 360f
-
-    private fun turnToward(current: Float, target: Float, maximumStep: Float): Float {
-        val delta = ((target - current + 540f) % 360f) - 180f
-        return normalizeYaw(current + delta.coerceIn(-maximumStep, maximumStep))
-    }
 }
 
 internal object BuilderPanelInputPolicy {
@@ -399,6 +444,7 @@ internal class BuilderSelectionActionPanel(
     private val onAction: (Player, BuilderPanelAction) -> Unit,
     private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin),
 ) : Listener, AutoCloseable {
+    private data class Placement(val anchor: Location, val distance: Double)
     private data class Button(
         val action: BuilderPanelAction,
         val label: PacketTextDisplay,
@@ -417,11 +463,15 @@ internal class BuilderSelectionActionPanel(
         var anchor: Location,
         var yaw: Float,
         var positionedFrom: Location,
+        val viewFrame: BuilderPanelViewFrame,
+        var placementDistance: Double = 2.4,
         val clickGate: BuilderPanelClickGate = BuilderPanelClickGate(),
         val buttons: MutableMap<BuilderPanelAction, Button> = linkedMapOf(),
         var actions: List<BuilderPanelAction> = emptyList(),
         var statusDisplay: PacketTextDisplay? = null,
         var lastStatus: Component? = null,
+        var paginationDisplay: PacketTextDisplay? = null,
+        var lastPagination: Component? = null,
         var interpolationDurationForNextUpdate: Int = INTERPOLATION_TICKS,
     )
 
@@ -450,7 +500,7 @@ internal class BuilderSelectionActionPanel(
         rendererFailuresLogged.remove(player)
     }
 
-    /** Called by the selector's right-click path so a panel button cannot set a new selection corner. */
+    /** Called by the selector's hand-input path so a panel button cannot set a new selection corner. */
     fun intercept(player: Player): Boolean {
         if (closed) return false
         val panel = panels[player.uniqueId] ?: return false
@@ -502,16 +552,19 @@ internal class BuilderSelectionActionPanel(
     private fun createPanel(player: Player, current: BuilderPanelView): Panel {
         val actions = current.actions.distinct()
         val layout = layout(actions)
-        val placement = placement(player, current.selection, layout)
+        val viewFrame = captureViewFrame(player)
+        val placement = placement(player, layout, viewFrame)
         val panel = Panel(
             owner = player.uniqueId,
             world = player.world,
             context = current.context,
             selection = current.selection,
             generation = 0,
-            anchor = placement.first,
-            yaw = placement.second,
+            anchor = placement.anchor,
+            yaw = placement.anchor.yaw,
             positionedFrom = bodyPosition(player),
+            viewFrame = viewFrame,
+            placementDistance = placement.distance,
             actions = actions,
         )
         try {
@@ -534,7 +587,6 @@ internal class BuilderSelectionActionPanel(
             setPlacement(
                 player,
                 panel,
-                current.selection,
                 layout,
                 forceSnap = panel.selection != current.selection || panel.actions != actions,
             )
@@ -544,10 +596,11 @@ internal class BuilderSelectionActionPanel(
             panel.selection = current.selection
             panel.generation++
         }
-        if (!areaAvailable(player, panel.world, panel.anchor, panel.yaw, layout, checkLineOfSight = false)) {
-            setPlacement(player, panel, current.selection, layout, forceSnap = true)
+        if (!areaAvailable(player, panel.world, panel.anchor, panel.yaw, layout, panel.viewFrame, checkLineOfSight = false)) {
+            setPlacement(player, panel, layout, forceSnap = true)
         }
         updateStatus(player, panel, current.status, layout)
+        updatePagination(player, panel, current.pagination, layout)
         reconcileButtons(player, panel, actions, layout)
         panel.interpolationDurationForNextUpdate = INTERPOLATION_TICKS
     }
@@ -555,14 +608,15 @@ internal class BuilderSelectionActionPanel(
     private fun setPlacement(
         player: Player,
         panel: Panel,
-        selection: BuilderSelection,
         layout: BuilderPanelLayout,
         forceSnap: Boolean,
     ) {
         val oldAnchor = BuilderPanelAnchor(
             BuilderPanelPoint3(panel.anchor.x, panel.anchor.y, panel.anchor.z), panel.yaw,
         )
-        val (anchor, yaw) = placement(player, selection, layout, panel.yaw)
+        val placed = placement(player, layout, panel.viewFrame, panel.placementDistance)
+        val anchor = placed.anchor
+        val yaw = anchor.yaw
         val newAnchor = BuilderPanelAnchor(BuilderPanelPoint3(anchor.x, anchor.y, anchor.z), yaw)
         val angleDelta = abs(((yaw - panel.yaw + 540f) % 360f) - 180f)
         val canInterpolate = !forceSnap && oldAnchor.point.distance(newAnchor.point) <= MAX_SMOOTH_STEP &&
@@ -576,6 +630,35 @@ internal class BuilderSelectionActionPanel(
         panel.anchor = anchor
         panel.yaw = yaw
         panel.positionedFrom = bodyPosition(player)
+        panel.placementDistance = placed.distance
+    }
+
+    private fun updatePagination(
+        player: Player,
+        panel: Panel,
+        pagination: Component,
+        layout: BuilderPanelLayout,
+    ) {
+        if (layout.navigationCount != 2 || pagination == Component.empty()) {
+            panel.paginationDisplay?.remove()
+            panel.paginationDisplay = null
+            panel.lastPagination = null
+            return
+        }
+        val navigationY = layout.buttons.last().y - settings.buttonHeight / 2.0 + LABEL_Y_OFFSET
+        val location = panel.anchor.clone().add(0.0, navigationY, 0.0).apply {
+            yaw = panel.yaw
+            pitch = 0f
+        }
+        val display = panel.paginationDisplay ?: newPaginationLabel(player, location, pagination).also {
+            panel.paginationDisplay = it
+        }
+        if (display.location != location) {
+            teleportSmooth(display, location, panel.interpolationDurationForNextUpdate)
+        }
+        if (panel.lastPagination != pagination) display.text(pagination)
+        display.showTo(player)
+        panel.lastPagination = pagination
     }
 
     private fun layout(actions: List<BuilderPanelAction>): BuilderPanelLayout =
@@ -598,44 +681,62 @@ internal class BuilderSelectionActionPanel(
     private fun sameBodyPosition(first: Location, second: Location): Boolean =
         first.world?.uid == second.world?.uid && first.x == second.x && first.y == second.y && first.z == second.z
 
-    private fun placement(
-        player: Player,
-        selection: BuilderSelection,
-        layout: BuilderPanelLayout,
-        previousYaw: Float? = null,
-    ): Pair<Location, Float> {
+    private fun normalizeYaw(yaw: Float): Float = ((yaw % 360f) + 360f) % 360f
+
+    private fun captureViewFrame(player: Player): BuilderPanelViewFrame {
         val feet = bodyPosition(player)
-        val eye = Location(player.world, feet.x, feet.y + BuilderPanelGeometry.STANDING_EYE_HEIGHT, feet.z)
-        val target = BuilderPanelPoint3(
-            (selection.minX + selection.maxX + 1) / 2.0,
-            eye.y,
-            (selection.minZ + selection.maxZ + 1) / 2.0,
-        )
-        val ray = player.world.rayTraceBlocks(eye, direction(eye, target), settings.reach,
-            FluidCollisionMode.NEVER, true)
-        val blockDistance = ray?.hitPosition?.distance(eye.toVector())
-        val candidateSettings = listOf(1.0, 0.82, 0.64, 0.46, 0.3).map { settings.copy(distance = settings.distance * it) }
-        for (candidateSettingsForDistance in candidateSettings) {
-            val placed = BuilderPanelGeometry.anchor(
-                BuilderPanelPoint3(eye.x, eye.y, eye.z),
-                target,
-                candidateSettingsForDistance,
-                layout.buttons.size,
-                layout.navigationCount,
-                blockDistance,
-                previousYaw,
-            )
-            val anchor = Location(player.world, placed.point.x, placed.point.y, placed.point.z, placed.yaw, 0f)
-            if (areaAvailable(player, player.world, anchor, placed.yaw, layout, checkLineOfSight = true)) {
-                return anchor to placed.yaw
-            }
+        val eye = player.eyeLocation
+        val look = eye.direction.clone().normalize()
+        val horizontalLength = hypot(look.x, look.z)
+        val yaw = if (horizontalLength > 1e-8) {
+            normalizeYaw(Math.toDegrees(kotlin.math.atan2(look.x, -look.z)).toFloat())
+        } else {
+            normalizeYaw(eye.yaw)
         }
-        throw PanelAreaUnavailable()
+        return BuilderPanelViewFrame(
+            eyeOffset = BuilderPanelPoint3(eye.x - feet.x, eye.y - feet.y, eye.z - feet.z),
+            direction = BuilderPanelPoint3(look.x, look.y, look.z),
+            yaw = yaw,
+        )
     }
 
-    private fun direction(eye: Location, target: BuilderPanelPoint3): org.bukkit.util.Vector {
-        val vector = org.bukkit.util.Vector(target.x - eye.x, target.y - eye.y, target.z - eye.z)
-        return if (vector.lengthSquared() <= 1e-12) eye.direction else vector.normalize()
+    private fun eyeLocation(player: Player, frame: BuilderPanelViewFrame): Location {
+        val feet = bodyPosition(player)
+        return Location(
+            player.world,
+            feet.x + frame.eyeOffset.x,
+            feet.y + frame.eyeOffset.y,
+            feet.z + frame.eyeOffset.z,
+        )
+    }
+
+    private fun placement(
+        player: Player,
+        layout: BuilderPanelLayout,
+        frame: BuilderPanelViewFrame,
+        previousDistance: Double? = null,
+    ): Placement {
+        val eye = eyeLocation(player, frame)
+        val direction = org.bukkit.util.Vector(frame.direction.x, frame.direction.y, frame.direction.z)
+        val ray = player.world.rayTraceBlocks(eye, direction, settings.reach,
+            FluidCollisionMode.NEVER, true)
+        val blockDistance = ray?.hitPosition?.distance(eye.toVector())
+        val maximum = min(settings.distance, blockDistance?.let { max(0.25, it - 0.35) } ?: settings.distance)
+        fun anchorAt(distance: Double): Location {
+            val placed = BuilderPanelGeometry.anchorOnRay(
+                BuilderPanelPoint3(eye.x, eye.y, eye.z),
+                frame.direction,
+                frame.yaw,
+                settings.copy(distance = distance),
+                layout,
+            )
+            return Location(player.world, placed.point.x, placed.point.y, placed.point.z, placed.yaw, 0f)
+        }
+        val distance = BuilderPanelGeometry.stableDistance(maximum, previousDistance) { candidate ->
+            val anchor = anchorAt(candidate)
+            areaAvailable(player, player.world, anchor, anchor.yaw, layout, frame, checkLineOfSight = true)
+        } ?: throw PanelAreaUnavailable()
+        return Placement(anchorAt(distance), distance)
     }
 
     private fun areaAvailable(
@@ -644,6 +745,7 @@ internal class BuilderSelectionActionPanel(
         anchor: Location,
         yaw: Float,
         layout: BuilderPanelLayout,
+        frame: BuilderPanelViewFrame,
         checkLineOfSight: Boolean,
     ): Boolean {
         val geometryAnchor = BuilderPanelAnchor(
@@ -652,7 +754,7 @@ internal class BuilderSelectionActionPanel(
         )
         val panelBounds = BuilderPanelGeometry.panelBounds(geometryAnchor, layout, settings)
         if (!hasClearBlockBounds(player, world, panelBounds)) return false
-        return !checkLineOfSight || hasLineOfSight(player, world, geometryAnchor, layout)
+        return !checkLineOfSight || hasLineOfSight(player, world, geometryAnchor, layout, frame)
     }
 
     private fun hasClearBlockBounds(player: Player, world: World, bounds: BuilderPanelBounds): Boolean {
@@ -687,15 +789,17 @@ internal class BuilderSelectionActionPanel(
         world: World,
         anchor: BuilderPanelAnchor,
         layout: BuilderPanelLayout,
+        frame: BuilderPanelViewFrame,
     ): Boolean {
-        val feet = bodyPosition(player)
-        val origin = Location(world, feet.x, feet.y + BuilderPanelGeometry.STANDING_EYE_HEIGHT, feet.z)
+        val origin = eyeLocation(player, frame)
         val localTargets = buildList {
             add(BuilderPanelPoint3(0.0, layout.statusY, 0.0))
             layout.buttons.forEach { add(BuilderPanelPoint3(it.x, it.y, 0.0)) }
             val halfWidth = max(
                 BuilderPanelGeometry.STATUS_DISPLAY_WIDTH / 2.0,
-                layout.buttons.maxOfOrNull { abs(it.x) + settings.buttonWidth / 2.0 } ?: 0.0,
+                layout.buttons.maxOfOrNull {
+                    abs(it.x) + BuilderPanelGeometry.controlWidth(layout, it.index, settings) / 2.0
+                } ?: 0.0,
             )
             val minY = min(
                 layout.statusY - BuilderPanelGeometry.STATUS_HEIGHT / 2.0,
@@ -807,14 +911,15 @@ internal class BuilderSelectionActionPanel(
         labelLocation: Location,
         hitboxLocation: Location,
     ): Button {
-        val label = newLabel(player, labelLocation, settings.labelScale)
+        val width = BuilderPanelGeometry.controlWidth(action, settings)
+        val label = newLabel(player, labelLocation, settings.labelScale, width)
         return try {
             val hitbox = panel.world.spawn(hitboxLocation, Interaction::class.java) { entity ->
                 entity.isVisibleByDefault = false
                 entity.isPersistent = false
                 entity.isInvulnerable = true
                 entity.setGravity(false)
-                entity.interactionWidth = settings.buttonWidth
+                entity.interactionWidth = width
                 entity.interactionHeight = settings.buttonHeight
                 entity.isResponsive = true
                 player.showEntity(plugin, entity)
@@ -826,7 +931,12 @@ internal class BuilderSelectionActionPanel(
         }
     }
 
-    private fun newLabel(player: Player, location: Location, scale: Float): PacketTextDisplay =
+    private fun newLabel(
+        player: Player,
+        location: Location,
+        scale: Float,
+        width: Float = settings.buttonWidth,
+    ): PacketTextDisplay =
         displays.spawnText(location, Component.empty()).apply {
             isVisibleByDefault = false
             billboard = Display.Billboard.FIXED
@@ -836,12 +946,23 @@ internal class BuilderSelectionActionPanel(
             isSeeThrough = false
             alignment = org.bukkit.entity.TextDisplay.TextAlignment.CENTER
             lineWidth = if (scale == STATUS_SCALE) STATUS_LINE_WIDTH else BUTTON_LINE_WIDTH
-            displayWidth = if (scale == STATUS_SCALE) STATUS_DISPLAY_WIDTH else settings.buttonWidth
+            displayWidth = if (scale == STATUS_SCALE) STATUS_DISPLAY_WIDTH else width
             displayHeight = if (scale == STATUS_SCALE) STATUS_DISPLAY_HEIGHT else settings.buttonHeight
             viewRange = DISPLAY_VIEW_RANGE
             transformation = Transformation(Vector3f(), Quaternionf(), Vector3f(scale), Quaternionf())
             showTo(player)
         }
+
+    private fun newPaginationLabel(
+        player: Player,
+        location: Location,
+        pagination: Component,
+    ): PacketTextDisplay = newLabel(player, location, STATUS_SCALE).apply {
+        lineWidth = PAGINATION_LINE_WIDTH
+        displayWidth = PAGINATION_DISPLAY_WIDTH
+        displayHeight = PAGINATION_DISPLAY_HEIGHT
+        text(pagination)
+    }
 
     private fun refreshHover(player: Player, panel: Panel) {
         val selected = aimedButton(player, panel)
@@ -878,7 +999,7 @@ internal class BuilderSelectionActionPanel(
                 action = action,
                 center = BuilderPanelPoint3(center.x, center.y, center.z),
                 yaw = panel.yaw.toDouble(),
-                width = settings.buttonWidth.toDouble(),
+                width = BuilderPanelGeometry.controlWidth(action, settings).toDouble(),
                 height = settings.buttonHeight.toDouble(),
                 enabled = eye.distanceSquared(button.hitbox.location) <= settings.reach * settings.reach,
             )
@@ -909,32 +1030,29 @@ internal class BuilderSelectionActionPanel(
     fun onClickAt(event: PlayerInteractAtEntityEvent) = click(event)
 
     private fun click(event: PlayerInteractEntityEvent) {
-        val owner = hitboxOwners[event.rightClicked.uniqueId] ?: return
+        val hitboxId = event.rightClicked.uniqueId
+        val owner = hitboxOwners[hitboxId] ?: return
         event.isCancelled = true
         val player = event.player
         if (player.uniqueId != owner || event.hand != EquipmentSlot.HAND) return
-        val panel = panels[owner] ?: return
-        if (panel.buttons.values.none { it.hitbox.uniqueId == event.rightClicked.uniqueId }) return
-        val current = try {
-            view(player)
-        } catch (failure: Throwable) {
-            rendererFailed(owner, failure)
-            return
-        } ?: run { clear(owner); return }
-        val target = aimedButton(player, panel)
-        if (!matches(panel, current)) {
-            try {
-                applyView(player, panel, current)
-            } catch (_: PanelAreaUnavailable) {
-                removeCurrentPanel(owner)
-            } catch (failure: Throwable) {
-                rendererFailed(owner, failure)
-            }
-            return
-        }
-        if (target == null || !inputCurrent(panel, target, current)) return
-        if (panel.clickGate.accept()) onAction(player, target.action)
+        if (!ownsHitbox(owner, hitboxId)) return
+        intercept(player)
     }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onPrePlayerAttack(event: PrePlayerAttackEntityEvent) {
+        val hitboxId = event.attacked.uniqueId
+        val owner = hitboxOwners[hitboxId] ?: return
+        val preserveExternalCancellation = event.willAttack() && event.isCancelled
+        event.isCancelled = true
+        val player = event.player
+        if (preserveExternalCancellation || player.uniqueId != owner || !ownsHitbox(owner, hitboxId)) return
+        intercept(player)
+    }
+
+    private fun ownsHitbox(owner: UUID, hitboxId: UUID): Boolean =
+        hitboxOwners[hitboxId] == owner &&
+            panels[owner]?.buttons?.values?.any { it.hitbox.uniqueId == hitboxId } == true
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onControlDamage(event: EntityDamageByEntityEvent) {
@@ -966,6 +1084,8 @@ internal class BuilderSelectionActionPanel(
         panel.buttons.clear()
         panel.statusDisplay?.remove()
         panel.statusDisplay = null
+        panel.paginationDisplay?.remove()
+        panel.paginationDisplay = null
     }
 
     private fun rendererFailed(id: UUID, failure: Throwable) {
@@ -1000,6 +1120,9 @@ internal class BuilderSelectionActionPanel(
         const val STATUS_SCALE = 0.48f
         const val STATUS_LINE_WIDTH = 240
         const val BUTTON_LINE_WIDTH = 190
+        const val PAGINATION_LINE_WIDTH = 80
+        const val PAGINATION_DISPLAY_WIDTH = 1.0f
+        const val PAGINATION_DISPLAY_HEIGHT = 0.18f
         const val STATUS_DISPLAY_WIDTH = 3.0f
         const val STATUS_DISPLAY_HEIGHT = 0.55f
         const val DISPLAY_VIEW_RANGE = 0.15f

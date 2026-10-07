@@ -113,10 +113,11 @@ class BuilderToolsConfig(
     val playerRecoveryRetryPeriodTicks: Long get() = config.long("runtime.player-recovery-retry-period-ticks", 100L)
     val progressEveryBatches: Int get() = config.integer("runtime.progress-every-batches", 10)
     val previewPeriodTicks: Long get() = config.long("preview.period-ticks", 10L)
+    val selectionPanelMaxSelectionDistance: Double get() = config.double("selection-panel.max-selection-distance", 8.0)
     internal fun selectionPanelSettings() = BuilderPanelSettings(
         distance = config.double("selection-panel.distance", 2.4),
-        sideOffset = config.double("selection-panel.side-offset", 0.65),
-        heightOffset = config.double("selection-panel.height-offset", -0.25),
+        sideOffset = config.double("selection-panel.side-offset", 0.0),
+        heightOffset = config.double("selection-panel.height-offset", 0.0),
         rowSpacing = config.double("selection-panel.row-spacing", 0.26),
         columnSpacing = config.double("selection-panel.column-spacing", 1.55),
         buttonWidth = config.double("selection-panel.button-width", 1.50).toFloat(),
@@ -307,6 +308,9 @@ class BuilderToolsConfig(
             "Builder construction site view range is invalid"
         }
         require(healthRefreshPeriodTicks in 10L..1_200L) { "Builder-tools health refresh period is invalid" }
+        require(selectionPanelMaxSelectionDistance.isFinite() && selectionPanelMaxSelectionDistance in 1.0..64.0) {
+            "Builder selection panel maximum selection distance is invalid"
+        }
         require(playerRecoveryRetryPeriodTicks in 20L..1_200L) { "Builder-tools recovery retry period is invalid" }
         require(progressEveryBatches in 1..100) { "Builder-tools progress cadence is invalid" }
         require(previewPeriodTicks in 5L..40L) { "Builder-tools preview period is invalid" }
@@ -387,6 +391,7 @@ class BuilderToolsConfig(
             scalarPaths = setOf(
                 "prefix",
                 "selection-panel.selection",
+                "selection-panel.pagination",
                 "selection-panel.plan",
                 "selection-panel.progress",
                 "selection-panel.scanning",
@@ -488,6 +493,7 @@ class BuilderToolsConfig(
                 "book.status.changed",
                 "book.status.active",
                 "book.material-required",
+                "book.inventory-material-required",
                 "book.inventory-full",
                 "book.invalid-name",
                 "book.limit",
