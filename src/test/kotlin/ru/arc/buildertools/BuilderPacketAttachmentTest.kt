@@ -1,12 +1,25 @@
 package ru.arc.buildertools
 
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.PacketEventsAPI
+import com.github.retrooper.packetevents.injector.ChannelInjector
+import com.github.retrooper.packetevents.manager.player.PlayerManager
+import com.github.retrooper.packetevents.manager.protocol.ProtocolManager
+import com.github.retrooper.packetevents.manager.server.ServerManager
+import com.github.retrooper.packetevents.manager.server.ServerVersion
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.github.retrooper.packetevents.impl.netty.NettyManagerImpl
 import ru.arc.paper.api.VisualPacketAdmission
 import java.util.UUID
 import java.util.logging.Logger
 
 class BuilderPacketAttachmentTest : FunSpec({
+    val previousPacketEventsApi = PacketEvents.getAPI()
+    beforeSpec { PacketEvents.setAPI(TestPacketEventsApi()) }
+    afterSpec { PacketEvents.setAPI(previousPacketEventsApi) }
+
     test("a retry uses only the latest desired scene") {
         val channel = FakePreviewChannel()
         val gateway = RecordingPreviewGateway()
@@ -89,6 +102,68 @@ class BuilderPacketAttachmentTest : FunSpec({
         gateway.visibleIds shouldBe setOf(25)
     }
 
+    test("glow-only changes update the existing entity without respawn") {
+        val channel = FakePreviewChannel()
+        val gateway = RecordingPreviewGateway()
+        val attachment = BuilderPacketAttachment(channel, gateway, Logger.getAnonymousLogger())
+        val visible = display(26)
+        val suppressed = visible.copy(glowing = false)
+
+        attachment.submit(listOf(visible))
+        gateway.runImmediate()
+        attachment.submit(listOf(suppressed))
+        gateway.runImmediate()
+        attachment.submit(listOf(visible))
+        gateway.runImmediate()
+        attachment.submit(listOf(visible))
+        gateway.runImmediate()
+
+        gateway.displayAttempts shouldBe listOf(26)
+        gateway.glowAttempts shouldBe listOf(suppressed, visible)
+        gateway.destroyAttempts shouldBe emptyList()
+        gateway.glowStates[26] shouldBe true
+    }
+
+    test("a denied glow metadata update retries without replacing the entity") {
+        val channel = FakePreviewChannel()
+        val gateway = RecordingPreviewGateway()
+        val attachment = BuilderPacketAttachment(channel, gateway, Logger.getAnonymousLogger())
+        val visible = display(27)
+        val suppressed = visible.copy(glowing = false)
+        gateway.glowAdmissions += listOf(VisualPacketAdmission.SERVER_RATE, VisualPacketAdmission.ALLOWED)
+
+        attachment.submit(listOf(visible))
+        gateway.runImmediate()
+        attachment.submit(listOf(suppressed))
+        gateway.runImmediate()
+        gateway.runRetry()
+
+        gateway.displayAttempts shouldBe listOf(27)
+        gateway.glowAttempts shouldBe listOf(suppressed, suppressed)
+        gateway.destroyAttempts shouldBe emptyList()
+        gateway.glowStates[27] shouldBe false
+    }
+
+    test("initial suppression and metadata toggles touch only the entity glow flag") {
+        val suppressed = display(28).copy(glowing = false)
+        val initial = builderDisplayPacketTransaction(suppressed)
+        val initialMetadata = initial.last() as WrapperPlayServerEntityMetadata
+        val off = builderDisplayGlowTransaction(suppressed)
+        val on = builderDisplayGlowTransaction(suppressed.copy(glowing = true))
+
+        initial.size shouldBe 2
+        initialMetadata.metadataValue(0) shouldBe 0.toByte()
+        initialMetadata.metadataValue(22) shouldBe suppressed.glowRgb
+        off.size shouldBe 1
+        val offMetadata = off.single() as WrapperPlayServerEntityMetadata
+        offMetadata.entityId shouldBe suppressed.entityId
+        offMetadata.entityMetadata.map { it.index } shouldBe listOf(0)
+        offMetadata.metadataValue(0) shouldBe 0.toByte()
+        val onMetadata = on.single() as WrapperPlayServerEntityMetadata
+        onMetadata.entityId shouldBe suppressed.entityId
+        onMetadata.metadataValue(0) shouldBe 0x40.toByte()
+    }
+
     test("a disconnected channel drops its captured per-viewer state") {
         val channel = FakePreviewChannel()
         val gateway = RecordingPreviewGateway()
@@ -123,9 +198,12 @@ private class RecordingPreviewGateway : BuilderPreviewPacketGateway {
     val retryTasks = mutableListOf<() -> Unit>()
     val displayAttempts = mutableListOf<Int>()
     val destroyAttempts = mutableListOf<List<Int>>()
+    val glowAttempts = mutableListOf<BuilderPacketDisplay>()
     val visibleIds = linkedSetOf<Int>()
     val displayAdmissions = mutableListOf<VisualPacketAdmission>()
     val destroyAdmissions = mutableListOf<VisualPacketAdmission>()
+    val glowAdmissions = mutableListOf<VisualPacketAdmission>()
+    val glowStates = mutableMapOf<Int, Boolean>()
 
     override fun isOpen(channel: Any) = (channel as FakePreviewChannel).open
     override fun execute(channel: Any, task: () -> Unit) { immediateTasks += task }
@@ -135,6 +213,13 @@ private class RecordingPreviewGateway : BuilderPreviewPacketGateway {
         displayAttempts += display.entityId
         val admission = displayAdmissions.removeFirstOrAllowed()
         if (admission == VisualPacketAdmission.ALLOWED) visibleIds += display.entityId
+        return admission
+    }
+
+    override fun glow(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission {
+        glowAttempts += display
+        val admission = glowAdmissions.removeFirstOrAllowed()
+        if (admission == VisualPacketAdmission.ALLOWED) glowStates[display.entityId] = display.glowing
         return admission
     }
 
@@ -152,4 +237,26 @@ private class RecordingPreviewGateway : BuilderPreviewPacketGateway {
 
     private fun MutableList<VisualPacketAdmission>.removeFirstOrAllowed() =
         if (isEmpty()) VisualPacketAdmission.ALLOWED else removeAt(0)
+}
+
+private fun WrapperPlayServerEntityMetadata.metadataValue(index: Int): Any? =
+    entityMetadata.single { it.index == index }.value
+
+/** PacketEvents entity metadata wrappers need a protocol version, but these tests use no live connection. */
+private class TestPacketEventsApi : PacketEventsAPI<Any>() {
+    private val server = ServerManager { ServerVersion.V_1_21_11 }
+    private val netty = NettyManagerImpl()
+
+    override fun getServerManager() = server
+    override fun getNettyManager() = netty
+    override fun getPlugin(): Any = this
+    override fun getProtocolManager(): ProtocolManager = error("No live protocol manager in packet unit tests")
+    override fun getPlayerManager(): PlayerManager = error("No Bukkit players in packet unit tests")
+    override fun getInjector(): ChannelInjector = error("No channel injection in packet unit tests")
+    override fun load() = Unit
+    override fun init() = Unit
+    override fun terminate() = Unit
+    override fun isLoaded() = true
+    override fun isInitialized() = true
+    override fun isTerminated() = false
 }

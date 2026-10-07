@@ -235,6 +235,11 @@ Geometry lives under `selection-panel` in `builder-tools.yml` and is validated
 before reload activation. Rendering and action callbacks share the configured
 eight-block maximum distance to the nearest selection face; leaving range hides
 controls without clearing the selection or pending plan.
+With `selection-panel.suppress-selection-glow` enabled (the default), looking
+toward the panel temporarily disables selection glow while retaining its frame.
+The gaze area covers the full panel with hysteresis; looking away or closing the
+panel restores glow. Changes use budgeted metadata updates on existing display
+IDs. Reload replaces the panel settings, including this switch.
 The book action copies the current selection before draft creation. It snapshots
 the chosen inventory book slot and revalidates that stack before durable delivery;
 the command's existing main-hand source and journal recovery remain available.

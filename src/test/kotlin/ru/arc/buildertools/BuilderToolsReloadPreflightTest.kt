@@ -31,6 +31,7 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         candidate.selectionPanelMaxSelectionDistance shouldBe 8.0
         candidate.selectionPanelSettings().sideOffset shouldBe 0.0
         candidate.selectionPanelSettings().heightOffset shouldBe 0.0
+        candidate.selectionPanelSettings().suppressSelectionGlow shouldBe true
         val plain = PlainTextComponentSerializer.plainText()
         plain.serialize(candidate.messages().render("selection-panel.actions.previous-page", "ru")) shouldBe "<"
         plain.serialize(candidate.messages().render("selection-panel.actions.next-page", "ru")) shouldBe ">"
@@ -71,6 +72,21 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         BuilderToolsReloadPreflight.load(root).selectionPanelMaxSelectionDistance shouldBe 12.0
         BuilderToolsConfig.mergeBundledDefaults(root)
         Config(root, "modules/builder-tools.yml").double("selection-panel.max-selection-distance") shouldBe 12.0
+    }
+
+    test("selection glow suppression can be disabled and retains its reload override") {
+        val root = configRoot()
+        val config = Config(root, "modules/builder-tools.yml")
+        config.setBoolean("selection-panel.suppress-selection-glow", false)
+        config.saveStrict()
+        BuilderToolsReloadPreflight.load(root).selectionPanelSettings().suppressSelectionGlow shouldBe false
+        BuilderToolsConfig.mergeBundledDefaults(root)
+        Config(root, "modules/builder-tools.yml").boolean("selection-panel.suppress-selection-glow") shouldBe false
+
+        config.setString("selection-panel.suppress-selection-glow", "sometimes")
+        config.saveStrict()
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+            .message.orEmpty() shouldContain "selection-panel.suppress-selection-glow"
     }
 
     test("client language can be re-enabled through validated configuration") {

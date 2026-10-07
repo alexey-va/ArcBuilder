@@ -114,6 +114,57 @@ class BuilderSelectionActionPanelTest : StringSpec({
         ) shouldBe fallback
     }
 
+    "gaze covers status and edge controls with hysteresis scaled to panel distance" {
+        val settings = BuilderPanelSettings()
+        val statusLayout = BuilderPanelGeometry.layout(1, settings)
+        val fullLayout = BuilderPanelGeometry.layout(8, settings, navigationCount = 2)
+        val eye = BuilderPanelPoint3(0.0, 0.0, 0.0)
+
+        fun gazeAt(
+            layout: BuilderPanelLayout,
+            distance: Double,
+            x: Double,
+            y: Double,
+            marginDegrees: Double,
+        ): Boolean {
+            val centerY = BuilderPanelGeometry.centerY(layout, settings)
+            val anchor = BuilderPanelAnchor(BuilderPanelPoint3(0.0, -centerY, distance), 180f)
+            val direction = BuilderPanelPoint3(-x, y - centerY, distance)
+            val length = sqrt(direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+            return BuilderPanelGeometry.gazeIntersectsPanel(
+                eye,
+                BuilderPanelPoint3(direction.x / length, direction.y / length, direction.z / length),
+                anchor,
+                layout,
+                settings,
+                marginDegrees,
+            )
+        }
+
+        gazeAt(statusLayout, 1.0, 1.49, statusLayout.statusY, 0.0) shouldBe true
+        val statusHalfWidth = BuilderPanelGeometry.STATUS_DISPLAY_WIDTH / 2.0
+        val nearWallOutsideEight = statusHalfWidth + 1.0 * kotlin.math.tan(Math.toRadians(8.0)) + 0.01
+        gazeAt(statusLayout, 1.0, nearWallOutsideEight, BuilderPanelGeometry.centerY(statusLayout, settings), 8.0) shouldBe false
+        gazeAt(statusLayout, 1.0, nearWallOutsideEight, BuilderPanelGeometry.centerY(statusLayout, settings), 13.0) shouldBe true
+
+        val outerButton = fullLayout.buttons.minBy { it.x }
+        gazeAt(
+            fullLayout,
+            2.4,
+            outerButton.x - settings.buttonWidth / 2.0 + 0.01,
+            outerButton.y,
+            0.0,
+        ) shouldBe true
+        val fullPanelHalfWidth = maxOf(
+            BuilderPanelGeometry.STATUS_DISPLAY_WIDTH / 2.0,
+            fullLayout.buttons.maxOf { kotlin.math.abs(it.x) + BuilderPanelGeometry.controlWidth(fullLayout, it.index, settings) / 2.0 },
+        )
+        val fullPanelOutsideEight = fullPanelHalfWidth + 2.4 * kotlin.math.tan(Math.toRadians(8.0)) + 0.01
+        gazeAt(fullLayout, 2.4, fullPanelOutsideEight, BuilderPanelGeometry.centerY(fullLayout, settings), 8.0) shouldBe false
+        gazeAt(fullLayout, 2.4, fullPanelOutsideEight, BuilderPanelGeometry.centerY(fullLayout, settings), 13.0) shouldBe true
+        gazeAt(fullLayout, 2.4, 0.0, fullLayout.buttons.last().y, 0.0) shouldBe true
+    }
+
     "panel tick tracks selection and body translation, not head pose or crouch" {
         val worldId = UUID.randomUUID()
         val world = mockk<World>(relaxed = true)
@@ -155,25 +206,37 @@ class BuilderSelectionActionPanelTest : StringSpec({
         val plugin = mockk<Plugin>(relaxed = true)
         every { plugin.server } returns server
         val displays = mockk<PaperPacketDisplays>(relaxed = true)
+        val spawnedLabels = mutableListOf<PacketTextDisplay>()
+        val removedLabels = mutableSetOf<PacketTextDisplay>()
         every { displays.spawnText(any<Location>(), any<Component>()) } answers {
             val location = firstArg<Location>().clone()
             val display = mockk<PacketTextDisplay>(relaxed = true)
             every { display.location } returns location
+            every { display.remove() } answers { removedLabels += display; Unit }
+            spawnedLabels += display
             display
         }
 
         val initialSelection = singleBlockSelection(worldId, x = 0, z = 5)
         var currentView = BuilderPanelView("first-selection", initialSelection, Component.text("selection"), emptyList())
+        val glowTransitions = mutableListOf<Pair<UUID, Boolean>>()
+        var throwOnGlowRestore = false
+        val panelSettings = BuilderPanelSettings()
         val panel = BuilderSelectionActionPanel(
             plugin,
-            BuilderPanelSettings(),
+            panelSettings,
             mockk<LocalizedMiniMessage>(relaxed = true),
             view = { currentView },
             onAction = { _, _ -> },
             displays = displays,
+            onSelectionGlowSuppression = { id, suppressed ->
+                glowTransitions += id to suppressed
+                if (!suppressed && throwOnGlowRestore) error("restore callback failure")
+            },
         )
         try {
             panel.tick()
+            glowTransitions shouldBe emptyList()
             val state = panelState(panel, playerId)
             val initialFrame = panelField(state, "viewFrame") as BuilderPanelViewFrame
             val initialAnchor = (panelField(state, "anchor") as Location).clone()
@@ -182,10 +245,18 @@ class BuilderSelectionActionPanelTest : StringSpec({
             (abs(initialFrame.direction.z - 1.0) < 1e-9) shouldBe true
             initialFrame.yaw shouldBe 180f
 
-            headYaw = 270f
+            headYaw = 0f
+            headPitch = 0f
+            panel.tick()
+            glowTransitions shouldBe listOf(playerId to true)
+            panel.tick()
+            glowTransitions shouldBe listOf(playerId to true)
+
+            headYaw = 90f
             headPitch = 35f
             eyeHeight = 1.27
             panel.tick()
+            glowTransitions shouldBe listOf(playerId to true, playerId to false)
             (panelField(state, "viewFrame") as BuilderPanelViewFrame) shouldBe initialFrame
             panelField(state, "anchor") shouldBe initialAnchor
 
@@ -208,8 +279,34 @@ class BuilderSelectionActionPanelTest : StringSpec({
             val selectedLength = sqrt(32.0)
             (abs(selectedFrame.direction.x - (4.0 / selectedLength)) < 1e-9) shouldBe true
             (abs(selectedFrame.direction.z - (4.0 / selectedLength)) < 1e-9) shouldBe true
+
+            headYaw = 315f
+            headPitch = 0f
+            panel.tick()
+            glowTransitions shouldBe listOf(playerId to true, playerId to false, playerId to true)
+            throwOnGlowRestore = true
+            panel.clear(playerId)
+            glowTransitions shouldBe listOf(playerId to true, playerId to false, playerId to true, playerId to false)
+            removedLabels.size shouldBe spawnedLabels.size
         } finally {
             panel.close()
+        }
+
+        val disabledTransitions = mutableListOf<Pair<UUID, Boolean>>()
+        val disabledPanel = BuilderSelectionActionPanel(
+            plugin,
+            panelSettings.copy(suppressSelectionGlow = false),
+            mockk<LocalizedMiniMessage>(relaxed = true),
+            view = { currentView },
+            onAction = { _, _ -> },
+            displays = displays,
+            onSelectionGlowSuppression = { id, suppressed -> disabledTransitions += id to suppressed },
+        )
+        try {
+            disabledPanel.tick()
+            disabledTransitions shouldBe emptyList()
+        } finally {
+            disabledPanel.close()
         }
     }
 

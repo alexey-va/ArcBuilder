@@ -38,6 +38,7 @@ import java.util.PriorityQueue
  */
 internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseable {
     fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?)
+    fun suppressSelectionGlow(playerId: UUID, suppressed: Boolean) = Unit
     fun clearSelection(playerId: UUID)
     fun plan(player: Player, plan: BuilderPlan)
     fun clearPlan(playerId: UUID)
@@ -122,6 +123,7 @@ internal class BuilderBlockDisplayRenderer(
     private data class BookBlock(val location: Location, val blockData: BlockData)
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
+    private val suppressedSelectionGlow = mutableSetOf<UUID>()
     private val movingPreviews = mutableMapOf<Pair<UUID, Layer>, MovingPreview>()
     private val bookSites = mutableMapOf<UUID, ConstructionSite>()
     private val bookBossBars = mutableMapOf<UUID, BossBar>()
@@ -245,7 +247,17 @@ internal class BuilderBlockDisplayRenderer(
         replace(player, Layer.SELECTION, specs)
     }
 
-    override fun clearSelection(playerId: UUID) = remove(playerId, Layer.SELECTION)
+    override fun suppressSelectionGlow(playerId: UUID, suppressed: Boolean) {
+        if (closed) return
+        val changed = if (suppressed) suppressedSelectionGlow.add(playerId) else suppressedSelectionGlow.remove(playerId)
+        if (!changed) return
+        val key = playerId to Layer.SELECTION
+        scenes[key]?.let { syncScene(key, it) }
+    }
+
+    override fun clearSelection(playerId: UUID) {
+        remove(playerId, Layer.SELECTION)
+    }
 
     override fun plan(player: Player, plan: BuilderPlan) {
         if (plan.changes.firstOrNull()?.position?.worldId != player.world.uid) {
@@ -523,7 +535,10 @@ internal class BuilderBlockDisplayRenderer(
             val connection = packets.connection(viewer) ?: return@mapNotNull null
             viewer.uniqueId to BuilderPacketViewer(connection, sentChunks(viewer))
         }.toMap()
-        scene.audience.update(scene.entities.values, audience)
+        val displays = if (key.second == Layer.SELECTION && key.first in suppressedSelectionGlow) {
+            scene.entities.values.map { it.copy(glowing = false) }
+        } else scene.entities.values
+        scene.audience.update(displays, audience)
     }
 
     @EventHandler
@@ -584,6 +599,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun clearPlayer(playerId: UUID) {
+        suppressedSelectionGlow.remove(playerId)
         movingPreviews.keys.filter { it.first == playerId }.forEach { movingPreviews.remove(it)?.close() }
         Layer.entries.forEach { remove(playerId, it) }
         closeBookGuidance(playerId)
@@ -600,6 +616,7 @@ internal class BuilderBlockDisplayRenderer(
         bookBossBars.keys.toList().forEach(::closeBookGuidance)
         scenes.values.forEach { it.audience.close() }
         scenes.clear()
+        suppressedSelectionGlow.clear()
         movingPreviews.values.forEach(MovingPreview::close)
         movingPreviews.clear()
         packets.close()

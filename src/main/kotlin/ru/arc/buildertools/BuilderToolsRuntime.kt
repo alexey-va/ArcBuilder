@@ -780,6 +780,7 @@ internal class BuilderToolsRuntime(
             materialPicker = BuilderMaterialPicker(plugin, messages)
             selectionActionPanel = BuilderSelectionActionPanel(
                 plugin, config.selectionPanelSettings(), messages, ::selectionPanelView, ::onSelectionPanelAction,
+                onSelectionGlowSuppression = displayRenderer::suppressSelectionGlow,
             )
             checkNotNull(taskScope.runTimer(1L, 1L) { selectionActionPanel?.tick() }) {
                 "Builder selection action panel task was not scheduled"

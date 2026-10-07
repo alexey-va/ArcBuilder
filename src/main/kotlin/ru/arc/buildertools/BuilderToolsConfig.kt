@@ -124,6 +124,7 @@ class BuilderToolsConfig(
         buttonHeight = config.double("selection-panel.button-height", 0.23).toFloat(),
         labelScale = config.double("selection-panel.label-scale", 0.80).toFloat(),
         reach = config.double("selection-panel.reach", 4.0),
+        suppressSelectionGlow = config.boolean("selection-panel.suppress-selection-glow", true),
     )
     val previewMovementPeriodTicks: Long get() = config.long("preview.movement-period-ticks", 2L)
     val previewRadius: Double get() = config.double("preview.radius", 32.0)

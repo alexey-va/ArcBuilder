@@ -86,6 +86,7 @@ class BuilderToolsReloadMockBukkitTest : FunSpec({
             BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
             plain(console.nextComponentMessage()) shouldContain "применена без перезапуска"
             awaitBuilderUp(paper)
+            activePanelSettings().suppressSelectionGlow shouldBe true
 
             val player = paper.addPlayer("ReloadJourney").apply {
                 isOp = false
@@ -95,11 +96,13 @@ class BuilderToolsReloadMockBukkitTest : FunSpec({
             }
             val liveConfig = Config(plugin.dataPath, ConfigManager.moduleYamlRelative(plugin.dataPath, "builder-tools.yml"))
             liveConfig.setStringList("locales.ru.help", listOf("<green>Маркер горячей перезагрузки"))
+            liveConfig.setBoolean("selection-panel.suppress-selection-glow", false)
             liveConfig.saveStrict()
 
             BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
             plain(console.nextComponentMessage()) shouldContain "применена без перезапуска"
             awaitBuilderUp(paper)
+            activePanelSettings().suppressSelectionGlow shouldBe false
             BuilderToolsModule.onCommand(player, command, "builder", arrayOf("help")) shouldBe true
             plain(player.nextComponentMessage()) shouldContain "маркер горячей перезагрузки"
 
@@ -114,6 +117,15 @@ class BuilderToolsReloadMockBukkitTest : FunSpec({
 })
 
 private val reloadPlain = PlainTextComponentSerializer.plainText()
+
+private fun activePanelSettings(): BuilderPanelSettings {
+    val runtime = BuilderToolsModule::class.java.getDeclaredField("runtime").apply { isAccessible = true }
+        .get(BuilderToolsModule)
+    val panel = BuilderToolsRuntime::class.java.getDeclaredField("selectionActionPanel").apply { isAccessible = true }
+        .get(checkNotNull(runtime))
+    return BuilderSelectionActionPanel::class.java.getDeclaredField("settings").apply { isAccessible = true }
+        .get(checkNotNull(panel)) as BuilderPanelSettings
+}
 
 private fun plain(component: net.kyori.adventure.text.Component?): String =
     reloadPlain.serialize(checkNotNull(component)).lowercase()

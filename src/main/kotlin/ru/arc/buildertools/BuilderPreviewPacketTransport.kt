@@ -42,6 +42,7 @@ internal data class BuilderPacketDisplay(
     val translateZ: Float,
     val glowRgb: Int,
     val viewRange: Float,
+    val glowing: Boolean = true,
 )
 
 /** Packet-only replacement for the native preview entity lifecycle. */
@@ -73,6 +74,7 @@ internal interface BuilderPreviewPacketGateway {
     fun execute(channel: Any, task: () -> Unit)
     fun retry(channel: Any, task: () -> Unit)
     fun display(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission
+    fun glow(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission
     fun destroy(channel: Any, entityIds: List<Int>): VisualPacketAdmission
     fun flush(channel: Any)
 }
@@ -95,6 +97,9 @@ internal class PaperBuilderPreviewPacketGateway(
 
     override fun display(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission =
         packets.write(channel, builderDisplayPacketTransaction(display))
+
+    override fun glow(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission =
+        packets.write(channel, builderDisplayGlowTransaction(display))
 
     override fun destroy(channel: Any, entityIds: List<Int>): VisualPacketAdmission =
         packets.write(channel, listOf(WrapperPlayServerDestroyEntities(*entityIds.toIntArray())), cleanup = true)
@@ -122,7 +127,7 @@ internal fun builderDisplayPacketTransaction(display: BuilderPacketDisplay): Lis
         display.entityId,
         listOf(
             // Entity metadata index 0: GLOWING flag (0x40).
-            EntityData(0, EntityDataTypes.BYTE, 0x40.toByte()),
+            EntityData(0, EntityDataTypes.BYTE, if (display.glowing) GLOWING_FLAG else 0.toByte()),
             // Display metadata starts at 8; transformation is 11..14.
             EntityData(11, EntityDataTypes.VECTOR3F, Vector3f(display.translateX, display.translateY, display.translateZ)),
             EntityData(12, EntityDataTypes.VECTOR3F, Vector3f(display.scaleX, display.scaleY, display.scaleZ)),
@@ -139,10 +144,19 @@ internal fun builderDisplayPacketTransaction(display: BuilderPacketDisplay): Lis
 )
 
 private const val FULL_BRIGHTNESS = 0xF000F0
+private val GLOWING_FLAG = 0x40.toByte()
+
+/** Metadata-only update for an existing BlockDisplay; position, color and ID stay stable. */
+internal fun builderDisplayGlowTransaction(display: BuilderPacketDisplay): List<PacketWrapper<*>> = listOf(
+    WrapperPlayServerEntityMetadata(
+        display.entityId,
+        listOf(EntityData(0, EntityDataTypes.BYTE, if (display.glowing) GLOWING_FLAG else 0.toByte())),
+    ),
+)
 
 /**
- * One connection's latest desired state and the entity IDs whose complete packet
- * transactions were admitted. All packet operations and admitted-state changes
+ * One connection's latest desired state and the entity snapshots whose packet
+ * updates were admitted. All packet operations and admitted-state changes
  * happen on the captured channel's event loop.
  */
 internal class BuilderPacketAttachment(
@@ -235,7 +249,8 @@ internal class BuilderPacketAttachment(
         val staleIds = synchronized(lock) {
             (admitted.keys + uncertain + forcedResetIds).filter { id ->
                 val shown = admitted[id]
-                id in forcedResetIds || id in uncertain || shown != desired[id]
+                id in forcedResetIds || id in uncertain ||
+                    (shown != desired[id] && !shown.isGlowOnlyUpdate(desired[id]))
             }.distinct()
         }
         if (staleIds.isNotEmpty()) {
@@ -272,7 +287,9 @@ internal class BuilderPacketAttachment(
         }
         if (!cleanupStillPending && !terminalAdmission) {
             val candidates = synchronized(lock) {
-                desired.values.filter { admitted[it.entityId] != it && it.entityId !in uncertain }
+                desired.values.filter {
+                    admitted[it.entityId] != it && it.entityId !in uncertain
+                }
             }
             if (candidates.isNotEmpty()) {
                 val start = candidates.indexOfFirst { it.entityId == nextCandidateId }.let { if (it < 0) 0 else it }
@@ -280,7 +297,12 @@ internal class BuilderPacketAttachment(
                 var nextCursor: Int? = null
                 rotated.forEachIndexed { index, display ->
                     try {
-                        when (gateway.display(channel, display)) {
+                        val isGlowUpdate = synchronized(lock) {
+                            admitted[display.entityId].isGlowOnlyUpdate(display)
+                        }
+                        val admission = if (isGlowUpdate) gateway.glow(channel, display)
+                        else gateway.display(channel, display)
+                        when (admission) {
                             VisualPacketAdmission.ALLOWED -> {
                                 gateway.flush(channel)
                                 synchronized(lock) {
@@ -294,7 +316,7 @@ internal class BuilderPacketAttachment(
                             VisualPacketAdmission.CLOSED -> terminalAdmission = true
                         }
                     } catch (failure: Exception) {
-                        // A failed write may have handed spawn to Netty before metadata failed.
+                        // A failed write may have reached the client; destroy and replay it safely.
                         synchronized(lock) { uncertain += display.entityId }
                         logFailure(failure)
                         if (!isOpen(channel)) {
@@ -355,6 +377,13 @@ internal class BuilderPacketAttachment(
     }
 
     private enum class QueueAction { NOW, LATER, STOP }
+
+    private fun BuilderPacketDisplay?.isGlowOnlyUpdate(desired: BuilderPacketDisplay?): Boolean {
+        val shown = this ?: return false
+        val target = desired ?: return false
+        if (shown.glowing == target.glowing) return false
+        return shown.copy(glowing = target.glowing) == target
+    }
 }
 
 internal class PacketEventsBuilderPreviewTransport(

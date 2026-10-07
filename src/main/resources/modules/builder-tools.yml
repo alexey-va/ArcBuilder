@@ -220,6 +220,9 @@ selection-panel:
   button-height: 0.23
   label-scale: 0.80
   reach: 4.0
+  # Temporarily hide the selection's glow while looking toward the menu.
+  # The frame remains visible; false restores always-on glow. Applies on reload.
+  suppress-selection-glow: true
 
 preview:
   # Recheck ordinary preview world surfaces twice per second.

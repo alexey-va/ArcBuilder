@@ -39,6 +39,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.tan
 
 internal enum class BuilderPanelAction {
     FILL, REPLACE, COPY, PASTE, PREVIOUS_PAGE, NEXT_PAGE, DECONSTRUCT, DISCONNECT,
@@ -65,6 +66,7 @@ internal data class BuilderPanelSettings(
     val buttonHeight: Float = 0.23f,
     val labelScale: Float = 0.8f,
     val reach: Double = 4.0,
+    val suppressSelectionGlow: Boolean = true,
 ) {
     init {
         require(distance.isFinite() && distance > 0.0)
@@ -359,6 +361,45 @@ internal object BuilderPanelGeometry {
         }
     }
 
+    fun gazeIntersectsPanel(
+        eye: BuilderPanelPoint3,
+        direction: BuilderPanelPoint3,
+        anchor: BuilderPanelAnchor,
+        layout: BuilderPanelLayout,
+        settings: BuilderPanelSettings,
+        marginDegrees: Double,
+    ): Boolean {
+        require(marginDegrees.isFinite() && marginDegrees >= 0.0 && marginDegrees < 90.0)
+        val minY = min(
+            layout.statusY - STATUS_HEIGHT / 2.0,
+            layout.buttons.minOfOrNull { it.y - settings.buttonHeight / 2.0 } ?: 0.0,
+        )
+        val maxY = max(
+            layout.statusY + STATUS_HEIGHT / 2.0,
+            layout.buttons.maxOfOrNull { it.y + settings.buttonHeight / 2.0 } ?: 0.0,
+        )
+        val halfWidth = panelHalfWidth(layout, settings)
+        val halfHeight = (maxY - minY) / 2.0
+        val centerY = (minY + maxY) / 2.0
+        val center = BuilderPanelPoint3(anchor.point.x, anchor.point.y + centerY, anchor.point.z)
+        val centerDistance = eye.distance(center)
+        if (!centerDistance.isFinite() || centerDistance <= EPSILON) return false
+
+        val angularPadding = centerDistance * tan(Math.toRadians(marginDegrees))
+        val expandedHalfWidth = halfWidth + angularPadding
+        val expandedHalfHeight = halfHeight + angularPadding
+        val rayLimit = centerDistance + hypot(expandedHalfWidth, expandedHalfHeight) + EPSILON
+        // The action only identifies a hit; this plane represents the entire menu surface.
+        val fullMenu = BuilderPanelControlPlane(
+            action = BuilderPanelAction.FILL,
+            center = center,
+            yaw = anchor.yaw.toDouble(),
+            width = expandedHalfWidth * 2.0,
+            height = expandedHalfHeight * 2.0,
+        )
+        return nearestTarget(eye, direction, listOf(fullMenu), rayLimit) != null
+    }
+
     fun nearestTarget(
         origin: BuilderPanelPoint3,
         direction: BuilderPanelPoint3,
@@ -441,6 +482,7 @@ internal class BuilderSelectionActionPanel(
     private val view: (Player) -> BuilderPanelView?,
     private val onAction: (Player, BuilderPanelAction) -> Unit,
     private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "selection-action-panel"),
+    private val onSelectionGlowSuppression: (UUID, Boolean) -> Unit = { _, _ -> },
 ) : Listener, AutoCloseable {
     private data class Placement(val anchor: Location, val distance: Double)
     private data class Button(
@@ -471,7 +513,9 @@ internal class BuilderSelectionActionPanel(
         var paginationDisplay: PacketTextDisplay? = null,
         var lastPagination: Component? = null,
         var interpolationDurationForNextUpdate: Int = INTERPOLATION_TICKS,
-    )
+    ) {
+        var selectionGlowSuppressed = false
+    }
 
     private val panels = mutableMapOf<UUID, Panel>()
     private val hitboxOwners = mutableMapOf<UUID, UUID>()
@@ -538,6 +582,7 @@ internal class BuilderSelectionActionPanel(
         try {
             val panel = panels[player.uniqueId] ?: createPanel(player, current).also { panels[player.uniqueId] = it }
             applyView(player, panel, current)
+            refreshSelectionGlowSuppression(player, panel)
             refreshHover(player, panel)
             rendererFailuresLogged.remove(player.uniqueId)
         } catch (_: PanelAreaUnavailable) {
@@ -983,6 +1028,34 @@ internal class BuilderSelectionActionPanel(
         }
     }
 
+    private fun refreshSelectionGlowSuppression(player: Player, panel: Panel) {
+        val suppressed = if (!settings.suppressSelectionGlow) {
+            false
+        } else {
+            val eye = player.eyeLocation
+            val margin = if (panel.selectionGlowSuppressed) {
+                SELECTION_GLOW_RESTORE_MARGIN_DEGREES
+            } else {
+                SELECTION_GLOW_SUPPRESS_MARGIN_DEGREES
+            }
+            BuilderPanelGeometry.gazeIntersectsPanel(
+                BuilderPanelPoint3(eye.x, eye.y, eye.z),
+                eye.direction.let { BuilderPanelPoint3(it.x, it.y, it.z) },
+                BuilderPanelAnchor(BuilderPanelPoint3(panel.anchor.x, panel.anchor.y, panel.anchor.z), panel.yaw),
+                layout(panel.actions),
+                settings,
+                margin,
+            )
+        }
+        setSelectionGlowSuppressed(panel, suppressed)
+    }
+
+    private fun setSelectionGlowSuppressed(panel: Panel, suppressed: Boolean) {
+        if (panel.selectionGlowSuppressed == suppressed) return
+        panel.selectionGlowSuppressed = suppressed
+        onSelectionGlowSuppression(panel.owner, suppressed)
+    }
+
     /** Uses the visible button planes so hover and both click paths agree exactly. */
     private fun aimedButton(player: Player, panel: Panel): Button? {
         if (!player.isOnline || player.world != panel.world || player.uniqueId != panel.owner) return null
@@ -1086,6 +1159,8 @@ internal class BuilderSelectionActionPanel(
     }
 
     private fun removePanel(panel: Panel) {
+        runCatching { setSelectionGlowSuppressed(panel, false) }
+            .onFailure { plugin.logger.log(Level.WARNING, "Failed to restore selection glow for ${panel.owner}", it) }
         val player = plugin.server.getPlayer(panel.owner)
         panel.buttons.values.toList().forEach { removeButton(player, it) }
         panel.buttons.clear()
@@ -1122,6 +1197,8 @@ internal class BuilderSelectionActionPanel(
     private companion object {
         const val LABEL_Y_OFFSET = 0.025
         const val INTERPOLATION_TICKS = 2
+        const val SELECTION_GLOW_SUPPRESS_MARGIN_DEGREES = 8.0
+        const val SELECTION_GLOW_RESTORE_MARGIN_DEGREES = 13.0
         const val MAX_SMOOTH_STEP = 1.0
         const val MAX_SMOOTH_TURN = 30f
         const val STATUS_SCALE = 0.48f

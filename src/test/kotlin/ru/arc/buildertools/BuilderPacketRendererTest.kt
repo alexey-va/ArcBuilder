@@ -41,16 +41,36 @@ class BuilderPacketRendererTest : FunSpec({
                         val second = BuilderBlockPos(world.uid, 8, 68, 8)
                         val points = BuilderSelectionPoints(first, second)
                         val selection = BuilderSelection(first, second)
+                        renderer.suppressSelectionGlow(player.uniqueId, true)
                         renderer.selection(player, points, selection)
                         sent.single().size shouldBe 14
+                        sent.single().all { !it.glowing } shouldBe true
+                        val entityIds = sent.single().map(BuilderPacketDisplay::entityId)
                         renderer.selection(player, points, selection)
                         sent.size shouldBe 1
+                        renderer.suppressSelectionGlow(player.uniqueId, false)
+                        sent.size shouldBe 2
+                        sent.last().map(BuilderPacketDisplay::entityId) shouldBe entityIds
+                        sent.last().all(BuilderPacketDisplay::glowing) shouldBe true
+                        sent.last().map { it.copy(glowing = false) } shouldBe sent.first()
+                        renderer.suppressSelectionGlow(player.uniqueId, true)
+                        sent.last().map(BuilderPacketDisplay::entityId) shouldBe entityIds
+                        sent.last().all { !it.glowing } shouldBe true
+                        sent.last() shouldBe sent.first()
                         world.entities.filterIsInstance<BlockDisplay>().size shouldBe 0
+                        renderer.clearSelection(player.uniqueId)
+                        sent.last() shouldBe emptyList()
+                        renderer.selection(player, points, selection)
+                        sent.last().all { !it.glowing } shouldBe true
+                        renderer.clearPlayer(player.uniqueId)
+                        sent.last() shouldBe emptyList()
+                        renderer.selection(player, points, selection)
+                        sent.last().all(BuilderPacketDisplay::glowing) shouldBe true
                         renderer.clearPlayer(player.uniqueId)
                         sent.last() shouldBe emptyList()
                     }
                 }
-                sent.size shouldBe 2
+                sent.size shouldBe 8
             }
         }
     }

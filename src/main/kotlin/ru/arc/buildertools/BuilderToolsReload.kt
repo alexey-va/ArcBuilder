@@ -304,6 +304,7 @@ internal object BuilderToolsReloadPreflight {
         "selection-panel.button-height" to YamlValueType.DOUBLE,
         "selection-panel.label-scale" to YamlValueType.DOUBLE,
         "selection-panel.reach" to YamlValueType.DOUBLE,
+        "selection-panel.suppress-selection-glow" to YamlValueType.BOOLEAN,
         "preview.movement-period-ticks" to YamlValueType.LONG,
         "preview.radius" to YamlValueType.DOUBLE,
         "preview.outline-spacing" to YamlValueType.DOUBLE,
