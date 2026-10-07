@@ -1,5 +1,7 @@
 package ru.arc.buildertools
 
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.PacketEventsAPI
 import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
 import com.mojang.brigadier.suggestion.SuggestionsBuilder
 import io.kotest.core.spec.style.FunSpec
@@ -1509,10 +1511,14 @@ private class ArcBuilderJourney private constructor(
     }
 
     override fun close() {
-        runCatching { runtime.close() }
-        runCatching { paper.server.pluginManager.disablePlugin(plugin) }
-        paper.close()
-        ConfigManager.clear()
+        try {
+            runCatching { runtime.close() }
+            runCatching { paper.server.pluginManager.disablePlugin(plugin) }
+            paper.close()
+            ConfigManager.clear()
+        } finally {
+            unmockkStatic(PacketEvents::class)
+        }
     }
 
     companion object {
@@ -1523,8 +1529,21 @@ private class ArcBuilderJourney private constructor(
             lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
             lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
         ): ArcBuilderJourney {
+            mockkStatic(PacketEvents::class)
+            try {
+                val packetEventsApi = mockk<PacketEventsAPI<Any>>(relaxed = true)
+                every { PacketEvents.getAPI() } returns packetEventsApi
+            } catch (failure: Throwable) {
+                unmockkStatic(PacketEvents::class)
+                throw failure
+            }
             ConfigManager.clear()
-            val paper = MockBukkitTestRuntime.open()
+            val paper = try {
+                MockBukkitTestRuntime.open()
+            } catch (failure: Throwable) {
+                unmockkStatic(PacketEvents::class)
+                throw failure
+            }
             try {
                 val plugin = paper.loadPlugin<ArcBuilderPlugin>()
                 installArcVisualPacketBudgetFixture(plugin)
@@ -1563,8 +1582,12 @@ private class ArcBuilderJourney private constructor(
                 }
                 return journey
             } catch (failure: Throwable) {
-                runCatching { paper.close() }
-                ConfigManager.clear()
+                try {
+                    runCatching { paper.close() }
+                    ConfigManager.clear()
+                } finally {
+                    unmockkStatic(PacketEvents::class)
+                }
                 throw failure
             }
         }
