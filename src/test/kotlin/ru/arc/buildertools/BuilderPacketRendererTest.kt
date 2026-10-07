@@ -19,11 +19,11 @@ class BuilderPacketRendererTest : FunSpec({
                 val world = paper.addSimpleWorld("packet-preview")
                 val player = paper.addPlayer("PreviewOwner")
                 player.teleport(world.getBlockAt(4, 64, 4).location)
-                val sent = mutableListOf<Pair<List<Int>, List<BuilderPacketDisplay>>>()
+                val sent = mutableListOf<List<BuilderPacketDisplay>>()
                 val connection = object : BuilderPreviewConnection {
                     override val identity = Any()
-                    override fun send(removed: List<Int>, added: List<BuilderPacketDisplay>) {
-                        sent += removed to added
+                    override fun submit(desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int>) {
+                        sent += desired.toList()
                     }
                 }
                 val packets = object : BuilderPreviewPacketTransport {
@@ -42,14 +42,12 @@ class BuilderPacketRendererTest : FunSpec({
                         val points = BuilderSelectionPoints(first, second)
                         val selection = BuilderSelection(first, second)
                         renderer.selection(player, points, selection)
-                        sent.single().second.size shouldBe 14
-                        val ids = sent.single().second.map(BuilderPacketDisplay::entityId)
+                        sent.single().size shouldBe 14
                         renderer.selection(player, points, selection)
                         sent.size shouldBe 1
                         world.entities.filterIsInstance<BlockDisplay>().size shouldBe 0
                         renderer.clearPlayer(player.uniqueId)
-                        sent.last().first.toSet() shouldBe ids.toSet()
-                        sent.last().second shouldBe emptyList()
+                        sent.last() shouldBe emptyList()
                     }
                 }
                 sent.size shouldBe 2

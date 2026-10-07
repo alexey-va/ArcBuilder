@@ -190,7 +190,7 @@ internal class BuilderConstructionSiteDisplayManager(
     private val messages: LocalizedMiniMessage,
     private val projectLookup: (UUID) -> BuilderConstructionProjectRecord?,
     private val onInspect: (Player, BuilderConstructionProjectRecord) -> Unit,
-    private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin),
+    private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "construction-sites"),
 ) : Listener, AutoCloseable {
     private data class Scene(
         val project: BuilderConstructionProjectRecord,

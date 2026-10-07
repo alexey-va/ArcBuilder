@@ -176,7 +176,10 @@ private fun withMovingPreview(test: (MovingPreviewFixture) -> Unit) {
                 val active = linkedMapOf<Int, BuilderPacketDisplay>()
                 val connection = object : BuilderPreviewConnection {
                     override val identity = Any()
-                    override fun send(removed: List<Int>, added: List<BuilderPacketDisplay>) {
+                    override fun submit(desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int>) {
+                        val byId = desired.associateBy(BuilderPacketDisplay::entityId)
+                        val removed = ((active.keys - byId.keys) + forceResetIds).distinct()
+                        val added = byId.values.filter { it.entityId !in active || it.entityId in forceResetIds }
                         sent += removed to added
                         removed.forEach(active::remove)
                         added.forEach { active[it.entityId] = it }

@@ -81,7 +81,7 @@ internal class BuilderBlockDisplayRenderer(
     private val messages: LocalizedMiniMessage,
     private val taskScope: LifecycleTaskScope,
     movementPeriodTicks: Long = 2L,
-    private val packets: BuilderPreviewPacketTransport = PacketEventsBuilderPreviewTransport(plugin.logger),
+    private val packets: BuilderPreviewPacketTransport = PacketEventsBuilderPreviewTransport(plugin),
     private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
 ) : BuilderDisplayRenderer, Listener {
     private enum class Layer { SELECTION, PLAN, BOOK }

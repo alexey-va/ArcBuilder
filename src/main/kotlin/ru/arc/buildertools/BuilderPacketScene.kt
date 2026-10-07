@@ -12,7 +12,7 @@ internal data class BuilderPacketViewer(
 internal class BuilderPacketScene : AutoCloseable {
     private data class Viewer(
         val connection: BuilderPreviewConnection,
-        val shown: MutableMap<Int, BuilderPacketDisplay>,
+        val desired: MutableMap<Int, BuilderPacketDisplay>,
     )
 
     private val viewers = mutableMapOf<UUID, Viewer>()
@@ -28,25 +28,28 @@ internal class BuilderPacketScene : AutoCloseable {
             val desired = displays.asSequence()
                 .filter { it.chunkKey() in snapshot.sentChunks }
                 .associateBy(BuilderPacketDisplay::entityId)
-            val shown = previous?.shown.orEmpty()
-            val removed = (shown.keys - desired.keys).toList()
-            val added = desired.filterKeys { it !in shown }.values.toList()
-            if (removed.isNotEmpty() || added.isNotEmpty()) snapshot.connection.send(removed, added)
+            val previousDesired = previous?.desired.orEmpty()
+            if (previousDesired != desired) {
+                val removedIds = previousDesired.keys - desired.keys
+                snapshot.connection.submit(desired.values.toList(), removedIds)
+            }
             viewers[playerId] = Viewer(snapshot.connection, desired.toMutableMap())
         }
     }
 
     fun forgetChunk(playerId: UUID, chunkKey: Long) {
         val viewer = viewers[playerId] ?: return
-        val removed = viewer.shown.values.filter { it.chunkKey() == chunkKey }.map(BuilderPacketDisplay::entityId)
-        if (removed.isEmpty()) return
-        viewer.connection.send(removed, emptyList())
-        removed.forEach(viewer.shown::remove)
+        val forgotten = viewer.desired.values.filter { it.chunkKey() == chunkKey }
+        if (forgotten.isEmpty()) return
+        val retained = viewer.desired.values.filterNot { it.chunkKey() == chunkKey }
+        viewer.desired.clear()
+        retained.forEach { viewer.desired[it.entityId] = it }
+        viewer.connection.submit(retained, forgotten.mapTo(linkedSetOf(), BuilderPacketDisplay::entityId))
     }
 
     fun removeViewer(playerId: UUID) {
         val viewer = viewers.remove(playerId) ?: return
-        if (viewer.shown.isNotEmpty()) viewer.connection.send(viewer.shown.keys.toList(), emptyList())
+        if (viewer.desired.isNotEmpty()) viewer.connection.submit(emptyList(), viewer.desired.keys)
     }
 
     override fun close() {
