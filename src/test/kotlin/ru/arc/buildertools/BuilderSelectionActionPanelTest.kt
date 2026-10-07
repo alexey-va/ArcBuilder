@@ -8,9 +8,12 @@ import io.papermc.paper.event.player.PrePlayerAttackEntityEvent
 import net.kyori.adventure.text.Component
 import org.bukkit.FluidCollisionMode
 import org.bukkit.Location
+import org.bukkit.Server
 import org.bukkit.World
+import org.bukkit.block.Block
 import org.bukkit.entity.Interaction
 import org.bukkit.entity.Player
+import org.bukkit.plugin.Plugin
 import org.bukkit.util.Vector
 import ru.arc.paper.display.PacketTextDisplay
 import ru.arc.paper.display.PaperPacketDisplays
@@ -86,7 +89,131 @@ class BuilderSelectionActionPanelTest : StringSpec({
         (navCenterDistance / 2.0 - navHalfWidth - textHalfWidth >= 0.04) shouldBe true
     }
 
-    "whole panel center stays on the latched eye ray across pages and body movement" {
+    "selection direction follows its horizontal center and preserves fallback directly overhead" {
+        val worldId = selection().worldId
+        val eye = BuilderPanelPoint3(0.5, 65.62, 0.5)
+        val straightAhead = BuilderSelection(
+            BuilderBlockPos(worldId, 0, 64, 5), BuilderBlockPos(worldId, 0, 64, 5),
+        )
+        val diagonal = BuilderSelection(
+            BuilderBlockPos(worldId, 4, 64, 4), BuilderBlockPos(worldId, 4, 64, 4),
+        )
+        val fallback = BuilderPanelPoint3(-1.0, 0.0, 0.0)
+
+        BuilderPanelGeometry.selectionDirection(eye, straightAhead, fallback) shouldBe
+            BuilderPanelPoint3(0.0, 0.0, 1.0)
+        val diagonalDirection = BuilderPanelGeometry.selectionDirection(eye, diagonal, fallback)
+        (diagonalDirection.x > 0.0 && diagonalDirection.z > 0.0) shouldBe true
+        (abs(sqrt(diagonalDirection.x * diagonalDirection.x + diagonalDirection.z * diagonalDirection.z) - 1.0) < 1e-9) shouldBe true
+        BuilderPanelGeometry.selectionDirection(
+            eye,
+            BuilderSelection(
+                BuilderBlockPos(worldId, 0, 64, 0), BuilderBlockPos(worldId, 0, 64, 0),
+            ),
+            fallback,
+        ) shouldBe fallback
+    }
+
+    "panel tick tracks selection and body translation, not head pose or crouch" {
+        val worldId = UUID.randomUUID()
+        val world = mockk<World>(relaxed = true)
+        every { world.uid } returns worldId
+        every { world.minHeight } returns -64
+        every { world.maxHeight } returns 320
+        every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
+        every {
+            world.rayTraceBlocks(
+                any<Location>(), any<Vector>(), any<Double>(), any<FluidCollisionMode>(), any<Boolean>(),
+            )
+        } returns null
+        val passableBlock = mockk<Block>(relaxed = true)
+        every { passableBlock.isPassable } returns true
+        every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } returns passableBlock
+
+        val playerId = UUID.randomUUID()
+        var feetX = 0.5
+        var feetY = 64.0
+        var feetZ = 0.5
+        var headYaw = 90f
+        var headPitch = -40f
+        var eyeHeight = 1.62
+        val player = mockk<Player>(relaxed = true)
+        every { player.uniqueId } returns playerId
+        every { player.world } returns world
+        every { player.isOnline } returns true
+        every { player.location } answers { Location(world, feetX, feetY, feetZ) }
+        every { player.eyeLocation } answers {
+            Location(world, feetX, feetY + eyeHeight, feetZ, headYaw, headPitch)
+        }
+        every { player.sentChunkKeys } returns (-2..2).flatMap { x ->
+            (-2..2).map { z -> chunkKey(x, z) }
+        }.toSet()
+
+        val server = mockk<Server>(relaxed = true)
+        every { server.onlinePlayers } returns listOf(player)
+        every { server.getPlayer(playerId) } returns player
+        val plugin = mockk<Plugin>(relaxed = true)
+        every { plugin.server } returns server
+        val displays = mockk<PaperPacketDisplays>(relaxed = true)
+        every { displays.spawnText(any<Location>(), any<Component>()) } answers {
+            val location = firstArg<Location>().clone()
+            val display = mockk<PacketTextDisplay>(relaxed = true)
+            every { display.location } returns location
+            display
+        }
+
+        val initialSelection = singleBlockSelection(worldId, x = 0, z = 5)
+        var currentView = BuilderPanelView("first-selection", initialSelection, Component.text("selection"), emptyList())
+        val panel = BuilderSelectionActionPanel(
+            plugin,
+            BuilderPanelSettings(),
+            mockk<LocalizedMiniMessage>(relaxed = true),
+            view = { currentView },
+            onAction = { _, _ -> },
+            displays = displays,
+        )
+        try {
+            panel.tick()
+            val state = panelState(panel, playerId)
+            val initialFrame = panelField(state, "viewFrame") as BuilderPanelViewFrame
+            val initialAnchor = (panelField(state, "anchor") as Location).clone()
+
+            (abs(initialFrame.direction.x) < 1e-9) shouldBe true
+            (abs(initialFrame.direction.z - 1.0) < 1e-9) shouldBe true
+            initialFrame.yaw shouldBe 180f
+
+            headYaw = 270f
+            headPitch = 35f
+            eyeHeight = 1.27
+            panel.tick()
+            (panelField(state, "viewFrame") as BuilderPanelViewFrame) shouldBe initialFrame
+            panelField(state, "anchor") shouldBe initialAnchor
+
+            feetX = 2.5
+            panel.tick()
+            val movedFrame = panelField(state, "viewFrame") as BuilderPanelViewFrame
+            val movedAnchor = panelField(state, "anchor") as Location
+            val movedLength = sqrt(29.0)
+            (abs(movedFrame.direction.x - (-2.0 / movedLength)) < 1e-9) shouldBe true
+            (abs(movedFrame.direction.z - (5.0 / movedLength)) < 1e-9) shouldBe true
+            movedFrame.eyeOffset.y shouldBe initialFrame.eyeOffset.y
+            (movedAnchor.distance(initialAnchor) > 0.5) shouldBe true
+
+            currentView = currentView.copy(
+                context = "second-selection",
+                selection = singleBlockSelection(worldId, x = 6, z = 4),
+            )
+            panel.tick()
+            val selectedFrame = panelField(state, "viewFrame") as BuilderPanelViewFrame
+            val selectedLength = sqrt(32.0)
+            (abs(selectedFrame.direction.x - (4.0 / selectedLength)) < 1e-9) shouldBe true
+            (abs(selectedFrame.direction.z - (4.0 / selectedLength)) < 1e-9) shouldBe true
+        } finally {
+            panel.close()
+        }
+    }
+
+    "whole panel center stays on the placement frame across pages and body movement" {
         val settings = BuilderPanelSettings()
         val eye = BuilderPanelPoint3(2.0, 70.0, -3.0)
         val look = BuilderPanelPoint3(0.25, -0.15, 0.95)
@@ -198,6 +325,17 @@ class BuilderSelectionActionPanelTest : StringSpec({
 
         swept.overlaps(BuilderPanelBounds(-0.2, 68.0, 0.45, 0.2, 72.0, 0.6)) shouldBe false
         swept.overlaps(BuilderPanelBounds(-0.2, 68.0, 0.08, 0.2, 72.0, 0.12)) shouldBe true
+    }
+
+    "a small yaw sweep stays thin in depth while covering the rotated edge" {
+        val settings = BuilderPanelSettings()
+        val layout = BuilderPanelGeometry.layout(8, settings, navigationCount = 2)
+        val from = BuilderPanelAnchor(BuilderPanelPoint3(0.0, 70.0, 0.0), 0f)
+        val to = BuilderPanelAnchor(from.point, 2f)
+        val swept = BuilderPanelGeometry.sweptBounds(from, to, layout, settings)
+
+        swept.overlaps(BuilderPanelBounds(-0.2, 68.0, 0.4, 0.2, 72.0, 0.6)) shouldBe false
+        swept.overlaps(BuilderPanelBounds(-0.2, 68.0, 0.06, 0.2, 72.0, 0.08)) shouldBe true
     }
 
     "stable placement distance suppresses near-wall jitter and follows clearances gradually" {
@@ -388,6 +526,23 @@ private fun installButtonState(
         .get(panel) as MutableMap<UUID, UUID>
     owners[hitbox.uniqueId] = player.uniqueId
 }
+
+private fun panelState(panel: BuilderSelectionActionPanel, owner: UUID): Any {
+    val panels = BuilderSelectionActionPanel::class.java.getDeclaredField("panels").apply { isAccessible = true }
+        .get(panel) as Map<UUID, Any>
+    return checkNotNull(panels[owner])
+}
+
+private fun panelField(panel: Any, name: String): Any? =
+    panel.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(panel)
+
+private fun singleBlockSelection(worldId: UUID, x: Int, z: Int) = BuilderSelection(
+    BuilderBlockPos(worldId, x, 64, z),
+    BuilderBlockPos(worldId, x, 64, z),
+)
+
+private fun chunkKey(x: Int, z: Int): Long =
+    (x.toLong() and 0xffffffffL) or ((z.toLong() and 0xffffffffL) shl 32)
 
 private fun selection(): BuilderSelection {
     val world = UUID.fromString("11111111-2222-3333-4444-555555555555")

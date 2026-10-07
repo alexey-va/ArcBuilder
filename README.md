@@ -17,9 +17,11 @@ The plugin uses arc-core 2.7.18 and requires ARC for its shared visual packet bu
 - Holding the selector with a completed selection shows a private world panel.
   Aim and left or right click: up to six actions per page cover fill, replace, copy, paste,
   deconstruction, fence disconnection, drafts, undo and selection reset. `<` / `>`
-  change pages, with a page caption between them. The panel initially centers on
-  the look ray, follows walking with native client interpolation and stays
-  anchored while aiming in place; blocked placements are excluded. It hides
+  change pages, with a page caption between them. The panel sits at eye level
+  toward the selection's horizontal centre and faces the player. Walking updates
+  its position and orientation with native client interpolation; head turns and
+  crouching in place leave the controls still. Changing the selection updates its
+  direction immediately. Blocked placements are excluded. It hides
   beyond eight blocks from the nearest selection edge and returns without losing
   the selection. A prepared plan shows materials and confirmation controls.
   Create book captures the current selection and, in survival, consumes one plain
