@@ -122,6 +122,8 @@ tasks {
         exclude("org/bukkit/**")
         exclude("io/papermc/**")
         exclude("com/sk89q/**")
+        exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
+        exclude("ru/arc/paper/api/**")
         relocate("com.github.stefvanschie.inventoryframework", "ru.ruscrafting.builder.libs.inventoryframework")
         relocate("com.jeff_media.customblockdata", "ru.ruscrafting.builder.libs.customblockdata")
         relocate("de.tr7zw.changeme.nbtapi", "ru.ruscrafting.builder.libs.nbtapi")
