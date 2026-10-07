@@ -131,6 +131,18 @@ internal object BuilderPanelGeometry {
     const val NAVIGATION_HITBOX_WIDTH = 0.45f
     private const val EPSILON = 1e-8
 
+    fun selectionDirection(
+        eye: BuilderPanelPoint3,
+        selection: BuilderSelection,
+        fallback: BuilderPanelPoint3,
+    ): BuilderPanelPoint3 {
+        val dx = (selection.minX.toDouble() + selection.maxX + 1.0) / 2.0 - eye.x
+        val dz = (selection.minZ.toDouble() + selection.maxZ + 1.0) / 2.0 - eye.z
+        val distance = hypot(dx, dz)
+        // Directly above the centre there is no unique selection-facing direction.
+        return if (distance >= 0.25) BuilderPanelPoint3(dx / distance, 0.0, dz / distance) else fallback
+    }
+
     fun layout(actionCount: Int, settings: BuilderPanelSettings, navigationCount: Int = 0): BuilderPanelLayout {
         require(actionCount in 0..BuilderPanelAction.entries.size)
         require(navigationCount == 0 || navigationCount == 2)
@@ -282,30 +294,16 @@ internal object BuilderPanelGeometry {
         padding: Double = SURFACE_CLEARANCE,
     ): BuilderPanelBounds {
         require(padding.isFinite() && padding >= 0.0)
-        if (abs(((to.yaw - from.yaw + 540f) % 360f) - 180f) < 1e-5) {
-            val first = panelBounds(from, layout, settings, padding)
-            val last = panelBounds(to, layout, settings, padding)
-            return BuilderPanelBounds(
-                min(first.minX, last.minX), min(first.minY, last.minY), min(first.minZ, last.minZ),
-                max(first.maxX, last.maxX), max(first.maxY, last.maxY), max(first.maxZ, last.maxZ),
-            )
-        }
-        val radius = panelHalfWidth(layout, settings) + padding
-        val minY = min(
-            layout.statusY - STATUS_HEIGHT / 2.0,
-            layout.buttons.minOfOrNull { it.y - settings.buttonHeight / 2.0 } ?: 0.0,
-        ) - padding
-        val maxY = max(
-            layout.statusY + STATUS_HEIGHT / 2.0,
-            layout.buttons.maxOfOrNull { it.y + settings.buttonHeight / 2.0 } ?: 0.0,
-        ) + padding
+        val first = panelBounds(from, layout, settings, padding)
+        val last = panelBounds(to, layout, settings, padding)
+        val angle = abs(((to.yaw - from.yaw + 540f) % 360f) - 180f)
+        // A rotating edge bows away from its endpoint chord by at most this sagitta.
+        // Small turns must not inflate a thin panel into a full-radius cylinder.
+        val bow = (panelHalfWidth(layout, settings) + padding) *
+            (1.0 - cos(Math.toRadians(angle.toDouble()) / 2.0))
         return BuilderPanelBounds(
-            min(from.point.x, to.point.x) - radius,
-            min(from.point.y, to.point.y) + minY,
-            min(from.point.z, to.point.z) - radius,
-            max(from.point.x, to.point.x) + radius,
-            max(from.point.y, to.point.y) + maxY,
-            max(from.point.z, to.point.z) + radius,
+            min(first.minX, last.minX) - bow, min(first.minY, last.minY), min(first.minZ, last.minZ) - bow,
+            max(first.maxX, last.maxX) + bow, max(first.maxY, last.maxY), max(first.maxZ, last.maxZ) + bow,
         )
     }
 
@@ -463,7 +461,7 @@ internal class BuilderSelectionActionPanel(
         var anchor: Location,
         var yaw: Float,
         var positionedFrom: Location,
-        val viewFrame: BuilderPanelViewFrame,
+        var viewFrame: BuilderPanelViewFrame,
         var placementDistance: Double = 2.4,
         val clickGate: BuilderPanelClickGate = BuilderPanelClickGate(),
         val buttons: MutableMap<BuilderPanelAction, Button> = linkedMapOf(),
@@ -552,7 +550,7 @@ internal class BuilderSelectionActionPanel(
     private fun createPanel(player: Player, current: BuilderPanelView): Panel {
         val actions = current.actions.distinct()
         val layout = layout(actions)
-        val viewFrame = captureViewFrame(player)
+        val viewFrame = captureViewFrame(player, current.selection)
         val placement = placement(player, layout, viewFrame)
         val panel = Panel(
             owner = player.uniqueId,
@@ -588,7 +586,8 @@ internal class BuilderSelectionActionPanel(
                 player,
                 panel,
                 layout,
-                forceSnap = panel.selection != current.selection || panel.actions != actions,
+                forceSnap = panel.actions != actions,
+                selection = current.selection,
             )
         }
         if (panel.context != current.context || panel.selection != current.selection) {
@@ -610,11 +609,13 @@ internal class BuilderSelectionActionPanel(
         panel: Panel,
         layout: BuilderPanelLayout,
         forceSnap: Boolean,
+        selection: BuilderSelection = panel.selection,
     ) {
         val oldAnchor = BuilderPanelAnchor(
             BuilderPanelPoint3(panel.anchor.x, panel.anchor.y, panel.anchor.z), panel.yaw,
         )
-        val placed = placement(player, layout, panel.viewFrame, panel.placementDistance)
+        val frame = captureViewFrame(player, selection, panel.viewFrame)
+        val placed = placement(player, layout, frame, panel.placementDistance)
         val anchor = placed.anchor
         val yaw = anchor.yaw
         val newAnchor = BuilderPanelAnchor(BuilderPanelPoint3(anchor.x, anchor.y, anchor.z), yaw)
@@ -627,6 +628,7 @@ internal class BuilderSelectionActionPanel(
                 BuilderPanelGeometry.sweptBounds(oldAnchor, newAnchor, layout, settings),
             )
         panel.interpolationDurationForNextUpdate = if (canInterpolate) INTERPOLATION_TICKS else 0
+        panel.viewFrame = frame
         panel.anchor = anchor
         panel.yaw = yaw
         panel.positionedFrom = bodyPosition(player)
@@ -683,20 +685,25 @@ internal class BuilderSelectionActionPanel(
 
     private fun normalizeYaw(yaw: Float): Float = ((yaw % 360f) + 360f) % 360f
 
-    private fun captureViewFrame(player: Player): BuilderPanelViewFrame {
+    private fun captureViewFrame(
+        player: Player,
+        selection: BuilderSelection,
+        previous: BuilderPanelViewFrame? = null,
+    ): BuilderPanelViewFrame {
         val feet = bodyPosition(player)
         val eye = player.eyeLocation
-        val look = eye.direction.clone().normalize()
-        val horizontalLength = hypot(look.x, look.z)
-        val yaw = if (horizontalLength > 1e-8) {
-            normalizeYaw(Math.toDegrees(kotlin.math.atan2(look.x, -look.z)).toFloat())
-        } else {
-            normalizeYaw(eye.yaw)
+        val offset = previous?.eyeOffset
+            ?: BuilderPanelPoint3(eye.x - feet.x, eye.y - feet.y, eye.z - feet.z)
+        val fallback = previous?.direction ?: Math.toRadians(eye.yaw.toDouble()).let {
+            BuilderPanelPoint3(-sin(it), 0.0, cos(it))
         }
+        val direction = BuilderPanelGeometry.selectionDirection(
+            BuilderPanelPoint3(feet.x + offset.x, feet.y + offset.y, feet.z + offset.z), selection, fallback,
+        )
         return BuilderPanelViewFrame(
-            eyeOffset = BuilderPanelPoint3(eye.x - feet.x, eye.y - feet.y, eye.z - feet.z),
-            direction = BuilderPanelPoint3(look.x, look.y, look.z),
-            yaw = yaw,
+            eyeOffset = offset,
+            direction = direction,
+            yaw = normalizeYaw(Math.toDegrees(kotlin.math.atan2(direction.x, -direction.z)).toFloat()),
         )
     }
 

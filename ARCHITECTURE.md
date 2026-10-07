@@ -218,12 +218,15 @@ the normal plugin restart path rather than `/builder reload`.
 is held. Text uses the shared `PaperPacketDisplays` owner; private Interaction
 targets and the same bounded, occlusion-checked aiming rule drive hover and
 both mouse buttons. A compact two-column panel shows six actions per page and
-arrow navigation with a separate page caption. The initial actual eye ray centers
-the full panel envelope; its direction and eye offset remain latched for that panel.
-Body translation drives continuous placement updates with client interpolation;
-head rotation and eye-height changes alone leave its anchor stationary. Candidate
-placement checks the full panel footprint against loaded world geometry. Fixed-yaw
-interpolation checks the thin swept footprint; obstacle clearance retains a safe
+arrow navigation with a separate page caption. The full panel envelope sits at
+the captured eye height, toward the selection's horizontal centre, perpendicular
+to the horizontal player-to-selection line. Body translation and selection changes
+recompute that direction; head turns and crouching in place leave its anchor still.
+Within 0.25 blocks of the horizontal centre the previous direction is retained;
+only the initial degenerate case falls back to the player's horizontal look.
+Candidate placement checks the full panel footprint against loaded world geometry.
+Native interpolation checks endpoint footprints plus the rotation arc's maximum
+deviation, without inflating small turns to a full cylinder. Obstacle clearance retains a safe
 distance and restores it gradually with hysteresis. Context identity
 and a duplicate-click gate prevent old inputs from confirming a replacement
 plan. Changing a selection corner discards its pending ordinary plan. Tool,
