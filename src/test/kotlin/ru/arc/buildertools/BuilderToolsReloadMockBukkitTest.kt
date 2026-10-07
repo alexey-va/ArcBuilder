@@ -87,6 +87,7 @@ class BuilderToolsReloadMockBukkitTest : FunSpec({
             plain(console.nextComponentMessage()) shouldContain "применена без перезапуска"
             awaitBuilderUp(paper)
             activePanelSettings().suppressSelectionGlow shouldBe true
+            activePanelSettings().obstacleMaxShift shouldBe 1.25
 
             val player = paper.addPlayer("ReloadJourney").apply {
                 isOp = false
@@ -97,12 +98,14 @@ class BuilderToolsReloadMockBukkitTest : FunSpec({
             val liveConfig = Config(plugin.dataPath, ConfigManager.moduleYamlRelative(plugin.dataPath, "builder-tools.yml"))
             liveConfig.setStringList("locales.ru.help", listOf("<green>Маркер горячей перезагрузки"))
             liveConfig.setBoolean("selection-panel.suppress-selection-glow", false)
+            liveConfig.setDouble("selection-panel.obstacle-max-shift", 0.5)
             liveConfig.saveStrict()
 
             BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
             plain(console.nextComponentMessage()) shouldContain "применена без перезапуска"
             awaitBuilderUp(paper)
             activePanelSettings().suppressSelectionGlow shouldBe false
+            activePanelSettings().obstacleMaxShift shouldBe 0.5
             BuilderToolsModule.onCommand(player, command, "builder", arrayOf("help")) shouldBe true
             plain(player.nextComponentMessage()) shouldContain "маркер горячей перезагрузки"
 

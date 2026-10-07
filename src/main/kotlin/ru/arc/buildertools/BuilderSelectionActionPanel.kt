@@ -67,6 +67,7 @@ internal data class BuilderPanelSettings(
     val labelScale: Float = 0.8f,
     val reach: Double = 4.0,
     val suppressSelectionGlow: Boolean = true,
+    val obstacleMaxShift: Double = 1.25,
 ) {
     init {
         require(distance.isFinite() && distance > 0.0)
@@ -77,6 +78,9 @@ internal data class BuilderPanelSettings(
         require(buttonHeight.isFinite() && buttonHeight in 0.1f..1.0f)
         require(labelScale.isFinite() && labelScale in 0.1f..2.0f)
         require(reach.isFinite() && reach in 0.5..8.0)
+        require(obstacleMaxShift.isFinite() && obstacleMaxShift in 0.0..1.5) {
+            "selection-panel.obstacle-max-shift must be between 0 and 1.5 blocks"
+        }
     }
 }
 
@@ -103,6 +107,7 @@ internal data class BuilderPanelBounds(
 }
 
 internal data class BuilderPanelAnchor(val point: BuilderPanelPoint3, val yaw: Float)
+internal data class BuilderPanelShift(val side: Double = 0.0, val up: Double = 0.0)
 internal data class BuilderPanelViewFrame(
     val eyeOffset: BuilderPanelPoint3,
     val direction: BuilderPanelPoint3,
@@ -340,6 +345,39 @@ internal object BuilderPanelGeometry {
         return null
     }
 
+    /** Prefer the smallest escape from an obstruction and retain it until the return path has clearance. */
+    fun adaptiveShift(
+        maximum: Double,
+        previous: BuilderPanelShift?,
+        clear: (BuilderPanelShift, Double) -> Boolean,
+    ): BuilderPanelShift? {
+        require(maximum.isFinite() && maximum in 0.0..1.5)
+        val retained = previous?.takeIf { abs(it.side) <= maximum && it.up in 0.0..maximum }
+        if (retained != null && clear(retained, 0.0)) {
+            val length = hypot(retained.side, retained.up)
+            if (length <= EPSILON) return retained
+            fun towardsCenter(step: Double): BuilderPanelShift {
+                if (length <= step) return BuilderPanelShift()
+                val factor = (length - step) / length
+                return BuilderPanelShift(retained.side * factor, retained.up * factor)
+            }
+            val next = towardsCenter(0.06)
+            return if (clear(towardsCenter(0.18), 0.12) && clear(next, 0.0)) next else retained
+        }
+        val centered = BuilderPanelShift()
+        if (clear(centered, 0.0)) return centered
+        // A small, bounded local search; never route the menu around a wall or below the player's feet.
+        for (step in 1..ceil(maximum / 0.25).toInt()) {
+            val amount = min(maximum, step * 0.25)
+            for (shift in listOf(
+                BuilderPanelShift(up = amount), BuilderPanelShift(side = amount), BuilderPanelShift(side = -amount),
+            )) {
+                if (clear(shift, 0.0)) return shift
+            }
+        }
+        return null
+    }
+
     fun controlsReachable(
         eye: BuilderPanelPoint3,
         anchor: BuilderPanelAnchor,
@@ -484,7 +522,7 @@ internal class BuilderSelectionActionPanel(
     private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "selection-action-panel"),
     private val onSelectionGlowSuppression: (UUID, Boolean) -> Unit = { _, _ -> },
 ) : Listener, AutoCloseable {
-    private data class Placement(val anchor: Location, val distance: Double)
+    private data class Placement(val anchor: Location, val distance: Double, val shift: BuilderPanelShift)
     private data class Button(
         val action: BuilderPanelAction,
         val label: PacketTextDisplay,
@@ -515,6 +553,7 @@ internal class BuilderSelectionActionPanel(
         var interpolationDurationForNextUpdate: Int = INTERPOLATION_TICKS,
     ) {
         var selectionGlowSuppressed = false
+        var obstacleShift = BuilderPanelShift()
     }
 
     private val panels = mutableMapOf<UUID, Panel>()
@@ -609,7 +648,7 @@ internal class BuilderSelectionActionPanel(
             viewFrame = viewFrame,
             placementDistance = placement.distance,
             actions = actions,
-        )
+        ).apply { obstacleShift = placement.shift }
         try {
             panel.statusDisplay = newLabel(player, statusLocation(panel, layout), STATUS_SCALE)
             return panel
@@ -660,7 +699,10 @@ internal class BuilderSelectionActionPanel(
             BuilderPanelPoint3(panel.anchor.x, panel.anchor.y, panel.anchor.z), panel.yaw,
         )
         val frame = captureViewFrame(player, selection, panel.viewFrame)
-        val placed = placement(player, layout, frame, panel.placementDistance)
+        val placed = placement(
+            player, layout, frame, panel.placementDistance,
+            panel.obstacleShift.takeIf { panel.selection == selection },
+        )
         val anchor = placed.anchor
         val yaw = anchor.yaw
         val newAnchor = BuilderPanelAnchor(BuilderPanelPoint3(anchor.x, anchor.y, anchor.z), yaw)
@@ -678,6 +720,7 @@ internal class BuilderSelectionActionPanel(
         panel.yaw = yaw
         panel.positionedFrom = bodyPosition(player)
         panel.placementDistance = placed.distance
+        panel.obstacleShift = placed.shift
     }
 
     private fun updatePagination(
@@ -767,28 +810,49 @@ internal class BuilderSelectionActionPanel(
         layout: BuilderPanelLayout,
         frame: BuilderPanelViewFrame,
         previousDistance: Double? = null,
+        previousShift: BuilderPanelShift? = null,
     ): Placement {
         val eye = eyeLocation(player, frame)
-        val direction = org.bukkit.util.Vector(frame.direction.x, frame.direction.y, frame.direction.z)
-        val ray = player.world.rayTraceBlocks(eye, direction, settings.reach,
-            FluidCollisionMode.NEVER, true)
-        val blockDistance = ray?.hitPosition?.distance(eye.toVector())
-        val maximum = min(settings.distance, blockDistance?.let { max(0.25, it - 0.35) } ?: settings.distance)
-        fun anchorAt(distance: Double): Location {
+        fun anchorAt(distance: Double, shift: BuilderPanelShift): Location {
             val placed = BuilderPanelGeometry.anchorOnRay(
                 BuilderPanelPoint3(eye.x, eye.y, eye.z),
                 frame.direction,
                 frame.yaw,
-                settings.copy(distance = distance),
+                settings.copy(
+                    distance = distance,
+                    sideOffset = settings.sideOffset + shift.side,
+                    heightOffset = settings.heightOffset + shift.up,
+                ),
                 layout,
             )
             return Location(player.world, placed.point.x, placed.point.y, placed.point.z, placed.yaw, 0f)
         }
+        fun clear(distance: Double, shift: BuilderPanelShift, extraClearance: Double = 0.0): Boolean {
+            val anchor = anchorAt(distance, shift)
+            return areaAvailable(
+                player, player.world, anchor, anchor.yaw, layout, frame,
+                checkLineOfSight = true, extraClearance = extraClearance,
+            )
+        }
+        val retainedDistance = previousDistance?.coerceAtMost(settings.distance) ?: settings.distance
+        val shift = BuilderPanelGeometry.adaptiveShift(settings.obstacleMaxShift, previousShift) { candidate, margin ->
+            clear(retainedDistance, candidate, margin)
+        }
+        if (shift != null) {
+            val distance = BuilderPanelGeometry.stableDistance(settings.distance, previousDistance) { clear(it, shift) }
+            if (distance != null) return Placement(anchorAt(distance, shift), distance, shift)
+        }
+
+        // If a local detour cannot fit, retain the existing pullback along the centre ray.
+        val direction = org.bukkit.util.Vector(frame.direction.x, frame.direction.y, frame.direction.z)
+        val ray = player.world.rayTraceBlocks(eye, direction, settings.reach, FluidCollisionMode.NEVER, true)
+        val blockDistance = ray?.hitPosition?.distance(eye.toVector())
+        val maximum = min(settings.distance, blockDistance?.let { max(0.25, it - 0.35) } ?: settings.distance)
+        val centered = BuilderPanelShift()
         val distance = BuilderPanelGeometry.stableDistance(maximum, previousDistance) { candidate ->
-            val anchor = anchorAt(candidate)
-            areaAvailable(player, player.world, anchor, anchor.yaw, layout, frame, checkLineOfSight = true)
+            clear(candidate, centered)
         } ?: throw PanelAreaUnavailable()
-        return Placement(anchorAt(distance), distance)
+        return Placement(anchorAt(distance, centered), distance, centered)
     }
 
     private fun areaAvailable(
@@ -799,12 +863,19 @@ internal class BuilderSelectionActionPanel(
         layout: BuilderPanelLayout,
         frame: BuilderPanelViewFrame,
         checkLineOfSight: Boolean,
+        extraClearance: Double = 0.0,
     ): Boolean {
         val geometryAnchor = BuilderPanelAnchor(
             BuilderPanelPoint3(anchor.x, anchor.y, anchor.z),
             yaw,
         )
-        val panelBounds = BuilderPanelGeometry.panelBounds(geometryAnchor, layout, settings)
+        val eye = eyeLocation(player, frame)
+        if (!BuilderPanelGeometry.controlsReachable(
+            BuilderPanelPoint3(eye.x, eye.y, eye.z), geometryAnchor, layout, settings,
+        )) return false
+        val panelBounds = BuilderPanelGeometry.panelBounds(
+            geometryAnchor, layout, settings, BuilderPanelGeometry.SURFACE_CLEARANCE + extraClearance,
+        )
         if (!hasClearBlockBounds(player, world, panelBounds)) return false
         return !checkLineOfSight || hasLineOfSight(player, world, geometryAnchor, layout, frame)
     }

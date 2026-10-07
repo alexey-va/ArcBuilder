@@ -32,6 +32,7 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         candidate.selectionPanelSettings().sideOffset shouldBe 0.0
         candidate.selectionPanelSettings().heightOffset shouldBe 0.0
         candidate.selectionPanelSettings().suppressSelectionGlow shouldBe true
+        candidate.selectionPanelSettings().obstacleMaxShift shouldBe 1.25
         val plain = PlainTextComponentSerializer.plainText()
         plain.serialize(candidate.messages().render("selection-panel.actions.previous-page", "ru")) shouldBe "<"
         plain.serialize(candidate.messages().render("selection-panel.actions.next-page", "ru")) shouldBe ">"
@@ -87,6 +88,21 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         config.saveStrict()
         shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
             .message.orEmpty() shouldContain "selection-panel.suppress-selection-glow"
+    }
+
+    test("adaptive panel shift is bounded and keeps the operator override on reload") {
+        val root = configRoot()
+        val config = Config(root, "modules/builder-tools.yml")
+        for (invalid in listOf(-0.1, 1.51, Double.NaN)) {
+            config.setDouble("selection-panel.obstacle-max-shift", invalid)
+            config.saveStrict()
+            shouldThrowAny { BuilderToolsReloadPreflight.load(root) }
+        }
+        config.setDouble("selection-panel.obstacle-max-shift", 0.0)
+        config.saveStrict()
+        BuilderToolsReloadPreflight.load(root).selectionPanelSettings().obstacleMaxShift shouldBe 0.0
+        BuilderToolsConfig.mergeBundledDefaults(root)
+        Config(root, "modules/builder-tools.yml").double("selection-panel.obstacle-max-shift") shouldBe 0.0
     }
 
     test("client language can be re-enabled through validated configuration") {

@@ -14,6 +14,7 @@ import org.bukkit.block.Block
 import org.bukkit.entity.Interaction
 import org.bukkit.entity.Player
 import org.bukkit.plugin.Plugin
+import org.bukkit.util.BoundingBox
 import org.bukkit.util.Vector
 import ru.arc.paper.display.PacketTextDisplay
 import ru.arc.paper.display.PaperPacketDisplays
@@ -450,6 +451,237 @@ class BuilderSelectionActionPanelTest : StringSpec({
 
         val opening = checkNotNull(BuilderPanelGeometry.stableDistance(2.4, chosen) { it <= 2.4 })
         (opening - chosen in 0.0..0.061) shouldBe true
+    }
+
+    "adaptive obstacle shifts choose the nearest visible full-panel escape and retain it safely" {
+        val settings = BuilderPanelSettings()
+        val eye = BuilderPanelPoint3(0.5, 65.62, 0.5)
+        val direction = BuilderPanelPoint3(0.0, 0.0, 1.0)
+        val layout = BuilderPanelGeometry.layout(8, settings, navigationCount = 2)
+        val eyeVector = Vector(eye.x, eye.y, eye.z)
+
+        fun anchor(shift: BuilderPanelShift) = BuilderPanelGeometry.anchorOnRay(
+            eye,
+            direction,
+            180f,
+            settings.copy(
+                sideOffset = settings.sideOffset + shift.side,
+                heightOffset = settings.heightOffset + shift.up,
+            ),
+            layout,
+        )
+
+        fun clear(blocker: BoundingBox, shift: BuilderPanelShift, extraClearance: Double): Boolean {
+            val candidate = anchor(shift)
+            val obstacle = BuilderPanelBounds(
+                blocker.minX, blocker.minY, blocker.minZ, blocker.maxX, blocker.maxY, blocker.maxZ,
+            )
+            val envelope = BuilderPanelGeometry.panelBounds(
+                candidate,
+                layout,
+                settings,
+                BuilderPanelGeometry.SURFACE_CLEARANCE + extraClearance,
+            )
+            if (envelope.overlaps(obstacle) || !BuilderPanelGeometry.controlsReachable(eye, candidate, layout, settings)) {
+                return false
+            }
+
+            val halfWidth = maxOf(
+                BuilderPanelGeometry.STATUS_DISPLAY_WIDTH / 2.0,
+                layout.buttons.maxOf { kotlin.math.abs(it.x) + BuilderPanelGeometry.controlWidth(layout, it.index, settings) / 2.0 },
+            )
+            val minY = minOf(
+                layout.statusY - BuilderPanelGeometry.STATUS_HEIGHT / 2.0,
+                layout.buttons.minOf { it.y - settings.buttonHeight / 2.0 },
+            )
+            val maxY = maxOf(
+                layout.statusY + BuilderPanelGeometry.STATUS_HEIGHT / 2.0,
+                layout.buttons.maxOf { it.y + settings.buttonHeight / 2.0 },
+            )
+            val targets = buildList {
+                add(BuilderPanelPoint3(0.0, layout.statusY, 0.0))
+                layout.buttons.forEach { add(BuilderPanelPoint3(it.x, it.y, 0.0)) }
+                listOf(-halfWidth, halfWidth).forEach { x ->
+                    listOf(minY, maxY).forEach { y -> add(BuilderPanelPoint3(x, y, 0.0)) }
+                }
+            }
+            val yaw = Math.toRadians(candidate.yaw.toDouble())
+            val rightX = kotlin.math.cos(yaw)
+            val rightZ = kotlin.math.sin(yaw)
+            return targets.all { local ->
+                val target = Vector(
+                    candidate.point.x + rightX * local.x,
+                    candidate.point.y + local.y,
+                    candidate.point.z + rightZ * local.x,
+                )
+                val ray = target.clone().subtract(eyeVector)
+                ray.normalize()
+                blocker.rayTrace(eyeVector, ray, target.distance(eyeVector) - BuilderPanelGeometry.SURFACE_CLEARANCE) == null
+            }
+        }
+
+        val base = anchor(BuilderPanelShift())
+        val lowBlocker = BoundingBox(0.0, 64.0, 2.0, 1.0, 65.0, 3.0)
+        val lowBaseBounds = BuilderPanelGeometry.panelBounds(base, layout, settings)
+        lowBaseBounds.overlaps(BuilderPanelBounds(
+            lowBlocker.minX, lowBlocker.minY, lowBlocker.minZ, lowBlocker.maxX, lowBlocker.maxY, lowBlocker.maxZ,
+        )) shouldBe true
+        val up = checkNotNull(BuilderPanelGeometry.adaptiveShift(settings.obstacleMaxShift, null) { shift, margin ->
+            clear(lowBlocker, shift, margin)
+        })
+        up shouldBe BuilderPanelShift(up = 0.25)
+        val upAnchor = anchor(up)
+        BuilderPanelGeometry.controlsReachable(eye, upAnchor, layout, settings) shouldBe true
+        clear(lowBlocker, up, 0.0) shouldBe true
+
+        val sideBlocker = BoundingBox(2.0, 65.0, 2.0, 3.0, 66.0, 3.0)
+        val side = checkNotNull(BuilderPanelGeometry.adaptiveShift(settings.obstacleMaxShift, null) { shift, margin ->
+            clear(sideBlocker, shift, margin)
+        })
+        side shouldBe BuilderPanelShift(side = 0.25)
+        BuilderPanelGeometry.controlsReachable(eye, anchor(side), layout, settings) shouldBe true
+        clear(sideBlocker, side, 0.0) shouldBe true
+
+        BuilderPanelGeometry.adaptiveShift(0.0, null) { shift, margin ->
+            shift == BuilderPanelShift() && margin == 0.0
+        } shouldBe BuilderPanelShift()
+        BuilderPanelGeometry.adaptiveShift(0.0, null) { _, _ -> false } shouldBe null
+        BuilderPanelGeometry.adaptiveShift(settings.obstacleMaxShift, null) { _, _ -> false } shouldBe null
+
+        var retained = checkNotNull(BuilderPanelGeometry.adaptiveShift(settings.obstacleMaxShift, null) { shift, margin ->
+            shift.side == 0.0 && shift.up >= 0.25 + margin
+        })
+        retained shouldBe BuilderPanelShift(up = 0.25)
+        listOf(0.12, 0.14, 0.13, 0.15).forEach { minimumUp ->
+            val unchanged = BuilderPanelGeometry.adaptiveShift(settings.obstacleMaxShift, retained) { shift, margin ->
+                shift.side == 0.0 && shift.up >= minimumUp + margin
+            }
+            unchanged shouldBe retained
+        }
+        repeat(8) {
+            val next = checkNotNull(BuilderPanelGeometry.adaptiveShift(settings.obstacleMaxShift, retained) { _, _ -> true })
+            (retained.up - next.up in 0.0..0.0600001) shouldBe true
+            retained = next
+        }
+        retained shouldBe BuilderPanelShift()
+    }
+
+    "tick routes a panel around a block, retains the offset while still, then returns gradually on movement" {
+        val worldId = UUID.randomUUID()
+        val world = mockk<World>(relaxed = true)
+        every { world.uid } returns worldId
+        every { world.minHeight } returns -64
+        every { world.maxHeight } returns 320
+        every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
+
+        val obstacleBox = BoundingBox(0.0, 65.0, 2.0, 1.0, 66.0, 3.0)
+        var obstaclePresent = true
+        var rayTraceCount = 0
+        val obstacleBlock = mockk<Block>(relaxed = true)
+        every { obstacleBlock.isPassable } returns false
+        every { obstacleBlock.boundingBox } returns obstacleBox
+        val air = mockk<Block>(relaxed = true)
+        every { air.isPassable } returns true
+        every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers {
+            if (obstaclePresent && firstArg<Int>() == 0 && secondArg<Int>() == 65 && thirdArg<Int>() == 2) {
+                obstacleBlock
+            } else {
+                air
+            }
+        }
+        every {
+            world.rayTraceBlocks(
+                any<Location>(), any<Vector>(), any<Double>(), any<FluidCollisionMode>(), any<Boolean>(),
+            )
+        } answers {
+            rayTraceCount++
+            if (obstaclePresent) {
+                obstacleBox.rayTrace(firstArg<Location>().toVector(), secondArg<Vector>(), thirdArg<Double>())
+            } else {
+                null
+            }
+        }
+
+        val playerId = UUID.randomUUID()
+        var feetZ = 0.5
+        val player = mockk<Player>(relaxed = true)
+        every { player.uniqueId } returns playerId
+        every { player.world } returns world
+        every { player.isOnline } returns true
+        every { player.location } answers { Location(world, 0.5, 64.0, feetZ) }
+        every { player.eyeLocation } answers { Location(world, 0.5, 65.62, feetZ, 90f, 0f) }
+        every { player.sentChunkKeys } returns (-2..2).flatMap { x ->
+            (-2..2).map { z -> chunkKey(x, z) }
+        }.toSet()
+        val server = mockk<Server>(relaxed = true)
+        every { server.onlinePlayers } returns listOf(player)
+        every { server.getPlayer(playerId) } returns player
+        val plugin = mockk<Plugin>(relaxed = true)
+        every { plugin.server } returns server
+        val displays = mockk<PaperPacketDisplays>(relaxed = true)
+        every { displays.spawnText(any<Location>(), any<Component>()) } answers {
+            val location = firstArg<Location>().clone()
+            mockk<PacketTextDisplay>(relaxed = true).also { display ->
+                every { display.isValid } returns true
+                every { display.location } returns location
+                every { display.remove() } returns Unit
+            }
+        }
+
+        val settings = BuilderPanelSettings()
+        var currentView = BuilderPanelView(
+            "block-obstacle",
+            singleBlockSelection(worldId, x = 0, z = 5),
+            Component.text("status"),
+            emptyList(),
+        )
+        val panel = BuilderSelectionActionPanel(
+            plugin,
+            settings,
+            mockk<LocalizedMiniMessage>(relaxed = true),
+            view = { currentView },
+            onAction = { _, _ -> },
+            displays = displays,
+        )
+        try {
+            panel.tick()
+            val state = panelState(panel, playerId)
+            val shifted = panelField(state, "obstacleShift") as BuilderPanelShift
+            (shifted.up >= 0.5 && shifted.up <= settings.obstacleMaxShift) shouldBe true
+            shifted.side shouldBe 0.0
+            (rayTraceCount > 0) shouldBe true
+            val anchor = (panelField(state, "anchor") as Location).clone()
+            val layout = BuilderPanelGeometry.layout(0, settings)
+            val panelBounds = BuilderPanelGeometry.panelBounds(
+                BuilderPanelAnchor(BuilderPanelPoint3(anchor.x, anchor.y, anchor.z), anchor.yaw),
+                layout,
+                settings,
+            )
+            panelBounds.overlaps(BuilderPanelBounds(
+                obstacleBox.minX, obstacleBox.minY, obstacleBox.minZ, obstacleBox.maxX, obstacleBox.maxY, obstacleBox.maxZ,
+            )) shouldBe false
+
+            repeat(2) { panel.tick() }
+            panelField(state, "obstacleShift") shouldBe shifted
+            panelField(state, "anchor") shouldBe anchor
+
+            obstaclePresent = false
+            repeat(2) { panel.tick() }
+            panelField(state, "obstacleShift") shouldBe shifted
+            panelField(state, "anchor") shouldBe anchor
+
+            var previousUp = shifted.up
+            repeat(13) {
+                feetZ += 0.05
+                panel.tick()
+                val next = panelField(state, "obstacleShift") as BuilderPanelShift
+                (previousUp - next.up in 0.0..0.0600001) shouldBe true
+                previousUp = next.up
+            }
+            previousUp shouldBe 0.0
+        } finally {
+            panel.close()
+        }
     }
 
     "plane hover uses the visible button rectangle and honors block occlusion" {

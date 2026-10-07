@@ -223,6 +223,9 @@ selection-panel:
   # Temporarily hide the selection's glow while looking toward the menu.
   # The frame remains visible; false restores always-on glow. Applies on reload.
   suppress-selection-glow: true
+  # Maximum local rise or side shift around an obstacle, in blocks (0 disables; max 1.5).
+  # A stationary player keeps the chosen offset. Movement allows a gradual return. Applies on reload.
+  obstacle-max-shift: 1.25
 
 preview:
   # Recheck ordinary preview world surfaces twice per second.

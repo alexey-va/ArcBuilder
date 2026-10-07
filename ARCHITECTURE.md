@@ -225,6 +225,11 @@ recompute that direction; head turns and crouching in place leave its anchor sti
 Within 0.25 blocks of the horizontal centre the previous direction is retained;
 only the initial degenerate case falls back to the player's horizontal look.
 Candidate placement checks the full panel footprint against loaded world geometry.
+Before pulling closer, it can escape a small obstacle with the nearest upward or
+sideways shift, bounded by `selection-panel.obstacle-max-shift` (1.25 blocks by
+default; zero disables shifts). Candidates retain full-panel visibility and reach.
+The chosen shift stays fixed while the player stands still; movement allows a
+gradual return toward the centre only when an additional clearance probe passes.
 Native interpolation checks endpoint footprints plus the rotation arc's maximum
 deviation, without inflating small turns to a full cylinder. Obstacle clearance retains a safe
 distance and restores it gradually with hysteresis. Context identity
