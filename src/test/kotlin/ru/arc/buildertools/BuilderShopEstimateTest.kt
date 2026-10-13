@@ -21,6 +21,10 @@ import java.util.UUID
 class BuilderShopEstimateTest : FunSpec({
     val planId = UUID.fromString("77777777-7777-7777-7777-777777777777")
 
+    afterEach {
+        BuilderLocalePolicy.configure(defaultLocaleTag = "ru", followClientLocale = false)
+    }
+
     test("auto-buy is limited to material-backed construction plans") {
         BuilderShopEstimateRules.supportsAutoBuy(BuilderPlanKind.FILL) shouldBe true
         BuilderShopEstimateRules.supportsAutoBuy(BuilderPlanKind.REPLACE) shouldBe true
@@ -131,6 +135,7 @@ class BuilderShopEstimateTest : FunSpec({
     }
 
     test("shop feedback localizes material names and provider statuses") {
+        BuilderLocalePolicy.configure(defaultLocaleTag = "en", followClientLocale = false)
         MockBukkitTestRuntime.open().use { paper ->
             val player = paper.server.addPlayer("LocalizedBuyer")
             val world = paper.addSimpleWorld("localized-shop")

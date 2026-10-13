@@ -85,17 +85,28 @@ jobs:
       TEST_TIMEOUT: "60000"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Check out ARC runtime
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: alexey-va/ARC
+          ref: dd15c0e8af4274bd1d626cf96f83880a4af61fc9
+          path: e2e-arc
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+      - name: Build ARC runtime
+        working-directory: e2e-arc
+        run: ./gradlew --no-daemon shadowJar
       - name: Test ArcBuilder on real Paper
         shell: bash
         run: |
           set -o pipefail
           mkdir -p build
-          ./gradlew --no-daemon plugwrightTest 2>&1 | tee build/plugwright-e2e.log
+          mapfile -t arc_jars < <(find "$GITHUB_WORKSPACE/e2e-arc/build/libs" -maxdepth 1 -type f -name 'ARC-*.jar' ! -name '*-plain.jar' -print | sort)
+          test "${#arc_jars[@]}" -eq 1
+          ./gradlew --no-daemon plugwrightTest "-Pe2eArcJar=${arc_jars[0]}" 2>&1 | tee build/plugwright-e2e.log
           git diff --exit-code -- src/test/e2e/package-lock.json
       - name: Upload E2E results and Paper logs
         if: always()

@@ -7,6 +7,7 @@ import ru.arc.core.PaperArcRuntime
 import ru.arc.core.Tasks
 import ru.arc.buildertools.BuilderToolsModule
 import ru.arc.hooks.HookRegistry
+import ru.arc.paper.sql.PaperSqlServices
 import ru.arc.paper.runtime.PaperPluginRuntime
 import java.nio.file.Files
 import java.util.logging.Level
@@ -24,6 +25,7 @@ open class ArcBuilderPlugin : JavaPlugin() {
             it.start("version" to pluginMeta.version)
         }
         try {
+            runtime.own(PaperSqlServices.installConsumer(this))
             val runtimeConfigPath = ConfigManager.moduleYamlPath(dataPath, "builder-tools-runtime.yml")
             val serverId = if (Files.isRegularFile(runtimeConfigPath)) {
                 ConfigManager.ofModule(dataPath, "builder-tools-runtime.yml")

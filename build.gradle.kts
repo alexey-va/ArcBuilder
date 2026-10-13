@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.60"
+version = "1.0.61"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -32,14 +32,14 @@ kotlin { jvmToolchain(25) }
 
 dependencies {
     implementation(kotlin("stdlib"))
-    implementation("ru.ruscrafting.arc:arc-core:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.21")
-    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.21")
+    implementation("ru.ruscrafting.arc:arc-core:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.22")
+    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.22")
     implementation("org.snakeyaml:snakeyaml-engine:3.0.1")
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.21")
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.21")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.22")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.22")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
     implementation("de.tr7zw:item-nbt-api:2.15.7")
@@ -64,8 +64,8 @@ dependencies {
     testImplementation("com.github.retrooper:packetevents-spigot:2.12.1")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.21")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.21")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.22")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.22")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.Slimefun:Slimefun4:4.10")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
@@ -75,7 +75,7 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.0.3")
 
     "integrationTestImplementation"(sourceSets.test.get().output)
-    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.21")
+    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.22")
     configurations["integrationTestImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["integrationTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
 }
@@ -124,12 +124,19 @@ tasks {
         exclude("com/sk89q/**")
         exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
         exclude("ru/arc/paper/api/**")
+        exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
+        exclude("ru/arc/paper/sql/SharedPaperSqlService*.class")
+        exclude("ru/arc/paper/redis/PaperRedisServiceProvider*.class")
+        exclude("ru/arc/paper/redis/SharedPaperRedisService*.class")
+        exclude("ru/arc/paper/metrics/PaperArcMetricsProvider*.class")
         relocate("com.github.stefvanschie.inventoryframework", "ru.ruscrafting.builder.libs.inventoryframework")
         relocate("com.jeff_media.customblockdata", "ru.ruscrafting.builder.libs.customblockdata")
         relocate("de.tr7zw.changeme.nbtapi", "ru.ruscrafting.builder.libs.nbtapi")
     }
     check { dependsOn(shadowJar) }
 }
+
+val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
 
 plugwright {
     minecraftVersion.set("1.21.11")
@@ -145,7 +152,11 @@ plugwright {
     acceptEula.set(true)
     jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
     writeFiles {
+        e2eArcJar.orNull?.let { file("plugins/ARC.jar", it) }
         file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
+        file("plugins/ARC/modules/runtime.yml", projectDir.resolve("src/test/e2e/fixtures/arc-runtime.yml"))
+        file("plugins/ARC/modules/redis.yml", projectDir.resolve("src/test/e2e/fixtures/arc-redis.yml"))
+        file("plugins/ARC/modules/ops-http.yml", projectDir.resolve("src/test/e2e/fixtures/arc-ops-http.yml"))
         file("plugins/ArcBuilder/modules/builder-tools.yml", projectDir.resolve("src/main/resources/modules/builder-tools.yml").readText()
             .replaceFirst("enabled: false", "enabled: true")
             .replaceFirst("default-locale: ru", "default-locale: en")
