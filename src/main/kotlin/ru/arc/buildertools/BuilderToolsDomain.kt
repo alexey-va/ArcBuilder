@@ -1,5 +1,7 @@
 package ru.arc.buildertools
 
+import ru.arc.paper.api.ArcSchematicIds
+
 import ru.arc.paper.playerstate.PaperPlayerStateEnvelope
 import java.util.UUID
 import kotlin.math.abs
@@ -204,7 +206,7 @@ data class BuilderPlan(
         }
         require(skippedUnsafeBlocks in 0..ABSOLUTE_MAX_CHANGES) { "Skipped block count is invalid" }
         bookBuildingId?.let {
-            require(it.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}"))) {
+            require(it.length <= 160 && ArcSchematicIds.isValid(it)) {
                 "Builder-book plan building id is invalid"
             }
         }

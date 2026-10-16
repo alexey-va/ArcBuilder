@@ -1,3 +1,6 @@
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
 plugins {
     kotlin("jvm") version "2.3.0"
     id("com.gradleup.shadow") version "9.3.0"
@@ -6,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.62"
+version = "1.0.63"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -32,14 +35,14 @@ kotlin { jvmToolchain(25) }
 
 dependencies {
     implementation(kotlin("stdlib"))
-    implementation("ru.ruscrafting.arc:arc-core:2.7.23")
-    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.23")
-    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.23")
-    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.23")
-    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.23")
+    implementation("ru.ruscrafting.arc:arc-core:2.7.26")
+    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.26")
+    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.26")
+    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.26")
+    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.26")
     implementation("org.snakeyaml:snakeyaml-engine:3.0.1")
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.23")
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.23")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.26")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.26")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
     implementation("de.tr7zw:item-nbt-api:2.15.7")
@@ -64,8 +67,8 @@ dependencies {
     testImplementation("com.github.retrooper:packetevents-spigot:2.12.1")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.23")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.23")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.26")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.26")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.Slimefun:Slimefun4:4.10")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
@@ -75,7 +78,7 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.0.3")
 
     "integrationTestImplementation"(sourceSets.test.get().output)
-    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.23")
+    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.26")
     configurations["integrationTestImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["integrationTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
 }
@@ -136,7 +139,77 @@ tasks {
     check { dependsOn(shadowJar) }
 }
 
+// E2E uses the same separate service provider and API owner as production.
+val e2eArcVersion = "1.4.400"
+val e2eArcCoreVersion = "0.1.2"
+val e2eArcCoreSha256 = "c4d167340f2a06b85b043b55ac533cc9f160630019cd8882e1e32f534c756ac7"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
+val e2eArcCoreArtifact = configurations.detachedConfiguration(
+    dependencies.create("ru.ruscrafting:ArcCore:$e2eArcCoreVersion"),
+).apply { isTransitive = false }
+val e2eArcCoreJar = providers.gradleProperty("e2eArcCoreJar").map { project.file(it) }
+    .orElse(providers.provider { e2eArcCoreArtifact.singleFile })
+val e2eRuntimeArtifacts = layout.buildDirectory.dir("e2e-runtime")
+
+val prepareE2eRuntimeArtifacts = tasks.register("prepareE2eRuntimeArtifacts") {
+    description = "Verifies and stages ARC and the standalone ArcCore provider without starting Paper."
+    group = "verification"
+    inputs.file(e2eArcJar).optional()
+    inputs.file(e2eArcCoreJar)
+    inputs.property("arcVersion", e2eArcVersion)
+    inputs.property("arcCoreVersion", e2eArcCoreVersion)
+    inputs.property("arcCoreSha256", e2eArcCoreSha256)
+    outputs.dir(e2eRuntimeArtifacts)
+    doLast {
+        val arc = requireNotNull(e2eArcJar.orNull) {
+            "Supply -Pe2eArcJar=/absolute/path/ARC-$e2eArcVersion.jar from the pinned ARC checkout"
+        }
+        val core = e2eArcCoreJar.get()
+        fun inspect(file: File, expectedName: String, expectedVersion: String): Set<String> {
+            require(file.isFile) { "E2E plugin artifact is missing: $file" }
+            return ZipFile(file).use { jar ->
+                val descriptor = jar.getInputStream(requireNotNull(jar.getEntry("plugin.yml")) {
+                    "E2E plugin descriptor is missing: $file"
+                }).bufferedReader().use { it.readText() }
+                fun value(key: String): String? = descriptor.lineSequence()
+                    .firstOrNull { it.startsWith("$key:") }?.substringAfter(':')?.trim()?.trim('\'', '"')
+                require(value("name") == expectedName && value("version") == expectedVersion) {
+                    "Expected $expectedName $expectedVersion, found ${value("name")} ${value("version")}: $file"
+                }
+                jar.entries().asSequence().map { it.name }.toSet()
+            }
+        }
+        val arcEntries = inspect(arc, "ARC", e2eArcVersion)
+        val coreEntries = inspect(core, "ArcCore", e2eArcCoreVersion)
+        val sharedContracts = listOf("ArcSql", "ArcRedis", "ArcMetric", "ArcSchematic")
+        require(arcEntries.none { path -> sharedContracts.any { path.startsWith("ru/arc/paper/api/$it") } }) {
+            "ARC must consume the standalone ArcCore service API without bundling a second copy"
+        }
+        require(arcEntries.none { it.startsWith("ru/arc/paper/schematics/") }) {
+            "The schematic implementation belongs to ArcCore, not ARC"
+        }
+        require("ru/arc/paper/api/ArcSchematicService.class" in coreEntries &&
+            "ru/arc/paper/schematics/PaperSchematicServiceProvider.class" in coreEntries) {
+            "ArcCore must contain the shared schematic API and provider"
+        }
+        fun sha256(file: File): String = MessageDigest.getInstance("SHA-256")
+            .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+        val coreSha256 = sha256(core)
+        require(coreSha256 == e2eArcCoreSha256) { "ArcCore E2E artifact checksum mismatch: $coreSha256" }
+        val prepared = e2eRuntimeArtifacts.get().asFile.apply { mkdirs() }
+        arc.copyTo(prepared.resolve("ARC.jar"), overwrite = true)
+        core.copyTo(prepared.resolve("ArcCore.jar"), overwrite = true)
+        prepared.resolve("runtime-artifacts.properties").writeText(
+            "arc.version=$e2eArcVersion\narc.sha256=${sha256(arc)}\n" +
+                "arccore.version=$e2eArcCoreVersion\narccore.sha256=$coreSha256\n",
+        )
+        logger.lifecycle("E2E runtime artifacts verified: ARC $e2eArcVersion, ArcCore $e2eArcCoreVersion")
+    }
+}
+
+tasks.withType<me.drownek.plugwright.AbstractPlugwrightTask>().configureEach {
+    dependsOn(prepareE2eRuntimeArtifacts)
+}
 
 plugwright {
     minecraftVersion.set("1.21.11")
@@ -152,7 +225,8 @@ plugwright {
     acceptEula.set(true)
     jvmArgs.set(listOf("-Xms512M", "-Xmx2G", "-XX:ActiveProcessorCount=2"))
     writeFiles {
-        e2eArcJar.orNull?.let { file("plugins/ARC.jar", it) }
+        file("plugins/ARC.jar", e2eRuntimeArtifacts.get().file("ARC.jar").asFile)
+        file("plugins/ArcCore.jar", e2eRuntimeArtifacts.get().file("ArcCore.jar").asFile)
         file("server.properties", projectDir.resolve("src/test/e2e/fixtures/server.properties"))
         file("plugins/ARC/modules/runtime.yml", projectDir.resolve("src/test/e2e/fixtures/arc-runtime.yml"))
         file("plugins/ARC/modules/redis.yml", projectDir.resolve("src/test/e2e/fixtures/arc-redis.yml"))

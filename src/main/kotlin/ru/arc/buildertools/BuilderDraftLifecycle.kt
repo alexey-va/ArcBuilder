@@ -20,7 +20,9 @@ import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.error
 import ru.arc.util.Logging.warn
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
+import ru.arc.autobuild.Building
 import java.util.concurrent.RejectedExecutionException
 
 internal data class BuilderDraftLifecycleHealth(
@@ -66,16 +68,22 @@ internal interface BuilderDraftStorage {
     fun prepare(creatorId: UUID, source: BuilderClipboard): PreparedPlayerBuildBookTemplate
     fun persist(prepared: PreparedPlayerBuildBookTemplate): PlayerBuildBookTemplate
     fun inspectSchematic(buildingId: String): PlayerBuildBookDigestInspection
-    fun inspectContent(buildingId: String): PlayerBuildBookDigestInspection
+    fun inspectContent(buildingId: String, expectedSha256: String): CompletableFuture<PlayerBuildBookDigestInspection>
     fun register(template: PlayerBuildBookTemplate)
 }
 
-internal object PlayerBuildBookDraftStorage : BuilderDraftStorage {
+internal class PlayerBuildBookDraftStorage(
+    private val loadBuilding: (String, String?) -> CompletableFuture<Building>,
+) : BuilderDraftStorage {
     override fun prepare(creatorId: UUID, source: BuilderClipboard) = PlayerBuildBookStore.prepare(creatorId, source)
     override fun persist(prepared: PreparedPlayerBuildBookTemplate) = PlayerBuildBookStore.persist(prepared)
     override fun inspectSchematic(buildingId: String) = PlayerBuildBookStore.inspectSchematic(buildingId)
-    override fun inspectContent(buildingId: String) = PlayerBuildBookStore.inspectContent(buildingId)
-    override fun register(template: PlayerBuildBookTemplate) = PlayerBuildBookStore.register(template)
+    override fun inspectContent(buildingId: String, expectedSha256: String): CompletableFuture<PlayerBuildBookDigestInspection> =
+        loadBuilding(buildingId, expectedSha256).handle { building, failure ->
+            if (failure != null) PlayerBuildBookDigestInspection.Failed(failure)
+            else PlayerBuildBookDigestInspection.Ready(building.contentSha256)
+        }
+    override fun register(template: PlayerBuildBookTemplate) = Unit
 }
 
 /**
@@ -100,7 +108,7 @@ internal class BuilderDraftLifecycle(
 
     private val pending = mutableMapOf<UUID, BuilderDraftRecord>()
     private val conflictedPlayers = mutableSetOf<UUID>()
-    private val recoveries = mutableSetOf<UUID>()
+    private val recoveries = mutableMapOf<UUID, Any>()
     private val uncertainAcknowledgements = mutableSetOf<UUID>()
     private var ready = false
     private var failed = false
@@ -346,15 +354,28 @@ internal class BuilderDraftLifecycle(
     ) {
         val playerId = player.uniqueId
         val record = pending[playerId] ?: return
-        if (!recoveries.add(playerId)) return
+        if (playerId in recoveries) return
+        val recovery = Any()
+        recoveries[playerId] = recovery
         if (!operationLocks.isBookLocked(playerId) && !operationLocks.tryBookLock(playerId)) {
             recoveries -= playerId
             if (announce) send(player, "errors.busy")
             return
         }
-        writeAsync(
-            action = { storage.inspectSchematic(record.buildingId) },
-            callback = recovery@{ inspection, failure ->
+        val inspectionFuture = try {
+            CompletableFuture.supplyAsync({ storage.inspectSchematic(record.buildingId) }, storageExecutor)
+                .thenCompose { file ->
+                    if (file is PlayerBuildBookDigestInspection.Ready) {
+                        storage.inspectContent(record.buildingId, file.sha256).thenApply { content -> file to content }
+                    } else CompletableFuture.completedFuture(file to null)
+                }
+        } catch (failure: Throwable) {
+            CompletableFuture.failedFuture(failure)
+        }
+        inspectionFuture.whenComplete { inspected, failure ->
+            taskScope.runSync recovery@{
+                if (closed || pending[playerId] != record || recoveries[playerId] !== recovery) return@recovery
+                val inspection = inspected?.first
                 if (!player.isOnline) {
                     finishRecovery(playerId)
                     return@recovery
@@ -375,11 +396,12 @@ internal class BuilderDraftLifecycle(
                 }
                 val actualSha256 = (inspection as? PlayerBuildBookDigestInspection.Ready)?.sha256
                 if (actualSha256 != null) {
-                    when (val content = storage.inspectContent(record.buildingId)) {
+                    when (val content = inspected.second) {
                         is PlayerBuildBookDigestInspection.Ready -> if (content.sha256 != record.contentSha256) {
                             manualReview(player, record)
                             return@recovery
                         }
+                        null,
                         PlayerBuildBookDigestInspection.Missing,
                         is PlayerBuildBookDigestInspection.Failed,
                         -> {
@@ -439,8 +461,8 @@ internal class BuilderDraftLifecycle(
                     )
                     BuilderDraftRecoveryAction.MANUAL_REVIEW -> manualReview(player, record)
                 }
-            },
-        )
+            }
+        }
     }
 
     private fun advanceReady(

@@ -155,7 +155,10 @@ The adapter is version-bound; the real Paper E2E lamp/undo scenario verifies it.
 The implementation contract is documented in [Paper 1.21.11 Level.java.patch](https://raw.githubusercontent.com/PaperMC/Paper/ver/1.21.11/paper-server/patches/sources/net/minecraft/world/level/Level.java.patch).
 
 Fence-disconnection plans and their undo intentionally skip this pass. Durable
-construction-book steps use their separate existing lifecycle. Vanilla physics
+construction-book steps retain their separate durable lifecycle. Once the
+completion record is finalized, their fences, walls and panes use the narrow
+Arc Core connection-repair operation with exact expected-state comparison.
+Vanilla physics
 may change blocks beyond the selected region and continue on later ticks; undo
 retains exact-state validation and refuses stale tracked states. This pass is
 best-effort across server shutdown, not a persisted physics simulation or a
@@ -376,10 +379,24 @@ site's claim, because a wilderness project may sit beside somebody else's
 protected chest.
 
 System/legacy physical books are deliberately separate from player-authored
-registered books. `SystemBuildBookCatalog.kt` loads the reviewed catalogue,
-constrains every path to the shared schematic root, and verifies its SHA-256 at
-startup and again on use. Do not make every file in the shared root callable:
-it also contains player schematics and operational test files.
+registered books. `SystemBuildBookCatalog.kt` loads reviewed YAML metadata only.
+`BuilderSchematics` opens the configured root through ArcCore's shared
+`ArcSchematicService`; verified asynchronous loads enforce its path, size and
+SHA-256 policy on use. Startup does not preload the schematic library. Consumers
+keep no permanent schematic cache or WorldEdit clipboards. Core owns the bounded
+expiring cache and native transforms; previews and plans use immutable snapshots.
+Only reviewed entries are callable as system books because the root also contains
+player schematics and operational test files. Nested extensionless IDs and exact
+legacy suffixes are accepted without rewriting issued-book identity.
+
+`BuilderBookRequests` fences deferred continuations by runtime generation,
+player context, exact source item/slot and newest preview request. Activation and
+copy quotes retain the fence through registry lookups. Independent administrative
+grants use bounded individual tickets and check the current recipient session
+and space before issuance. Preview rotations have their own latest-transform
+fence, and confirmation waits for the transformed snapshot. Draft file writes and
+their create-only publication/reconciliation remain domain-owned storage-worker
+operations; loaded content verification is delegated to the shared service.
 
 `BuilderBookInteractionPolicy` is the canonical state machine for book clicks.
 A player may own one block preview or one prepared build plan, never both.

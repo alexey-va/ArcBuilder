@@ -596,6 +596,7 @@ locales:
         <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Вставить здесь]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать книгу]</click>
       retained: "<#d48763>Чертёж сохранён <#8c8c8c>— <#e6fff3>можно вставить снова"
     book:
+      loading: "<prefix><#e6fff3>Загружаем постройку…"
       draft-saving: "<prefix><#e6fff3>Сохраняем чертёж…"
       draft-recovery-starting: "<prefix><#e6fff3>Проверяем незавершённые черновики после перезапуска…"
       draft-pending: |-
@@ -1529,6 +1530,7 @@ locales:
         <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Paste here]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create book]</click>
       retained: "<aqua>Blueprint retained <dark_gray>— <white>you can paste it again"
     book:
+      loading: "<prefix><gray>Loading the build…"
       draft-saving: "<prefix><gray>Saving the blueprint…"
       draft-recovery-starting: "<prefix><gray>Checking unfinished drafts after restart…"
       draft-pending: |-

@@ -14,7 +14,7 @@ class SystemBuildBookCatalogTest : FunSpec({
     fun config(root: java.nio.file.Path, body: String): java.nio.file.Path =
         root.resolve("system-build-books.yml").also { Files.writeString(it, body.trimIndent()) }
 
-    test("known reviewed system book resolves only while the schematic digest matches") {
+    test("catalogue resolves metadata without reading or hashing schematic files") {
         val root = Files.createTempDirectory("arc-builder-system-books-")
         val bytes = "reviewed schematic".toByteArray()
         Files.write(root.resolve("viking.schem"), bytes)
@@ -50,10 +50,13 @@ class SystemBuildBookCatalogTest : FunSpec({
         checkNotNull(SystemBuildBookCatalog.load(defaultConfig, root).resolve(data)).materialsIncluded shouldBe true
 
         Files.writeString(root.resolve("viking.schem"), "changed")
-        catalog.resolve(data) shouldBe null
+        catalog.resolve(data) shouldBe definition
+        Files.delete(root.resolve("viking.schem"))
+        catalog.resolve(data) shouldBe definition
+        catalog.resolve(data.copy(buildingId = "viking")) shouldBe definition
     }
 
-    test("catalog rejects digest mismatch traversal duplicate ids and disabled player entries") {
+    test("catalog rejects invalid digest traversal duplicate ids and disabled player entries") {
         val root = Files.createTempDirectory("arc-builder-system-books-invalid-")
         val bytes = "schematic".toByteArray()
         Files.write(root.resolve("viking.schem"), bytes)
@@ -67,7 +70,7 @@ class SystemBuildBookCatalogTest : FunSpec({
                     books:
                       - building-id: viking.schem
                         title: Viking
-                        sha256: ${"0".repeat(64)}
+                        sha256: invalid-digest
                         player-enabled: true
                     """,
                 ),
@@ -140,6 +143,15 @@ class SystemBuildBookCatalogTest : FunSpec({
                 root,
             )
         }
+
+        val nested = SystemBuildBookCatalog.load(config(root, """
+            books:
+              - building-id: civs/castle
+                title: Castle
+                sha256: $digest
+                player-enabled: true
+        """), root)
+        nested.resolve(BuildBookData("civs/castle.schem", "old alias"))?.buildingId shouldBe "civs/castle"
 
         val disabled = SystemBuildBookCatalog.load(
             config(

@@ -1,6 +1,5 @@
 package ru.arc.buildertools
 
-import com.sk89q.worldedit.bukkit.BukkitAdapter
 import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.entity.Player
@@ -38,10 +37,9 @@ internal class BuilderBookPricing(
     }
 
     fun quote(player: Player, building: Building): BuilderBookQuoteResult {
-        val clipboard = runCatching { building.clipboard }.getOrElse { return BuilderBookQuoteResult.LimitExceeded }
-        if (clipboard.region.volume !in 1..config.maxScanVolume) return BuilderBookQuoteResult.LimitExceeded
-        val items = clipboard.region.asSequence().mapNotNull { position ->
-            BukkitAdapter.adapt(clipboard.getFullBlock(position)).takeUnless { it.material.isAir }?.let(BuilderPlacementCost::itemOrNull)
+        if (building.volume !in 1..config.maxScanVolume) return BuilderBookQuoteResult.LimitExceeded
+        val items = building.snapshot.blocks().asSequence().filterNot { it.isAir || it.isBarrier }.mapNotNull { block ->
+            BuilderPlacementCost.itemOrNull(Bukkit.createBlockData(block.blockData))
         }.take(config.maxClipboardBlocks + 1).toList()
         if (items.size > config.maxClipboardBlocks) return BuilderBookQuoteResult.LimitExceeded
         return quoteItems(player, items)

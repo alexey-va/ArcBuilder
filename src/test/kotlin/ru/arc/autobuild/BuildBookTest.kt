@@ -25,6 +25,17 @@ import java.util.UUID
 
 class BuildBookTest : TestBase() {
     @Test
+    fun `nested extensionless and legacy schematic ids retain their exact codec identity`() {
+        for (id in listOf("civs/myschema", "civs/myschema.schem", "civs/myschema.schematic")) {
+            val data = BuildBookData(id, "House").validated()
+            assertEquals(id, BuildBookCodec.read(BuildBookItems.create(data))?.buildingId)
+        }
+        for (id in listOf("../house", "civs/../house", "/house", "civs//house", "civs/./house")) {
+            assertThrows(IllegalArgumentException::class.java) { BuildBookData(id, "House").validated() }
+        }
+    }
+
+    @Test
     fun `system book volume and included materials survive codec and appear in lore`() {
         for (count in listOf(0, 1776, 20_000)) {
             val data = BuildBookData("cottage.schem", "Коттедж", blockCount = count, systemMaterialsIncluded = true).validated()
@@ -326,11 +337,7 @@ class BuildBookTest : TestBase() {
 
         assertEquals(first, repeated)
         assertTrue(first.buildingId.contains(prepared.contentSha256))
-        assertEquals(first.schematicSha256, PlayerBuildBookStore.schematicSha256(first.buildingId))
-
-        PlayerBuildBookStore.register(first)
-
-        assertEquals(first.buildingId, BuildingManager.getBuilding(first.buildingId)?.fileName)
+        assertEquals(first.schematicSha256, java.util.concurrent.CompletableFuture.supplyAsync { PlayerBuildBookStore.schematicSha256(first.buildingId) }.join())
 
         val collision = prepared.copy(
             contentSha256 = "f".repeat(64),

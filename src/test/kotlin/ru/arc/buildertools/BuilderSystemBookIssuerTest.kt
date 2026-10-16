@@ -14,8 +14,43 @@ import org.bukkit.entity.Player
 import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.autobuild.BuildBookSettings
 import kotlin.random.Random
+import ru.arc.paper.testing.loadPlugin
 
 class BuilderSystemBookIssuerTest : FunSpec({
+    test("two deferred console grants to one recipient both issue after unrelated hotbar changes") {
+        ru.arc.config.ConfigManager.clear()
+        ru.arc.paper.testing.MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ru.ruscrafting.builder.paper.ArcBuilderPlugin>()
+            BuilderToolsModule.shutdown()
+            val player = paper.addPlayer("GrantRecipient")
+            val console = mockk<ConsoleCommandSender>(relaxed = true)
+            val scheduler = ru.arc.core.TestTaskScheduler()
+            val scope = ru.arc.core.LifecycleTaskScope(scheduler)
+            val requests = BuilderBookRequests(scope)
+            val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+            val pending = mutableListOf<java.util.concurrent.CompletableFuture<ru.arc.autobuild.Building>>()
+            repeat(2) {
+                BuilderSystemBookIssuer.issue(console, listOf(player.name, definition.buildingId), { definition }, 8192,
+                    load = { _, _ -> java.util.concurrent.CompletableFuture<ru.arc.autobuild.Building>().also { pending += it } },
+                    requests = requests, permissionDenied = { error("must not deny") })
+            }
+            requests.size shouldBe 2
+            player.inventory.contents.filterNotNull().size shouldBe 0
+            player.inventory.heldItemSlot = 3
+            player.gameMode = org.bukkit.GameMode.CREATIVE
+            val building = ru.arc.autobuild.schematicTestBuilding(definition.buildingId)
+            pending.asReversed().forEach { it.complete(building) }
+            scheduler.executeImmediate()
+            requests.size shouldBe 0
+            player.inventory.contents.filterNotNull().count { ru.arc.autobuild.BuildBookCodec.read(it)?.buildingId == definition.buildingId } shouldBe 2
+            verify(exactly = 2) { console.sendMessage(match<String> { it.startsWith("SYSTEM_BOOK_ISSUED ") }) }
+            verify(exactly = 0) { console.sendMessage(match<String> { it.startsWith("SYSTEM_BOOK_REFUSED ") }) }
+            requests.close()
+            scope.close()
+        }
+        ru.arc.config.ConfigManager.clear()
+    }
+
     test("completion denies unauthorized senders before reading catalogue or players") {
         for (sender in listOf(mockk<Player>(relaxed = true), mockk<CommandSender>(relaxed = true))) {
             BuilderSystemBookIssuer.tabComplete(sender, arrayOf("systembook", ""),
@@ -58,7 +93,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
         val admin = mockk<Player>(relaxed = true)
         every { admin.hasPermission(BuilderSystemBookIssuer.PERMISSION) } returns true
         BuilderSystemBookIssuer.issue(admin, emptyList(), { error("must not resolve") }, 8192) { error("must not deny") }
-        verify { admin.sendMessage("Usage: builder systembook <online-player> <default.schem|random> [alternative.schem,...|@starter]") }
+        verify { admin.sendMessage("Usage: builder systembook <online-player> <building-id|random> [alternative-id,...|@starter]") }
     }
     test("issued catalogue data preserves title and material policy without inventing a player contract") {
         val definition = SystemBuildBookDefinition("house.schem", "Стартовый домик", "a".repeat(64), true, false)

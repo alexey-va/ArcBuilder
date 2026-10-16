@@ -170,6 +170,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     ),
                     deferPreparation = true,
                     hasCurrentConfirmation = false,
+                    deferConfirmation = true,
                 )
 
                 previewPresentation(plugin, config, host).use { presentation ->
@@ -219,6 +220,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 }
                 val book = BuildBookData("house.schem", "Дом")
                 val site = mockk<ConstructionSite>()
+                every { site.transforming } returns false
                 val snapshot = mockk<ConstructionSiteSnapshot>()
                 every { site.player } returns player
                 every { site.bookData } returns book
@@ -324,6 +326,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     blockCount = 401,
                 ).validated()
                 val site = mockk<ConstructionSite>()
+                every { site.transforming } returns false
                 val snapshot = mockk<ConstructionSiteSnapshot>()
                 every { site.player } returns player
                 every { site.bookData } returns book
@@ -343,6 +346,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                         issuePriceMinor = 14_845,
                     ),
                     hasCurrentConfirmation = false,
+                    deferConfirmation = true,
                 )
 
                 BuilderBookPreviewPresentation(
@@ -375,6 +379,11 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "150.00"
                     click(paper, player, 25).isCancelled.shouldBeTrue()
                     host.confirmCalls shouldBe 1
+                    host.completedConfirmations shouldBe emptyList()
+                    (player.openInventory.topInventory === originalMenu) shouldBe true
+                    click(paper, player, 25).isCancelled.shouldBeTrue()
+                    host.confirmCalls shouldBe 1
+                    checkNotNull(host.pendingConfirmation).invoke(true)
                     host.completedConfirmations shouldBe listOf(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION)
                 }
             } finally {
@@ -453,12 +462,14 @@ private class PreviewHost(
     var confirmation: BuilderBookPreviewConfirmation,
     private val deferPreparation: Boolean = false,
     var hasCurrentConfirmation: Boolean = true,
+    var deferConfirmation: Boolean = false,
 ) : BuilderBookPreviewPresentationHost {
     val adjustments = mutableListOf<BuildBookPreviewAdjustment>()
     var confirmCalls = 0
     var restoreCalls = 0
     val completedConfirmations = mutableListOf<BuilderBookPreviewConfirmationKind>()
     var pendingPreparation: ((BuilderBookPreviewConfirmation?) -> Unit)? = null
+    var pendingConfirmation: ((Boolean) -> Unit)? = null
 
     override fun adjust(player: org.bukkit.entity.Player, adjustment: BuildBookPreviewAdjustment): ConstructionSite {
         adjustments += adjustment
@@ -479,9 +490,9 @@ private class PreviewHost(
     override fun currentConfirmation(player: org.bukkit.entity.Player): BuilderBookPreviewConfirmation? =
         confirmation.takeIf { hasCurrentConfirmation }
 
-    override fun confirm(player: org.bukkit.entity.Player): Boolean {
+    override fun confirm(player: org.bukkit.entity.Player, complete: (Boolean) -> Unit) {
         confirmCalls += 1
-        return true
+        if (deferConfirmation) pendingConfirmation = complete else complete(true)
     }
 
     override fun complete(player: org.bukkit.entity.Player, kind: BuilderBookPreviewConfirmationKind) {
@@ -503,6 +514,7 @@ private fun previewSite(
     book: BuildBookData,
 ): ConstructionSite {
     val site = mockk<ConstructionSite>()
+                every { site.transforming } returns false
     val snapshot = mockk<ConstructionSiteSnapshot>()
     every { site.player } returns player
     every { site.bookData } returns book

@@ -50,7 +50,7 @@ object BuildBookEditorGui {
             return
         }
         val data = BuildBookCodec.read(player.inventory.itemInMainHand)
-        if (data == null || BuildingManager.getBuilding(data.buildingId) == null) {
+        if (data == null) {
             player.sendMessage(text("build-book.editor.invalid"))
             return
         }
@@ -205,7 +205,8 @@ object BuildBookEditorGui {
             return
         }
         val next = current.copy(transform = nextTransform.validated()).validated()
-        val previewResult = BuildingManager.updatePendingTransform(player, next)
+        val nextItem = BuildBookCodec.update(held, next)
+        val previewResult = BuildingManager.updatePendingTransform(player, next, nextItem)
         if (!previewResult.allowsBookUpdate) {
             val feedbackPath = when (previewResult) {
                 PreviewTransformUpdateResult.PREVIEW_INACTIVE -> "preview-inactive"
@@ -221,7 +222,7 @@ object BuildBookEditorGui {
             click.session.showFeedback(element, FEEDBACK_TICKS, item)
             return
         }
-        player.inventory.setItemInMainHand(BuildBookCodec.update(held, next))
+        player.inventory.setItemInMainHand(nextItem)
         player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.7f, 1.2f)
         open(player, onCopy)
     }

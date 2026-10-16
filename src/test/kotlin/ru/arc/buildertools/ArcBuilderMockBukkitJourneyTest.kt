@@ -50,6 +50,7 @@ import ru.arc.autobuild.BuildBookCodec
 import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.Building
+import ru.arc.autobuild.schematicTestBuilding
 import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.PlayerBuildBookStore
 import ru.arc.autobuild.PlayerBuildBookDigestInspection
@@ -215,6 +216,88 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("deferred click preserves original facing and action with identical books in two slots") {
+        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val loading = java.util.concurrent.CompletableFuture<Building>()
+        strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }, schematicLoader = { _, _ -> loading }) }) { journey ->
+            val player = journey.builder("DelayedBook", GameMode.CREATIVE)
+            player.teleport(player.location.apply { yaw = -180f })
+            val book = BuildBookItems.create(BuildBookData(definition.buildingId, definition.title))
+            player.inventory.setItem(0, book)
+            player.inventory.setItem(1, book.clone())
+            player.inventory.heldItemSlot = 0
+            player.isSneaking = false
+            journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
+            BuildingManager.pending(player.uniqueId) shouldBe null
+            player.isSneaking = true
+            player.setRotation(-90f, 0f)
+            loading.complete(schematicTestBuilding(definition.buildingId))
+            journey.paper.performTicks(3)
+            val preview = checkNotNull(BuildingManager.pending(player.uniqueId))
+            preview.rotation shouldBe 0
+            preview.transforming shouldBe false
+            journey.renderer.hasBook(player.uniqueId) shouldBe true
+        }
+    }
+
+    test("book menu waits safely for the initial shared transform") {
+        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val base = schematicTestBuilding(definition.buildingId)
+        val transformed = java.util.concurrent.CompletableFuture<ru.arc.paper.api.ArcSchematicSnapshot>()
+        val library = mockk<ru.arc.paper.api.ArcSchematicLibrary>()
+        every { library.transform(base.snapshot, any()) } returns transformed
+        val building = Building(definition.buildingId, base.snapshot, library)
+        strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }, schematicLoader = { _, _ -> java.util.concurrent.CompletableFuture.completedFuture(building) }) }) { journey ->
+            val player = journey.builder("PendingTransform", GameMode.CREATIVE)
+            player.inventory.setItemInMainHand(BuildBookItems.create(BuildBookData(definition.buildingId, definition.title)))
+            journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
+            checkNotNull(BuildingManager.pending(player.uniqueId)).transforming shouldBe true
+            player.performCommand("builder book menu") shouldBe true
+            journey.renderer.hasBook(player.uniqueId) shouldBe false
+            transformed.complete(base.snapshot)
+            journey.paper.performTicks(2)
+            checkNotNull(BuildingManager.pending(player.uniqueId)).transforming shouldBe false
+            journey.renderer.hasBook(player.uniqueId) shouldBe true
+            player.performCommand("builder book menu") shouldBe true
+            player.openInventory.topInventory.type shouldBe org.bukkit.event.inventory.InventoryType.CHEST
+        }
+    }
+
+    test("book cancel and clear invalidate an initial load before any preview exists") {
+        for (command in listOf("builder book cancel", "builder clear")) {
+            val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+            val loading = java.util.concurrent.CompletableFuture<Building>()
+            strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }, schematicLoader = { _, _ -> loading }) }) { journey ->
+                val player = journey.builder("CancelledLoad", GameMode.CREATIVE)
+                player.inventory.setItemInMainHand(BuildBookItems.create(BuildBookData(definition.buildingId, definition.title)))
+                journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
+                player.performCommand(command) shouldBe true
+                loading.complete(schematicTestBuilding(definition.buildingId))
+                journey.paper.performTicks(3)
+                BuildingManager.pending(player.uniqueId) shouldBe null
+                journey.renderer.hasBook(player.uniqueId) shouldBe false
+            }
+        }
+    }
+
+    test("deferred sneak click opens its selector after the modifier is released") {
+        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val loading = java.util.concurrent.CompletableFuture<Building>()
+        strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition.copy(buildingId = it.buildingId) }, schematicLoader = { _, _ -> loading }) }) { journey ->
+            val player = journey.builder("DelayedSelector", GameMode.CREATIVE)
+            val data = BuildBookData(definition.buildingId, definition.title,
+                selectableBuildingIds = listOf("civs/house", "civs/tower"))
+            player.inventory.setItemInMainHand(BuildBookItems.create(data))
+            player.isSneaking = true
+            journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
+            player.isSneaking = false
+            loading.complete(schematicTestBuilding(definition.buildingId))
+            journey.paper.performTicks(3)
+            BuildingManager.pending(player.uniqueId) shouldBe null
+            player.openInventory.topInventory.type shouldBe org.bukkit.event.inventory.InventoryType.CHEST
+        }
+    }
+
     test("system book journey keeps schematic air and removes obstructing andesite") {
         val definition = SystemBuildBookDefinition(
             buildingId = "carve-test.schem",
@@ -229,14 +312,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         try {
             strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
                 every { BukkitAdapter.adapt(schematicAir) } returns Bukkit.createBlockData(Material.AIR)
-                val building = mockk<Building>()
-                every { building.fileName } returns definition.buildingId
-                every { building.volume } returns 1L
-                every { building.blockCount } returns 1
-                every { building.getCorner1(any()) } returns BlockVector3.ZERO
-                every { building.getCorner2(any()) } returns BlockVector3.ZERO
-                every { building.getBlock(any(), any()) } returns schematicAir
-                BuildingManager.addBuilding(building)
+                journey.addBuilding(schematicTestBuilding(definition.buildingId, listOf(BukkitAdapter.adapt(schematicAir).asString)))
 
                 val player = journey.builder("AndesiteCarver", GameMode.CREATIVE)
                 player.teleport(player.location.apply { yaw = -180f })
@@ -279,16 +355,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 top.half = Bisected.Half.TOP
                 every { BukkitAdapter.adapt(bottomBlock) } returns bottom
                 every { BukkitAdapter.adapt(topBlock) } returns top
-                val building = mockk<Building>()
-                every { building.fileName } returns definition.buildingId
-                every { building.volume } returns 2L
-                every { building.blockCount } returns 2
-                every { building.getCorner1(any()) } returns BlockVector3.ZERO
-                every { building.getCorner2(any()) } returns BlockVector3.at(0, 1, 0)
-                every { building.getBlock(any(), any()) } answers {
-                    if (firstArg<BlockVector3>().y() == 0) bottomBlock else topBlock
-                }
-                BuildingManager.addBuilding(building)
+                journey.addBuilding(schematicTestBuilding(definition.buildingId, listOf(bottom.asString, top.asString)))
 
                 val player = journey.builder("DoorBookBuilder", GameMode.SURVIVAL)
                 player.teleport(player.location.apply { yaw = -180f })
@@ -339,16 +406,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 top.half = Bisected.Half.TOP
                 every { BukkitAdapter.adapt(bottomBlock) } returns bottom
                 every { BukkitAdapter.adapt(topBlock) } returns top
-                val building = mockk<Building>()
-                every { building.fileName } returns definition.buildingId
-                every { building.volume } returns 2L
-                every { building.blockCount } returns 2
-                every { building.getCorner1(any()) } returns BlockVector3.ZERO
-                every { building.getCorner2(any()) } returns BlockVector3.at(0, 1, 0)
-                every { building.getBlock(any(), any()) } answers {
-                    if (firstArg<BlockVector3>().y() == 0) bottomBlock else topBlock
-                }
-                BuildingManager.addBuilding(building)
+                journey.addBuilding(schematicTestBuilding(definition.buildingId, listOf(bottom.asString, top.asString)))
 
                 val player = journey.builder("InstantBuilder", GameMode.SURVIVAL)
                 player.teleport(player.location.apply { yaw = -180f })
@@ -431,14 +489,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 },
             ) { journey ->
                 every { BukkitAdapter.adapt(schematicChest) } returns Bukkit.createBlockData(Material.CHEST)
-                val building = mockk<Building>()
-                every { building.fileName } returns definition.buildingId
-                every { building.volume } returns 1L
-                every { building.blockCount } returns 1
-                every { building.getCorner1(any()) } returns BlockVector3.ZERO
-                every { building.getCorner2(any()) } returns BlockVector3.ZERO
-                every { building.getBlock(any(), any()) } returns schematicChest
-                BuildingManager.addBuilding(building)
+                journey.addBuilding(schematicTestBuilding(definition.buildingId, listOf(BukkitAdapter.adapt(schematicChest).asString)))
 
                 val player = journey.builder("StarterLootChest", GameMode.CREATIVE)
                 player.teleport(player.location.apply { yaw = -180f })
@@ -1265,7 +1316,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
 
             val draft = checkNotNull(BuildBookCodec.read(player.inventory.itemInMainHand))
             draft.sourceRotation shouldBe BuildingManager.rotationFromYaw(player.yaw)
-            BuildingManager.addBuilding(Building(draft.buildingId))
+            journey.addBuilding(schematicTestBuilding(draft.buildingId))
 
             val firstAnchor = world.getBlockAt(6, 64, 6)
             journey.paper.callEvent(
@@ -1278,6 +1329,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                     EquipmentSlot.HAND,
                 ),
             )
+            journey.paper.performTicks(3)
             checkNotNull(BuildingManager.pending(player.uniqueId)).also { preview ->
                 preview.centerBlock.blockX shouldBe 6
                 preview.centerBlock.blockZ shouldBe 6
@@ -1295,6 +1347,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                     EquipmentSlot.HAND,
                 ),
             )
+            journey.paper.performTicks(3)
             checkNotNull(BuildingManager.pending(player.uniqueId)).also { preview ->
                 preview.centerBlock.blockX shouldBe 9
                 preview.centerBlock.blockZ shouldBe 11
@@ -1313,6 +1366,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                     EquipmentSlot.HAND,
                 ),
             )
+            journey.paper.performTicks(3)
             checkNotNull(BuildingManager.pending(player.uniqueId))
             player.performCommand("builder book cancel") shouldBe true
             BuildingManager.pending(player.uniqueId) shouldBe null
@@ -1333,14 +1387,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         try {
             strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
                 every { BukkitAdapter.adapt(schematicBlock) } returns Bukkit.createBlockData(Material.STONE)
-                val building = mockk<Building>()
-                every { building.fileName } returns "viking.schem"
-                every { building.volume } returns 1L
-                every { building.blockCount } returns 1
-                every { building.getCorner1(any()) } returns BlockVector3.ZERO
-                every { building.getCorner2(any()) } returns BlockVector3.ZERO
-                every { building.getBlock(any(), any()) } returns schematicBlock
-                BuildingManager.addBuilding(building)
+                journey.addBuilding(schematicTestBuilding("viking.schem", listOf(BukkitAdapter.adapt(schematicBlock).asString)))
 
                 val player = journey.builder("StarterBook", GameMode.SURVIVAL)
                 player.teleport(player.location.apply { yaw = -180f })
@@ -1384,7 +1431,10 @@ private class ArcBuilderJourney private constructor(
     val world: World,
     val renderer: RecordingBuilderDisplayRenderer,
     private val runtime: BuilderToolsRuntime,
+    private val buildings: MutableMap<String, Building>,
 ) : AutoCloseable {
+    fun addBuilding(building: Building) { buildings[building.fileName] = building }
+
     fun builder(name: String, mode: GameMode) = paper.addPlayer(name).also { player ->
         player.gameMode = mode
         grantBuilderPermissions(player)
@@ -1479,6 +1529,7 @@ private class ArcBuilderJourney private constructor(
                 EquipmentSlot.HAND,
             ),
         )
+        paper.performTicks(3)
     }
 
     fun openBookHologramMenu(player: Player) = runtime.openBookPreviewMenuForTest(player)
@@ -1528,6 +1579,7 @@ private class ArcBuilderJourney private constructor(
             systemResolver: (ru.arc.autobuild.BuildBookData) -> SystemBuildBookDefinition? = { null },
             lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
             lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
+            schematicLoader: ((String, String?) -> java.util.concurrent.CompletableFuture<Building>)? = null,
         ): ArcBuilderJourney {
             mockkStatic(PacketEvents::class)
             try {
@@ -1557,6 +1609,7 @@ private class ArcBuilderJourney private constructor(
                 }
                 BuilderToolsModule.shutdown()
                 val renderer = RecordingBuilderDisplayRenderer()
+                val buildings = mutableMapOf<String, Building>()
                 val runtime = BuilderToolsRuntime(
                     plugin = plugin,
                     config = BuilderToolsConfig(config).validated(),
@@ -1564,7 +1617,10 @@ private class ArcBuilderJourney private constructor(
                     blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
                     physicsUpdater = physicsUpdater,
                     draftStorage = InMemoryBuilderDraftStorage(),
-                    bookSchematicVerifier = BuilderBookSchematicVerifier { true },
+                    schematicLoader = schematicLoader ?: { id, _ -> java.util.concurrent.CompletableFuture.completedFuture(
+                        buildings[id] ?: schematicTestBuilding(id),
+                    ) },
+                    bookSchematicVerifier = BuilderBookSchematicVerifier { _, _ -> true },
                     bookReplacementRefund = { block -> ItemStack(block.type) },
                     systemBuildBookResolver = systemResolver,
                     lootTableResolver = lootTableResolver,
@@ -1576,7 +1632,7 @@ private class ArcBuilderJourney private constructor(
                 }
                 val world = paper.addSimpleWorld("survival")
                 world.loadChunk(0, 0)
-                val journey = ArcBuilderJourney(paper, plugin, world, renderer, runtime)
+                val journey = ArcBuilderJourney(paper, plugin, world, renderer, runtime, buildings)
                 journey.await("ArcBuilder runtime readiness") {
                     runtime.runtimeHealthContribution().state == RuntimeHealthState.UP
                 }
@@ -1618,9 +1674,9 @@ private class InMemoryBuilderDraftStorage : BuilderDraftStorage {
         templates[buildingId]?.let { PlayerBuildBookDigestInspection.Ready(it.schematicSha256) }
             ?: PlayerBuildBookDigestInspection.Missing
 
-    override fun inspectContent(buildingId: String): PlayerBuildBookDigestInspection =
-        templates[buildingId]?.let { PlayerBuildBookDigestInspection.Ready(it.contentSha256) }
-            ?: PlayerBuildBookDigestInspection.Missing
+    override fun inspectContent(buildingId: String, expectedSha256: String): java.util.concurrent.CompletableFuture<PlayerBuildBookDigestInspection> =
+        java.util.concurrent.CompletableFuture.completedFuture(templates[buildingId]?.let { PlayerBuildBookDigestInspection.Ready(it.contentSha256) }
+            ?: PlayerBuildBookDigestInspection.Missing)
 
     override fun register(template: PlayerBuildBookTemplate) = Unit
 }

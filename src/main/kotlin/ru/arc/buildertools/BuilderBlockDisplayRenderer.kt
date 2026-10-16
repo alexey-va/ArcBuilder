@@ -1,6 +1,5 @@
 package ru.arc.buildertools
 
-import com.sk89q.worldedit.bukkit.BukkitAdapter
 import com.destroystokyo.paper.event.player.PlayerPostRespawnEvent
 import io.papermc.paper.event.packet.PlayerChunkLoadEvent
 import io.papermc.paper.event.packet.PlayerChunkUnloadEvent
@@ -25,7 +24,6 @@ import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.ScheduledTask
-import ru.arc.util.BlockUtils.rotateBlockData
 import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
 import java.util.PriorityQueue
@@ -437,10 +435,7 @@ internal class BuilderBlockDisplayRenderer(
     private fun bookModel(site: ConstructionSite): BookModel {
         val blocks = site.relativePositionsBottomUp().mapNotNull { relative ->
             val data = runCatching {
-                rotateBlockData(
-                    Bukkit.createBlockData(BukkitAdapter.adapt(site.sourceBlock(relative)).asString),
-                    site.fullRotation,
-                )
+                Bukkit.createBlockData(site.sourceBlock(relative))
             }.getOrNull()?.takeUnless { it.material.isAir } ?: return@mapNotNull null
             BookBlock(site.worldLocation(relative), data)
         }.toList()

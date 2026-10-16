@@ -1,5 +1,7 @@
 package ru.arc.buildertools
 
+import ru.arc.paper.api.ArcSchematicIds
+
 import ru.arc.autobuild.BuildBookMaterialRequirement
 import ru.arc.autobuild.BuildBookMaterialRequirements
 import java.math.BigDecimal
@@ -70,7 +72,7 @@ internal data class BuilderBookBlueprint(
         require(title.isNotBlank() && title.length <= 48 && title.none(Char::isISOControl)) {
             "Builder-book title is invalid"
         }
-        require(BUILDING_ID.matches(buildingId)) { "Builder-book building id is invalid" }
+        require(buildingId.length <= 160 && ArcSchematicIds.isValid(buildingId)) { "Builder-book building id is invalid" }
         require(SHA256.matches(contentSha256) && SHA256.matches(schematicSha256)) {
             "Builder-book content digest is invalid"
         }
@@ -99,7 +101,6 @@ internal data class BuilderBookBlueprint(
         const val MAX_MATERIAL_TYPES = 256
         const val MAX_PRICE_MINOR = 100_000_000_000L
         private val PLAYER_NAME = Regex("[A-Za-z0-9_]{1,16}")
-        private val BUILDING_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}")
         private val SHA256 = Regex("[a-f0-9]{64}")
     }
 }

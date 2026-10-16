@@ -75,7 +75,9 @@ entities, and the following configuration under `plugins/ArcBuilder/modules/`:
 - `builder-tools-runtime.yml`
 
 The existing schematic library remains at `plugins/ARC/schematics/` through the
-configured `../ARC/schematics` path. ARC must not contain Builder classes,
+configured `../ARC/schematics` path. ArcCore supplies asynchronous lazy loading,
+verified file/content digests and native transforms with a bounded expiring cache.
+Nested IDs such as `civs/myschema` work alongside existing suffixed book IDs. ARC must not contain Builder classes,
 commands, listeners, permissions, or module configs after migration.
 
 For the complete operator key inventory and the safe `/builder reload` runbook

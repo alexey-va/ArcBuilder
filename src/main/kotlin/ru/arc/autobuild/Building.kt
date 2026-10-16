@@ -1,83 +1,21 @@
 package ru.arc.autobuild
 
-import com.sk89q.worldedit.extent.clipboard.Clipboard
-import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormats
-import com.sk89q.worldedit.extent.transform.BlockTransformExtent
-import com.sk89q.worldedit.math.BlockVector3
-import com.sk89q.worldedit.math.transform.AffineTransform
-import com.sk89q.worldedit.world.block.BaseBlock
-import ru.arc.ARC
-import java.nio.file.Files
+import ru.arc.paper.api.ArcSchematicLibrary
+import ru.arc.paper.api.ArcSchematicSnapshot
+import ru.arc.paper.api.ArcSchematicTransform
+import java.util.concurrent.CompletableFuture
 
-class Building(val fileName: String) {
-    @Volatile private var loaded: Clipboard? = null
-    val clipboard: Clipboard
-        get() = loaded ?: synchronized(this) {
-            loaded ?: loadClipboard().also { loaded = it }
-        }
-    val volume: Long get() = clipboard.region.volume
-    val blockCount: Int by lazy { countBuildBookCells(clipboard) }
+/** One request's immutable value. Loading, transforms and cache lifetime belong to Arc Core. */
+class Building(
+    val fileName: String,
+    val snapshot: ArcSchematicSnapshot,
+    private val library: ArcSchematicLibrary,
+) {
+    val volume: Long get() = snapshot.volume
+    val blockCount: Int get() = snapshot.nonBarrierCount
+    val schematicSha256: String get() = snapshot.fileSha256
+    val contentSha256: String get() = snapshot.contentSha256
 
-    /** Loads the immutable schematic data without touching Bukkit state. */
-    internal fun preload(): Int {
-        clipboard
-        return blockCount
-    }
-
-    private fun loadClipboard(): Clipboard {
-        val file = BuilderStoragePaths.schematicsRoot().resolve(fileName).toFile()
-        require(file.isFile) { "Schematic file not found: $fileName" }
-        val format = ClipboardFormats.findByFile(file)
-            ?: throw IllegalArgumentException("Unknown schematic format: $fileName")
-        return Files.newInputStream(file.toPath()).use { input -> format.getReader(input).use { it.read() } }
-    }
-
-    fun getBlock(relative: BlockVector3, rotation: Int, mirrored: Boolean = false): BaseBlock {
-        val source = BuildBookStructureTransform.sourceRelative(relative, rotation, mirrored).add(clipboard.origin)
-        return BuildBookStructureTransform.mirrorBlock(clipboard.getFullBlock(source), mirrored)
-    }
-
-    fun getCorner1(rotation: Int, mirrored: Boolean = false): BlockVector3 = BuildBookStructureTransform.targetRelative(
-        clipboard.minimumPoint.subtract(clipboard.origin),
-        rotation,
-        mirrored,
-    )
-
-    fun getCorner2(rotation: Int, mirrored: Boolean = false): BlockVector3 = BuildBookStructureTransform.targetRelative(
-        clipboard.maximumPoint.subtract(clipboard.origin),
-        rotation,
-        mirrored,
-    )
-}
-
-/** Includes clearing air, but excludes keep-world markers from the book's volume. */
-internal fun countBuildBookCells(clipboard: Clipboard): Int =
-    clipboard.region.count { clipboard.getFullBlock(it).blockType.id != "minecraft:barrier" }
-
-internal object BuildBookStructureTransform {
-    private val horizontalMirror = AffineTransform().scale(-1.0, 1.0, 1.0)
-
-    fun sourceRelative(worldRelative: BlockVector3, rotation: Int, mirrored: Boolean): BlockVector3 {
-        val local = rotate(worldRelative, -rotation)
-        return if (mirrored) BlockVector3.at(-local.x(), local.y(), local.z()) else local
-    }
-
-    fun targetRelative(sourceRelative: BlockVector3, rotation: Int, mirrored: Boolean): BlockVector3 {
-        val local = if (mirrored) {
-            BlockVector3.at(-sourceRelative.x(), sourceRelative.y(), sourceRelative.z())
-        } else {
-            sourceRelative
-        }
-        return rotate(local, rotation)
-    }
-
-    fun mirrorBlock(block: BaseBlock, mirrored: Boolean): BaseBlock =
-        if (mirrored) BlockTransformExtent.transform(block, horizontalMirror) else block
-
-    fun rotate(vector: BlockVector3, degrees: Int): BlockVector3 = when (((degrees % 360) + 360) % 360) {
-        90 -> BlockVector3.at(-vector.z(), vector.y(), vector.x())
-        180 -> BlockVector3.at(-vector.x(), vector.y(), -vector.z())
-        270 -> BlockVector3.at(vector.z(), vector.y(), -vector.x())
-        else -> vector
-    }
+    fun transform(rotation: Int, mirrored: Boolean): CompletableFuture<ArcSchematicSnapshot> =
+        library.transform(snapshot, ArcSchematicTransform(BuildBookTransform.normalizeRotation(rotation) / 90, mirrored))
 }

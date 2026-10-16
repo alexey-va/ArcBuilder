@@ -114,12 +114,6 @@ object PlayerBuildBookStore {
         )
     }
 
-    /** Paper-primary-thread publication after [persist] has completed. */
-    internal fun register(template: PlayerBuildBookTemplate) {
-        check(Bukkit.isPrimaryThread()) { "Player build-book registration must run on the Paper primary thread" }
-        BuildingManager.addBuilding(Building(template.buildingId))
-    }
-
     internal fun fileName(creatorId: UUID, clipboard: BuilderClipboard): String {
         val checked = clipboard.validated(BuilderPlan.ABSOLUTE_MAX_CHANGES)
         val origin = "o${checked.originDx}_${checked.originDy}_${checked.originDz}"
@@ -137,6 +131,7 @@ object PlayerBuildBookStore {
     }
 
     internal fun inspectSchematic(buildingId: String): PlayerBuildBookDigestInspection = try {
+        check(!Bukkit.isPrimaryThread()) { "Player schematic file inspection must run on a storage worker" }
         require(buildingId.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}")))
         val root = resolvedSchematicsRoot()
         val target = root.resolve(buildingId)
@@ -152,52 +147,6 @@ object PlayerBuildBookStore {
 
     fun schematicSha256(buildingId: String): String? =
         (inspectSchematic(buildingId) as? PlayerBuildBookDigestInspection.Ready)?.sha256
-
-    internal fun inspectContent(buildingId: String): PlayerBuildBookDigestInspection {
-        return try {
-            require(buildingId.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}")))
-            val root = resolvedSchematicsRoot()
-            val target = root.resolve(buildingId)
-            require(target.parent == root) { "Player build-book inspection escaped the schematic root" }
-            if (!inspectRegularFile(target)) {
-                PlayerBuildBookDigestInspection.Missing
-            } else {
-                val building = checkNotNull(BuildingManager.getBuilding(buildingId)) {
-                    "Player build-book schematic could not be decoded"
-                }
-                val clipboard = building.clipboard
-                val minimum = clipboard.minimumPoint
-                val maximum = clipboard.maximumPoint
-                val digest = MessageDigest.getInstance("SHA-256")
-                val sizeX = maximum.x() - minimum.x() + 1
-                val sizeY = maximum.y() - minimum.y() + 1
-                val sizeZ = maximum.z() - minimum.z() + 1
-                digest.update("$sizeX:$sizeY:$sizeZ\n".toByteArray(StandardCharsets.UTF_8))
-                clipboard.region.asSequence()
-                    .mapNotNull { position ->
-                        val data = BukkitAdapter.adapt(clipboard.getFullBlock(position))
-                        if (data.material.isAir) null else BuilderClipboardBlock(
-                            position.x() - minimum.x(),
-                            position.y() - minimum.y(),
-                            position.z() - minimum.z(),
-                            data.asString,
-                        )
-                    }
-                    .sortedWith(compareBy<BuilderClipboardBlock> { it.dy }.thenBy { it.dx }.thenBy { it.dz })
-                    .forEach { block ->
-                        digest.update("${block.dx}:${block.dy}:${block.dz}:${block.blockData}\n".toByteArray(StandardCharsets.UTF_8))
-                    }
-                PlayerBuildBookDigestInspection.Ready(
-                    digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) },
-                )
-            }
-        } catch (failure: Throwable) {
-            PlayerBuildBookDigestInspection.Failed(failure)
-        }
-    }
-
-    fun contentSha256(buildingId: String): String? =
-        (inspectContent(buildingId) as? PlayerBuildBookDigestInspection.Ready)?.sha256
 
     private fun resolvedSchematicsRoot(): Path {
         return BuilderStoragePaths.schematicsRoot()

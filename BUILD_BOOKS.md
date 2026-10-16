@@ -83,6 +83,37 @@ The live canonical files are under the shared Minecraft root
 `../ARC/schematics` path. Spawn and survival links must resolve to that one
 shared root; never copy the catalogue into separate per-server folders.
 
+ArcBuilder opens that explicit root through the `ArcSchematicService` registered
+by ArcCore. Every file lookup, verified load and native rotation/mirror is
+asynchronous, including cache hits and book previews. The catalogue reads only
+its YAML metadata; startup and reload do not decode, hash or preload the library.
+Only the chosen option is loaded for selector changes and system-book issuance.
+Arc Core owns the bounded expiring cache; ArcBuilder keeps a snapshot only while
+its request, preview or plan needs it. Missing WorldEdit/provider service refuses
+the requested book operation without falling back to synchronous file loading.
+
+Use nested extensionless IDs such as `civs/myschema`. Existing exact `.schem`
+and `.schematic` IDs remain accepted. Root containment, symlink boundaries,
+size limits and ambiguous extensionless matches are validated by the provider.
+The ID saved in an issued book is not normalized or rewritten, so existing PDC,
+SQL identities and one-time-use fingerprints retain their original values.
+Historical content hashing still uses minimum-relative non-air cells in Y/X/Z
+order and canonical Bukkit block-data strings; the placement origin stays
+separate in the player filename.
+
+While a schematic loads, the book reports that it is loading. A late reply may
+only use the original player session, world, mode, slot and exact item. Preview
+clicks also retain the original sneak action and facing. Cancel, clear, quit and
+module shutdown invalidate their pending continuations. Accepted console grants
+use independent tickets (at most 256 pending) and recheck recipient session and
+inventory space; unrelated hotbar, world or mode changes do not cancel a grant.
+
+After a durable construction project has finalized its completion record,
+ArcBuilder asks the shared service to reconnect fences, walls and panes whose
+world state still exactly matches the committed block state. This bounded pass
+never changes unfinished journal steps or replays broad neighbor physics. It is
+best effort across shutdown and does not create a second durable repair queue.
+
 The reviewed catalogue pins every system schematic by SHA-256. After a
 deliberate schematic edit, update the file and its catalogue hash together.
 The maintenance task shifts the Sponge placement offset without rewriting
@@ -104,6 +135,8 @@ Run only the repository-approved local checks:
 
 ```bash
 ./gradlew --no-daemon test shadowJar
+# Before publishing a coordinated arc-core version, use its local composite:
+./gradlew -ParcCoreDir=../arc-core test shadowJar
 python3 ../arc-core/scripts/verify_consumer_architecture.py .
 ```
 

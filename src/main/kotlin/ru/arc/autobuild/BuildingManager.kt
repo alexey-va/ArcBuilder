@@ -2,8 +2,7 @@ package ru.arc.autobuild
 
 import org.bukkit.Location
 import org.bukkit.entity.Player
-import ru.arc.ARC
-import java.nio.file.Files
+import org.bukkit.inventory.ItemStack
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -21,49 +20,68 @@ internal sealed interface BuildBookPreviewAdjustment {
 }
 
 object BuildingManager {
-    private val buildings = ConcurrentHashMap<String, Building>()
     private val previews = ConcurrentHashMap<UUID, ConstructionSite>()
     @Volatile private var previewBridge: BuildBookPreviewBridge? = null
+    private var dispatch: ((() -> Unit) -> Unit)? = null
+    private var transformFailed: ((Player, Throwable) -> Unit)? = null
+    private val transforms = mutableMapOf<UUID, Any>()
 
-    internal fun installPreviewBridge(bridge: BuildBookPreviewBridge?) {
+    internal fun installPreviewBridge(
+        bridge: BuildBookPreviewBridge?,
+        runSync: (((() -> Unit) -> Unit))? = null,
+        onFailure: ((Player, Throwable) -> Unit)? = null,
+    ) {
         previewBridge = bridge
+        dispatch = runSync
+        transformFailed = onFailure
+        if (bridge == null) transforms.clear()
     }
 
-    @JvmStatic fun addBuilding(building: Building) { buildings[building.fileName] = building }
-
-    /** Drops cached schematics whose files may have changed between runtime generations. */
-    internal fun invalidateBuildings(buildingIds: Iterable<String>) {
-        buildingIds.forEach(buildings::remove)
-    }
-
-    @JvmStatic fun getBuilding(fileName: String): Building? {
-        buildings[fileName]?.let { return it }
-        if (!fileName.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}"))) return null
-        val path = BuilderStoragePaths.schematicsRoot().resolve(fileName)
-        if (!Files.isRegularFile(path)) return null
-        val created = Building(fileName)
-        return buildings.putIfAbsent(fileName, created) ?: created
-    }
-
-    /** Preloads catalogue schematics on a storage worker, never on the tick thread. */
-    internal fun preload(buildingIds: Iterable<String>): Int {
-        var loaded = 0
-        buildingIds.distinct().forEach { id ->
-            getBuilding(id)?.let {
-                it.preload()
-                loaded++
+    private fun refreshTransform(site: ConstructionSite, opening: Boolean = false, expectedItem: ItemStack? = null) {
+        val playerId = site.player.uniqueId
+        val token = Any()
+        transforms[playerId] = token
+        site.transforming = true
+        val data = site.bookData
+        val worldId = site.world.uid
+        val mode = site.player.gameMode
+        val heldSlot = site.player.inventory.heldItemSlot
+        val sourceSlot = if (expectedItem != null) heldSlot else
+            (sequenceOf(heldSlot) + site.player.inventory.contents.indices.asSequence().filter { it != heldSlot }).firstOrNull {
+            val item = site.player.inventory.getItem(it)
+            item != null && BuildBookCodec.matches(item, data)
+        }
+        val source = expectedItem?.clone() ?: sourceSlot?.let { site.player.inventory.getItem(it)?.clone() }
+        if (sourceSlot == null || source == null) { closePreview(playerId); return }
+        site.building.transform(site.fullRotation, site.mirrored).whenComplete { view, failure ->
+            dispatch?.invoke continuation@{
+                if (transforms[playerId] !== token || previews[playerId] !== site) return@continuation
+                transforms.remove(playerId)
+                if (!site.player.isOnline || site.player.world.uid != worldId || site.player.gameMode != mode ||
+                    site.player.inventory.heldItemSlot != heldSlot || site.bookData != data ||
+                    site.expiresAtMillis <= System.currentTimeMillis() || site.player.inventory.getItem(sourceSlot) != source) {
+                    closePreview(playerId)
+                    return@continuation
+                }
+                if (failure != null || view == null) {
+                    closePreview(playerId)
+                    transformFailed?.invoke(site.player, failure ?: IllegalStateException("Schematic transform is missing"))
+                    return@continuation
+                }
+                site.view = view
+                site.transforming = false
+                if (opening) previewBridge?.open(site) else previewBridge?.refresh(site)
             }
         }
-        return loaded
     }
 
     @JvmStatic fun hasExactOpenPreview(player: Player, expected: BuildBookData): Boolean =
-        pending(player.uniqueId)?.isExactOpenPreview(player, expected) == true
+        pending(player.uniqueId)?.let { !it.transforming && it.isExactOpenPreview(player, expected) } == true
 
-    @JvmStatic internal fun updatePendingTransform(player: Player, next: BuildBookData): PreviewTransformUpdateResult {
+    @JvmStatic internal fun updatePendingTransform(player: Player, next: BuildBookData, expectedItem: ItemStack? = null): PreviewTransformUpdateResult {
         val site = pending(player.uniqueId) ?: return PreviewTransformUpdateResult.NO_PREVIEW
         val result = site.update(next)
-        if (result == PreviewTransformUpdateResult.UPDATED) previewBridge?.refresh(site)
+        if (result == PreviewTransformUpdateResult.UPDATED) refreshTransform(site, expectedItem = expectedItem)
         return result
     }
 
@@ -73,21 +91,22 @@ object BuildingManager {
         data: BuildBookData,
         expiresAtMillis: Long,
         maxPlacementOffset: Int,
-    ): ConstructionSite? {
-        val building = getBuilding(data.buildingId) ?: return null
+        building: Building,
+        rotation: Int = rotationFromYaw(player.yaw),
+    ): ConstructionSite {
         val center = location.block.location
         val site = ConstructionSite(
             building,
             center,
             player,
-            rotationFromYaw(player.yaw),
+            rotation,
             player.world,
             data,
             expiresAtMillis,
             maxPlacementOffset,
         )
         previews.put(player.uniqueId, site)?.let { previewBridge?.close(player.uniqueId) }
-        previewBridge?.open(site)
+        refreshTransform(site, opening = true)
         return site
     }
 
@@ -106,6 +125,7 @@ object BuildingManager {
             expiresAtMillis = snapshot.expiresAtMillis,
             maxPlacementOffset = snapshot.placement.maxOffset,
             initialPlacement = snapshot.placement,
+            initialView = snapshot.view,
         )
         previews.put(snapshot.player.uniqueId, site)?.let { previewBridge?.close(snapshot.player.uniqueId) }
         previewBridge?.open(site)
@@ -128,7 +148,7 @@ object BuildingManager {
             BuildBookPreviewAdjustment.ToggleMirror -> site.toggleMirror()
             BuildBookPreviewAdjustment.Reset -> site.resetPlacement()
         }
-        previewBridge?.refresh(site)
+        refreshTransform(site)
         return site
     }
 
@@ -136,6 +156,7 @@ object BuildingManager {
         .filter { (_, site) -> site.expiresAtMillis <= nowMillis }
         .mapNotNull { (playerId, site) ->
             if (previews.remove(playerId, site)) {
+                transforms.remove(playerId)
                 previewBridge?.close(playerId)
                 playerId
             } else {
@@ -143,7 +164,12 @@ object BuildingManager {
             }
         }
 
+    internal fun invalidatePendingTransform(playerId: UUID) {
+        if (previews[playerId]?.transforming == true) closePreview(playerId)
+    }
+
     internal fun closePreview(playerId: UUID): Boolean {
+        transforms.remove(playerId)
         val removed = previews.remove(playerId) != null
         if (removed) previewBridge?.close(playerId)
         return removed
@@ -156,7 +182,10 @@ object BuildingManager {
     internal fun pending(playerId: UUID): ConstructionSite? {
         val site = previews[playerId] ?: return null
         if (site.expiresAtMillis > System.currentTimeMillis()) return site
-        if (previews.remove(playerId, site)) previewBridge?.close(playerId)
+        if (previews.remove(playerId, site)) {
+            transforms.remove(playerId)
+            previewBridge?.close(playerId)
+        }
         return null
     }
 

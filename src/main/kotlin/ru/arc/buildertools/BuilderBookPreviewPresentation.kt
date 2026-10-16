@@ -69,7 +69,7 @@ internal interface BuilderBookPreviewPresentationHost {
     fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment): ConstructionSite?
     fun prepare(player: Player, site: ConstructionSite, complete: (BuilderBookPreviewConfirmation?) -> Unit)
     fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation?
-    fun confirm(player: Player): Boolean
+    fun confirm(player: Player, complete: (Boolean) -> Unit)
     fun complete(player: Player, kind: BuilderBookPreviewConfirmationKind)
     fun restore(player: Player, snapshot: ConstructionSiteSnapshot): ConstructionSite?
     fun cancel(player: Player)
@@ -290,6 +290,10 @@ internal class BuilderBookPreviewPresentation(
         val playerId = player.uniqueId
         val site = placementSites[playerId] ?: panels[playerId]?.site ?: return player.closeInventory()
         if (playerId in preparing) return
+        if (site.transforming) {
+            player.sendMessage(messages.render("book.loading", locale(player)))
+            return
+        }
         val preparation = Any()
         preparing[playerId] = preparation
         snapshots[playerId] = site.snapshot()
@@ -343,13 +347,21 @@ internal class BuilderBookPreviewPresentation(
             player.playSound(player.location, Sound.BLOCK_NOTE_BLOCK_BASS, 0.7f, 0.7f)
             return
         }
-        if (host.confirm(player)) {
-            snapshots.remove(player.uniqueId)
-            confirmationInventories.remove(player.uniqueId)
-            host.complete(player, confirmation.kind)
-            player.closeInventory()
-        } else {
-            menus.session(player)?.requestRefresh()
+        val playerId = player.uniqueId
+        if (playerId in preparing) return
+        val request = Any()
+        preparing[playerId] = request
+        host.confirm(player) { accepted ->
+            if (closed || preparing[playerId] !== request) return@confirm
+            preparing.remove(playerId)
+            if (accepted) {
+                snapshots.remove(playerId)
+                confirmationInventories.remove(playerId)
+                host.complete(player, confirmation.kind)
+                player.closeInventory()
+            } else {
+                menus.session(player)?.requestRefresh()
+            }
         }
     }
 
@@ -380,7 +392,8 @@ internal class BuilderBookPreviewPresentation(
         val site = pending ?: placementSites[player.uniqueId]
             ?.takeIf { host.currentConfirmation(player) != null }
             ?: return false
-        openPlacementForOwner(player, site)
+        if (site.transforming) player.sendMessage(messages.render("book.loading", locale(player)))
+        else openPlacementForOwner(player, site)
         return true
     }
 

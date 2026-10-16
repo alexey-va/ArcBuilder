@@ -305,8 +305,8 @@ private object UnusedCommandDraftStorage : BuilderDraftStorage {
     override fun inspectSchematic(buildingId: String): PlayerBuildBookDigestInspection =
         PlayerBuildBookDigestInspection.Missing
 
-    override fun inspectContent(buildingId: String): PlayerBuildBookDigestInspection =
-        PlayerBuildBookDigestInspection.Missing
+    override fun inspectContent(buildingId: String, expectedSha256: String): java.util.concurrent.CompletableFuture<PlayerBuildBookDigestInspection> =
+        java.util.concurrent.CompletableFuture.completedFuture(PlayerBuildBookDigestInspection.Missing)
 
     override fun register(template: ru.arc.autobuild.PlayerBuildBookTemplate) = Unit
 }
@@ -334,7 +334,7 @@ private fun withCommandFixture(block: (CommandFixture) -> Unit) {
                     blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
                     physicsUpdater = RecordingBuilderPhysicsUpdater(),
                     draftStorage = UnusedCommandDraftStorage,
-                    bookSchematicVerifier = BuilderBookSchematicVerifier { true },
+                    bookSchematicVerifier = BuilderBookSchematicVerifier { _, _ -> true },
                     systemBuildBookResolver = { null },
                     systemBuildBookIds = listOf("atelier-house.schem"),
                     sendPlayerMessage = messages::record,

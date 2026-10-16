@@ -127,7 +127,7 @@ internal object BuilderToolsReloadPreflight {
 
         SystemBuildBookCatalog.load(
             systemBooksPath,
-            BuilderStoragePaths.validateSchematicsRoot(dataRoot, candidate.schematicsRoot),
+            BuilderStoragePaths.resolveCandidate(dataRoot, candidate.schematicsRoot),
         )
         return candidate
     }

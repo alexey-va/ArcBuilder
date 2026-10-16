@@ -154,7 +154,7 @@ private class MovingPreviewFixture(
         every { site.centerBlock } returns Location(world, 0.0, 64.0, 0.0)
         every { site.fullRotation } returns 0
         every { site.relativePositionsBottomUp() } answers { (0..63).asSequence().map { BlockVector3.at(it, 0, 0) } }
-        every { site.sourceBlock(any()) } returns stone
+        every { site.sourceBlock(any()) } returns Material.STONE.createBlockData().asString
         every { site.worldLocation(any()) } answers {
             Location(world, firstArg<BlockVector3>().x().toDouble(), 64.0, 0.0)
         }

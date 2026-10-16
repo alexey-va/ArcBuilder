@@ -42,6 +42,8 @@ import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.BuilderStoragePaths
 import ru.arc.autobuild.gui.BuildBookEditorGui
 import ru.arc.autobuild.BuildingManager
+import ru.arc.autobuild.Building
+import ru.arc.autobuild.BuilderSchematics
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.SystemBuildBookCatalog
 import ru.arc.autobuild.SystemBuildBookDefinition
@@ -58,8 +60,6 @@ import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.error
 import ru.arc.util.Logging.info
 import ru.arc.util.Logging.warn
-import ru.arc.util.BlockUtils.rotateBlockData
-import com.sk89q.worldedit.bukkit.BukkitAdapter
 import java.time.Duration
 import java.util.Locale
 import java.util.UUID
@@ -111,12 +111,13 @@ internal class BuilderToolsRuntime(
     ),
     blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
     private val physicsUpdater: BuilderPhysicsUpdater = PaperBuilderPhysicsUpdater,
-    draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
+    draftStorage: BuilderDraftStorage? = null,
     bookSchematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
     private val bookReplacementRefund: (Block) -> ItemStack? = BuilderDeconstructionRefunds::fromSilkTouch,
     systemBuildBookResolver: ((BuildBookData) -> SystemBuildBookDefinition?)? = null,
     systemBuildBookIds: List<String>? = null,
     systemBuildBookStarterIds: List<String>? = null,
+    schematicLoader: ((String, String?) -> CompletableFuture<Building>)? = null,
     private val lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
     private val lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
     private val sendPlayerMessage: (Player, Component) -> Unit = { player, message -> player.sendMessage(message) },
@@ -127,6 +128,10 @@ internal class BuilderToolsRuntime(
     private val systemBuildBookStarterIds = systemBuildBookStarterIds
         ?: systemBuildBookCatalog?.starterBuildingIds
         ?: this.systemBuildBookIds
+    private val schematics = BuilderSchematics(BuilderStoragePaths.resolveCandidate(plugin.dataPath, config.schematicsRoot))
+    private val loadBuilding = schematicLoader ?: schematics::load
+    private val bookRequests = BuilderBookRequests(taskScope)
+    private val systemBookRequests = BuilderBookRequests(taskScope)
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
     private val safety = BuilderBlockSafety(plugin, config.replaceableMaterials)
@@ -539,7 +544,7 @@ internal class BuilderToolsRuntime(
                     override fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation? =
                         currentBookPreviewConfirmation(player)
 
-                    override fun confirm(player: Player): Boolean = confirmBookPreview(player)
+                    override fun confirm(player: Player, complete: (Boolean) -> Unit) = confirmBookPreview(player, complete)
 
                     override fun complete(player: Player, kind: BuilderBookPreviewConfirmationKind) {
                         if (kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION) {
@@ -568,7 +573,11 @@ internal class BuilderToolsRuntime(
                 panelGlowColor = Color.fromRGB(config.constructionSiteGlowColor.removePrefix("#").toInt(16)),
                 viewRange = config.constructionSiteViewRange,
             ).also { initializedBookPreviewPresentation = it }
-            BuildingManager.installPreviewBridge(bookPreviewPresentation)
+            BuildingManager.installPreviewBridge(
+                bookPreviewPresentation,
+                { action -> taskScope.runSync(action) },
+                { player, failure -> error("Builder schematic transform failed", failure); send(player, "book.failed") },
+            )
             Bukkit.getPluginManager().registerEvents(this, plugin)
             checkNotNull(
                 taskScope.runTimer(20L, 20L) {
@@ -681,8 +690,9 @@ internal class BuilderToolsRuntime(
                 storageExecutor = storageExecutor,
                 operationLocks = operationLocks,
                 draftJournal = BuilderDraftJournal(plugin.dataPath, BuilderPlan.ABSOLUTE_MAX_CHANGES),
-                draftStorage = draftStorage,
+                draftStorage = draftStorage ?: PlayerBuildBookDraftStorage(loadBuilding),
                 schematicVerifier = bookSchematicVerifier,
+                loadBuilding = loadBuilding,
                 host = object : BuilderBookLifecycleHost {
                     override fun ensureOperationalContext(player: Player) =
                         this@BuilderToolsRuntime.ensureOperationalContext(player)
@@ -777,7 +787,6 @@ internal class BuilderToolsRuntime(
                 "Builder-tools health publication task was not scheduled"
             }
             loadRecoveryState()
-            preloadSystemBuilds()
             books.start()
             loadConstructionProjects()
             checkNotNull(
@@ -817,6 +826,9 @@ internal class BuilderToolsRuntime(
             initializedBookPreviewPresentation?.close()
             initializedConstructionProjectsMenu?.close()
             initializedConstructionMenus?.close()
+            bookRequests.close()
+            systemBookRequests.close()
+            schematics.close()
             taskScope.close()
             operationLocks.close()
             closeStorageExecutor()
@@ -828,26 +840,6 @@ internal class BuilderToolsRuntime(
         }
     }
 
-    private fun preloadSystemBuilds() {
-        if (systemBuildBookCatalog == null || systemBuildBookIds.isEmpty()) return
-        // The catalog has just revalidated current schematic digests. Do not let a
-        // previous runtime generation supply an old clipboard for the same file name.
-        BuildingManager.invalidateBuildings(systemBuildBookIds)
-        try {
-            storageExecutor.submit {
-                try {
-                    val uniqueIds = systemBuildBookIds.distinct()
-                    val loaded = BuildingManager.preload(uniqueIds)
-                    info("Builder system schematics preloaded: {}/{}", loaded, uniqueIds.size)
-                } catch (failure: Throwable) {
-                    warn("Builder system schematic preload failed: {}", failure.message)
-                }
-            }
-        } catch (_: RejectedExecutionException) {
-            warn("Builder system schematic preload was rejected because storage is stopping")
-        }
-    }
-
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         if (args.firstOrNull()?.equals("systembook", ignoreCase = true) == true) {
             return BuilderSystemBookIssuer.issue(
@@ -856,6 +848,8 @@ internal class BuilderToolsRuntime(
                 systemBuildBookResolver,
                 config.maxScanVolume,
                 { systemBuildBookStarterIds },
+                loadBuilding,
+                systemBookRequests,
                 { sender.sendMessage(messages.render("errors.no-permission")) },
             )
         }
@@ -1098,17 +1092,40 @@ internal class BuilderToolsRuntime(
         selectionActionPanel?.clear(playerId)
     }
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    fun onSelectionToolSlotChange(event: PlayerItemHeldEvent) = dismissSelectionControls(event.player.uniqueId)
+    private fun invalidatePendingBookRequests(playerId: UUID) {
+        bookRequests.invalidate(playerId)
+        books.invalidateSchematicRequests(playerId)
+        BuildingManager.invalidatePendingTransform(playerId)
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    fun onSelectionToolSwap(event: PlayerSwapHandItemsEvent) = dismissSelectionControls(event.player.uniqueId)
+    fun onSelectionToolSlotChange(event: PlayerItemHeldEvent) {
+        invalidatePendingBookRequests(event.player.uniqueId)
+        dismissSelectionControls(event.player.uniqueId)
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    fun onSelectionToolDrop(event: PlayerDropItemEvent) = dismissSelectionControls(event.player.uniqueId)
+    fun onSelectionToolSwap(event: PlayerSwapHandItemsEvent) {
+        invalidatePendingBookRequests(event.player.uniqueId)
+        dismissSelectionControls(event.player.uniqueId)
+    }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    fun onSelectionTeleport(event: PlayerTeleportEvent) = dismissSelectionControls(event.player.uniqueId)
+    fun onSelectionToolDrop(event: PlayerDropItemEvent) {
+        invalidatePendingBookRequests(event.player.uniqueId)
+        dismissSelectionControls(event.player.uniqueId)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onSelectionTeleport(event: PlayerTeleportEvent) {
+        invalidatePendingBookRequests(event.player.uniqueId)
+        dismissSelectionControls(event.player.uniqueId)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    fun onBookGameModeChange(event: org.bukkit.event.player.PlayerGameModeChangeEvent) {
+        invalidatePendingBookRequests(event.player.uniqueId)
+    }
 
     private fun openFillMaterialPicker(player: Player) {
         ensureFeaturePermission(player, BuilderFeature.FILL)
@@ -1262,6 +1279,11 @@ internal class BuilderToolsRuntime(
                 )
             }
             BuilderRootCommand.BOOK -> when (args.getOrNull(1)?.lowercase(Locale.ROOT)) {
+                "cancel" -> {
+                    val loading = bookRequests.invalidate(player.uniqueId)
+                    books.cancelMint(player, loading)
+                    bookPreviewPresentation.clearPlayer(player.uniqueId)
+                }
                 "menu" -> openBookPreviewMenu(player)
                 else -> books.handleCommand(player, args.drop(1))
             }
@@ -1429,21 +1451,19 @@ internal class BuilderToolsRuntime(
             if (data.draft) throw BuilderUserFailure("book.unactivated")
             if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
             if (!data.available) throw BuilderUserFailure("book.invalid")
-            books.verifySchematic(data)
+            books.verifySchematic(data, site.building)
             null
         } else {
             systemBuildBookResolver(data) ?: throw BuilderUserFailure("book.invalid")
         }
         if (BuilderBookAuctionTokenCodec.read(book) != null) throw BuilderUserFailure("book.auction-locked")
         if (!BuildBookCodec.matches(book, data)) throw BuilderUserFailure("book.missing")
+        if (site.transforming) throw BuilderUserFailure("book.loading")
         if (site.building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
 
         val lootTableKey = systemDefinition?.containerLootTableKey?.also { requiredLootTable(it) }
         val cells = site.relativePositionsBottomUp().map { relative ->
-            val after = rotateBlockData(
-                BukkitAdapter.adapt(site.sourceBlock(relative)),
-                site.fullRotation,
-            )
+            val after = Bukkit.createBlockData(site.sourceBlock(relative))
             val target = site.worldLocation(relative).block
             BuilderBookPlannedCell(
                 position = BuilderBlockPos(target.world.uid, target.x, target.y, target.z),
@@ -1775,6 +1795,7 @@ internal class BuilderToolsRuntime(
         site: ConstructionSite,
         complete: (BuilderBookPreviewConfirmation?) -> Unit,
     ) {
+        if (site.transforming) { send(player, "book.loading"); return complete(null) }
         val located = runBookPreviewAction(player) { requireMatchingPreviewBook(player, site) }
             ?: return complete(null)
         val data = located.data
@@ -1793,8 +1814,16 @@ internal class BuilderToolsRuntime(
             }
             return
         }
-        if (!startPlayerBuildBook(player, site, located.item, announce = false)) return complete(null)
-        complete(currentBookPreviewConfirmation(player))
+        requestBook(player, located, data, failed = { complete(null) }) { building ->
+            if (BuildingManager.pending(player.uniqueId) !== site || site.transforming ||
+                building.schematicSha256 != site.building.schematicSha256) {
+                send(player, "book.source-changed")
+                complete(null)
+            } else {
+                if (!startPlayerBuildBook(player, site, located.item, announce = false)) complete(null)
+                else complete(currentBookPreviewConfirmation(player))
+            }
+        }
     }
 
     private fun currentBookPreviewConfirmation(player: Player): BuilderBookPreviewConfirmation? {
@@ -1820,16 +1849,18 @@ internal class BuilderToolsRuntime(
         return books.currentPreviewActivation(player, site.bookData)?.toPreviewConfirmation()
     }
 
-    private fun confirmBookPreview(player: Player): Boolean {
-        val confirmation = currentBookPreviewConfirmation(player) ?: return false
-        if (confirmation.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION) {
-            val site = BuildingManager.pending(player.uniqueId) ?: return false
-            return books.confirmPreviewActivation(player, site.bookData)
+    private fun confirmBookPreview(player: Player, complete: (Boolean) -> Unit) {
+        val current = currentBookPreviewConfirmation(player) ?: return complete(false)
+        if (!current.cooldownRemaining.isZero) return complete(false)
+        if (current.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION) {
+            val site = BuildingManager.pending(player.uniqueId) ?: return complete(false)
+            books.confirmPreviewActivation(player, site.bookData, complete)
+            return
         }
-        return runBookPreviewAction(player) {
+        complete(runBookPreviewAction(player) {
             confirm(player, buildBook = true)
             previews.plan(player.uniqueId)?.kind != BuilderPlanKind.BUILD_BOOK
-        } ?: false
+        } ?: false)
     }
 
     private fun BuilderBookBlueprint.toPreviewConfirmation() = BuilderBookPreviewConfirmation(
@@ -1858,9 +1889,7 @@ internal class BuilderToolsRuntime(
         requireMatchingPreviewBook(player, site.bookData)
 
     private fun requireMatchingPreviewBook(player: Player, expected: BuildBookData): BuilderLocatedBook =
-        BuilderBookInventoryLocator.find(player, expected) { slot, item, raw ->
-            canonicalBook(player, slot, item, raw)
-        } ?: throw BuilderUserFailure("book.missing")
+        BuilderBookInventoryLocator.find(player, expected) { _, item, raw -> item to raw } ?: throw BuilderUserFailure("book.missing")
 
     private fun <T> runBookPreviewAction(player: Player, action: () -> T): T? = try {
         action()
@@ -2344,6 +2373,7 @@ internal class BuilderToolsRuntime(
                     constructionProjects[durable.projectId] = durable
                     constructionResources.forget(durable.projectId)
                     unlockConstruction(durable)
+                    repairCompletedConstructionConnections(durable)
                     Bukkit.getPlayer(durable.playerId)?.takeIf(Player::isOnline)?.let { player ->
                         if (durable.instantBuildRequestedBy == null) emitCommittedOperation(durable.plan, player.gameMode)
                     }
@@ -2380,6 +2410,27 @@ internal class BuilderToolsRuntime(
             }
             completed()
         }
+    }
+
+    private fun repairCompletedConstructionConnections(record: BuilderConstructionProjectRecord) {
+        // Connection shape changes happen only after the durable completion barrier;
+        // they can never invalidate an unfinished step or trigger its rollback.
+        val changes = record.plan.changes
+        val worldId = changes.firstOrNull()?.position?.worldId ?: return
+        val blocks = changes.map { change ->
+            val pos = change.position
+            ru.arc.paper.api.ArcSchematicBlock(
+                ru.arc.paper.api.ArcSchematicPoint(pos.x, pos.y, pos.z),
+                change.afterBlockData,
+                false,
+                false,
+            )
+        }
+        runCatching { schematics.library().repairConnections(worldId, blocks) }
+            .onSuccess { operation -> operation.completion.whenComplete { _, failure ->
+                if (failure != null) warn("Builder completed connection repair failed: {}", failure.message)
+            } }
+            .onFailure { failure -> warn("Builder completed connection repair unavailable: {}", failure.message) }
     }
 
     private fun beginMutation(player: Player, operation: BuilderActiveOperation) {
@@ -2682,6 +2733,9 @@ internal class BuilderToolsRuntime(
     }
 
     private fun cancelPlan(player: Player) {
+        val loading = bookRequests.invalidate(player.uniqueId)
+        val quoting = books.invalidateSchematicRequests(player.uniqueId)
+        books.cancelPreviewActivation(player.uniqueId)
         val active = operationLocks.operation(player.uniqueId)
         if (active != null) {
             if (active.interruptionDeferred) {
@@ -2703,7 +2757,11 @@ internal class BuilderToolsRuntime(
             bookPreviewPresentation.clearPlayer(player.uniqueId)
             send(player, "plan.cancelled")
         } else if (BuildingManager.closePreview(player.uniqueId)) {
+            bookPreviewPresentation.clearPlayer(player.uniqueId)
             send(player, "book.preview-cancelled")
+        } else if (loading || quoting) {
+            bookPreviewPresentation.clearPlayer(player.uniqueId)
+            send(player, "plan.cancelled")
         } else {
             throw BuilderUserFailure("errors.expired")
         }
@@ -2711,6 +2769,9 @@ internal class BuilderToolsRuntime(
 
     private fun clearSelection(player: Player) {
         if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
+        bookRequests.invalidate(player.uniqueId)
+        books.cancelPreviewActivation(player.uniqueId)
+        bookPreviewPresentation.clearPlayer(player.uniqueId)
         discardPendingPlan(player.uniqueId)
         selections.clear(player.uniqueId)
         selectionActionPanel?.clear(player.uniqueId)
@@ -3237,16 +3298,60 @@ internal class BuilderToolsRuntime(
         }
     }
 
+    private fun requestBook(
+        player: Player,
+        source: BuilderLocatedBook,
+        data: BuildBookData = source.data,
+        failed: () -> Unit = {},
+        ready: (Building) -> Unit,
+    ) {
+        val definition = if (data.playerCreated) null else systemBuildBookResolver(data)
+        if (!data.playerCreated && definition == null) { send(player, "book.invalid"); failed(); return }
+        send(player, "book.loading")
+        bookRequests.run(player, source,
+            request = { loadBuilding(data.buildingId, data.schematicSha256 ?: definition?.schematicSha256) },
+            failed = { failure ->
+                if (failure != null) warn("Builder schematic request rejected: {}", failure.message)
+                if (player.isOnline) send(player, if (failure == null) "book.source-changed" else "book.invalid")
+                failed()
+            },
+            ready = { building ->
+                try {
+                    ensureAvailable(player)
+                    if (building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
+                    if (data.playerCreated) books.verifySchematic(data, building)
+                    ready(building)
+                } catch (failure: BuilderUserFailure) {
+                    send(player, failure.path, failure.values)
+                    failed()
+                } catch (failure: Throwable) {
+                    error("Builder schematic continuation failed", failure)
+                    send(player, "book.failed")
+                    failed()
+                }
+            },
+        )
+    }
+
     private fun handleBookInteraction(
         player: Player,
         item: ItemStack,
         data: BuildBookData,
         clickedLocation: Location?,
+        loaded: Building? = null,
+        requestedSneaking: Boolean = player.isSneaking,
+        requestedRotation: Int = BuildingManager.rotationFromYaw(player.yaw),
     ) {
         try {
             ensureAvailable(player)
-            val (effectiveItem, effectiveData) = canonicalBook(player, item, data)
-            if (player.isSneaking) {
+            if (loaded == null) {
+                val anchor = clickedLocation?.clone()
+                val source = BuilderLocatedBook(player.inventory.heldItemSlot, item.clone(), data)
+                requestBook(player, source) { building -> handleBookInteraction(player, source.item, data, anchor, building, requestedSneaking, requestedRotation) }
+                return
+            }
+            val (effectiveItem, effectiveData) = canonicalBook(player, item, data, loaded)
+            if (requestedSneaking) {
                 discardPreparedBookPlan(player.uniqueId)
                 if (effectiveData.selectableBuildingIds.isNotEmpty()) {
                     openBookSelector(player, effectiveItem, effectiveData)
@@ -3275,8 +3380,9 @@ internal class BuilderToolsRuntime(
                         data = effectiveData,
                         expiresAtMillis = System.currentTimeMillis() + config.bookPreviewTtl.toMillis(),
                         maxPlacementOffset = config.bookPreviewMaxOffset,
+                        building = loaded,
+                        rotation = requestedRotation,
                     )
-                    ?: throw BuilderUserFailure("book.invalid")
                     if (current?.isExactOpenPreview(player, effectiveData) != true) {
                         send(
                             player,
@@ -3305,7 +3411,8 @@ internal class BuilderToolsRuntime(
         val expected = item.clone()
         val slot = player.inventory.heldItemSlot
         val choices = data.selectableBuildingIds.map { id ->
-            systemBuildBookResolver(data.copy(buildingId = id)) ?: throw BuilderUserFailure("book.invalid")
+            (systemBuildBookResolver(data.copy(buildingId = id)) ?: throw BuilderUserFailure("book.invalid"))
+                .copy(buildingId = id)
         }
         fun verifyHeldBook() {
             ensureAvailable(player)
@@ -3317,12 +3424,16 @@ internal class BuilderToolsRuntime(
         bookPreviewPresentation.openSelector(player, data, choices, onSelect = { selected ->
             try {
                 verifyHeldBook()
+                val selectorInventory = player.openInventory.topInventory
                 val candidate = data.copy(buildingId = selected, transform = ru.arc.autobuild.BuildBookTransform())
                 val definition = systemBuildBookResolver(candidate) ?: throw BuilderUserFailure("book.invalid")
+                requestBook(player, BuilderLocatedBook(slot, expected, data), candidate) { selectedBuilding ->
+                verifyHeldBook()
+                if (player.openInventory.topInventory !== selectorInventory) throw BuilderUserFailure("book.source-changed")
                 val updated = BuildBookCodec.update(expected, candidate.copy(
                     title = definition.title,
                     systemMaterialsIncluded = definition.materialsIncluded,
-                    blockCount = systemBookBlockCount(selected),
+                    blockCount = selectedBuilding.blockCount,
                     playerMaterials = emptyList(),
                 ).validated())
                 discardPreparedBookPlan(player.uniqueId)
@@ -3331,6 +3442,7 @@ internal class BuilderToolsRuntime(
                 player.inventory.setItem(slot, updated)
                 player.closeInventory()
                 send(player, "book.selector.saved", mapOf("name" to messages.literal(definition.title)))
+                }
             } catch (failure: BuilderUserFailure) {
                 player.closeInventory()
                 send(player, failure.path, failure.values)
@@ -3346,8 +3458,8 @@ internal class BuilderToolsRuntime(
         })
     }
 
-    private fun canonicalBook(player: Player, item: ItemStack, data: BuildBookData): Pair<ItemStack, BuildBookData> {
-        return canonicalBook(player, player.inventory.heldItemSlot, item, data)
+    private fun canonicalBook(player: Player, item: ItemStack, data: BuildBookData, building: Building): Pair<ItemStack, BuildBookData> {
+        return canonicalBook(player, player.inventory.heldItemSlot, item, data, building)
     }
 
     private fun canonicalBook(
@@ -3355,17 +3467,18 @@ internal class BuilderToolsRuntime(
         slot: Int,
         item: ItemStack,
         data: BuildBookData,
+        building: Building,
     ): Pair<ItemStack, BuildBookData> {
         val canonical = if (data.playerCreated) {
             if (data.deliveryPending) throw BuilderUserFailure("book.delivery-pending")
-            books.verifySchematic(data)
+            books.verifySchematic(data, building)
             data
         } else {
             val definition = systemBuildBookResolver(data) ?: throw BuilderUserFailure("book.invalid")
             data.copy(
                 title = definition.title,
                 systemMaterialsIncluded = definition.materialsIncluded,
-                blockCount = systemBookBlockCount(definition.buildingId),
+                blockCount = building.blockCount,
                 playerMaterials = emptyList(),
             ).validated()
         }
@@ -3373,12 +3486,6 @@ internal class BuilderToolsRuntime(
         val updated = BuildBookCodec.update(item, canonical)
         player.inventory.setItem(slot, updated)
         return updated to canonical
-    }
-
-    private fun systemBookBlockCount(id: String): Int {
-        val building = BuildingManager.getBuilding(id) ?: throw BuilderUserFailure("book.invalid")
-        if (building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
-        return building.blockCount
     }
 
     private fun preparedBookPlan(playerId: UUID, book: ItemStack): BuilderBookPreparedPlan {
@@ -3413,6 +3520,7 @@ internal class BuilderToolsRuntime(
 
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
+        bookRequests.invalidate(event.player.uniqueId)
         selectionActionPanel?.clear(event.player.uniqueId)
         crownSelectionDialog?.clearPlayer(event.player.uniqueId)
         materialPicker?.close(event.player.uniqueId)
@@ -3452,7 +3560,7 @@ internal class BuilderToolsRuntime(
             operationLocks.bookLockedPlayerCount > 0 || operationLocks.recoveryLockedPlayerCount > 0 ||
                 bookHealth.deliveryWaitingForSpace > 0 || bookHealth.reservationReleaseBacklog > 0 ||
                 bookHealth.recoveryBlocked -> BuilderToolsReloadBlocker.DURABLE_BOOK_FLOW
-            previews.pendingCount > 0 || plannedConstructionProjects.isNotEmpty() ->
+            bookRequests.size > 0 || systemBookRequests.size > 0 || books.pendingSchematicRequests > 0 || previews.pendingCount > 0 || plannedConstructionProjects.isNotEmpty() ->
                 BuilderToolsReloadBlocker.PENDING_PREVIEW
             selections.pendingCount > 0 || clipboardController.pendingCount > 0 || BuildingManager.pendingCount > 0 ->
                 BuilderToolsReloadBlocker.VOLATILE_PLAYER_STATE
@@ -3534,6 +3642,9 @@ internal class BuilderToolsRuntime(
         constructionInstantRequests.clear()
         bookHoldHints.clear()
         bookPreviewPresentation.close()
+        bookRequests.close()
+        systemBookRequests.close()
+        schematics.close()
         taskScope.close()
         closeStorageExecutor()
         shop.close()
@@ -3571,6 +3682,6 @@ private fun loadSystemBuildBookCatalog(
 ): SystemBuildBookCatalog {
     val path = plugin.dataPath.resolve("modules/system-build-books.yml")
     require(Files.isRegularFile(path)) { "System build-book catalog is missing" }
-    val catalog = SystemBuildBookCatalog.load(path, BuilderStoragePaths.schematicsRoot(config.schematicsRoot))
+    val catalog = SystemBuildBookCatalog.load(path, BuilderStoragePaths.resolveCandidate(plugin.dataPath, config.schematicsRoot))
     return catalog
 }

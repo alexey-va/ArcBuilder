@@ -4,6 +4,7 @@ import com.sk89q.worldedit.math.BlockVector3
 import org.bukkit.Location
 import org.bukkit.World
 import org.bukkit.entity.Player
+import ru.arc.paper.api.ArcSchematicSnapshot
 
 internal enum class PreviewTransformUpdateResult(val allowsBookUpdate: Boolean = false) {
     NO_PREVIEW(true),
@@ -29,7 +30,11 @@ class ConstructionSite internal constructor(
     val expiresAtMillis: Long,
     maxPlacementOffset: Int,
     initialPlacement: BuildBookPreviewPlacement? = null,
+    initialView: ArcSchematicSnapshot? = null,
 ) {
+    internal var view: ArcSchematicSnapshot? = initialView
+    internal var transforming: Boolean = initialView == null
+
     data class Corners(val corner1: BlockVector3, val corner2: BlockVector3)
 
     var bookData: BuildBookData = bookData
@@ -57,11 +62,10 @@ class ConstructionSite internal constructor(
         return centerBlock.clone().add(x.toDouble(), y.toDouble(), z.toDouble())
     }
     val corners: Corners get() {
-        val first = building.getCorner1(fullRotation, mirrored)
-        val second = building.getCorner2(fullRotation, mirrored)
+        val current = checkNotNull(view) { "Build-book schematic transform is still loading" }
         return Corners(
-            BlockVector3.at(minOf(first.x(), second.x()), minOf(first.y(), second.y()), minOf(first.z(), second.z())),
-            BlockVector3.at(maxOf(first.x(), second.x()), maxOf(first.y(), second.y()), maxOf(first.z(), second.z())),
+            BlockVector3.at(current.minimum.x, current.minimum.y, current.minimum.z),
+            BlockVector3.at(current.maximum.x, current.maximum.y, current.maximum.z),
         )
     }
 
@@ -99,6 +103,7 @@ class ConstructionSite internal constructor(
         bookData = bookData,
         expiresAtMillis = expiresAtMillis,
         placement = placement,
+        view = checkNotNull(view),
     )
 
     fun relativePositionsBottomUp(): Sequence<BlockVector3> = sequence {
@@ -109,7 +114,7 @@ class ConstructionSite internal constructor(
                     val relative = BlockVector3.at(x, y, z)
                     // Schematic barriers are keep-world markers, including after rotation/mirroring.
                     // Exclude them before either preview or construction touches the target block.
-                    if (sourceBlock(relative).blockType.id != "minecraft:barrier") yield(relative)
+                    if (!checkNotNull(view).blockAt(relative.x(), relative.y(), relative.z()).isBarrier) yield(relative)
                 }
             }
         }
@@ -119,7 +124,8 @@ class ConstructionSite internal constructor(
         relative.x().toDouble(), relative.y().toDouble(), relative.z().toDouble(),
     )
 
-    fun sourceBlock(relative: BlockVector3) = building.getBlock(relative, fullRotation, mirrored)
+    fun sourceBlock(relative: BlockVector3): String =
+        checkNotNull(view).blockAt(relative.x(), relative.y(), relative.z()).blockData
 
     fun cancelSilently(): Boolean {
         BuildingManager.closePreview(player.uniqueId)
@@ -134,4 +140,5 @@ internal data class ConstructionSiteSnapshot(
     val bookData: BuildBookData,
     val expiresAtMillis: Long,
     val placement: BuildBookPreviewPlacement,
+    val view: ArcSchematicSnapshot,
 )

@@ -31,7 +31,8 @@ internal object BuilderStoragePaths {
         return requireRealPathInsidePlugins(dataRoot, candidate)
     }
 
-    private fun resolveCandidate(dataRoot: Path, configuredRoot: String?): Path {
+    /** Pure lexical resolution; the shared async service validates the real root on request. */
+    fun resolveCandidate(dataRoot: Path, configuredRoot: String?): Path {
         val normalizedDataRoot = dataRoot.toAbsolutePath().normalize()
         val candidate = if (configuredRoot != null) {
             normalizedDataRoot.resolve(configuredRoot).normalize()

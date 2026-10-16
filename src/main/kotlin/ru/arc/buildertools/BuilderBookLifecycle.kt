@@ -12,6 +12,7 @@ import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.BuildBookTransform
 import ru.arc.autobuild.BuildingManager
+import ru.arc.autobuild.Building
 import ru.arc.autobuild.PlayerBuildBookStore
 import ru.arc.autobuild.PreviewTransformUpdateResult
 import ru.arc.core.LifecycleTaskScope
@@ -27,6 +28,7 @@ import ru.arc.util.Logging.info
 import ru.arc.util.Logging.warn
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.RejectedExecutionException
 
@@ -49,15 +51,15 @@ internal interface BuilderBookLifecycleHost {
 }
 
 internal fun interface BuilderBookSchematicVerifier {
-    fun matches(data: BuildBookData): Boolean
+    fun matches(data: BuildBookData, building: Building): Boolean
 }
 
 internal object PlayerBuildBookSchematicVerifier : BuilderBookSchematicVerifier {
-    override fun matches(data: BuildBookData): Boolean {
+    override fun matches(data: BuildBookData, building: Building): Boolean {
         val expectedFile = data.schematicSha256 ?: return false
         val expectedContent = data.contentSha256 ?: return false
-        return PlayerBuildBookStore.schematicSha256(data.buildingId) == expectedFile &&
-            PlayerBuildBookStore.contentSha256(data.buildingId) == expectedContent
+        return building.fileName == data.buildingId && building.schematicSha256 == expectedFile &&
+            building.contentSha256 == expectedContent
     }
 }
 
@@ -86,8 +88,9 @@ internal class BuilderBookLifecycle(
     private val operationLocks: BuilderOperationLocks,
     private val host: BuilderBookLifecycleHost,
     draftJournal: BuilderDraftJournal,
-    draftStorage: BuilderDraftStorage = PlayerBuildBookDraftStorage,
+    draftStorage: BuilderDraftStorage,
     private val schematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
+    private val loadBuilding: (String, String?) -> CompletableFuture<Building>,
 ) : AutoCloseable {
     private data class PendingMint(
         val kind: BuilderBookMintKind,
@@ -100,6 +103,9 @@ internal class BuilderBookLifecycle(
     )
 
     private val pricing = BuilderBookPricing(config)
+    private val schematicRequests = BuilderBookRequests(taskScope)
+    private val quoteRequests = BuilderBookRequests(taskScope)
+    val pendingSchematicRequests: Int get() = schematicRequests.size + quoteRequests.size
     private val debugLine = StructuredDebugLine("ARC_BUILDER_TOOLS")
     private val drafts = BuilderDraftLifecycle(
         config = config,
@@ -257,8 +263,39 @@ internal class BuilderBookLifecycle(
         drafts.createDraft(player, emptyList(), fromInventory = true)
     }
 
-    fun verifySchematic(data: BuildBookData) {
-        if (!schematicVerifier.matches(data)) fail("book.invalid")
+    fun verifySchematic(data: BuildBookData, building: Building) {
+        if (!schematicVerifier.matches(data, building)) fail("book.invalid")
+    }
+
+    private fun loadSchematic(
+        player: Player,
+        source: BuilderLocatedBook,
+        failed: () -> Unit = {},
+        ready: (Building) -> Unit,
+    ) {
+        quoteRequests.invalidate(player.uniqueId)
+        send(player, "book.loading")
+        schematicRequests.run(player, source,
+            request = { loadBuilding(source.data.buildingId, source.data.schematicSha256) },
+            failed = { failure ->
+                if (player.isOnline) send(player, if (failure == null) "book.source-changed" else "book.invalid")
+                failed()
+            },
+            ready = { building ->
+                try {
+                    host.ensureOperationalContext(player)
+                    verifySchematic(source.data, building)
+                    ready(building)
+                } catch (failure: BuilderUserFailure) {
+                    send(player, failure.path, failure.values)
+                    failed()
+                } catch (failure: Throwable) {
+                    error("Builder-book schematic continuation failed", failure)
+                    send(player, "book.failed")
+                    failed()
+                }
+            },
+        )
     }
 
     fun preparePreviewActivation(
@@ -279,21 +316,29 @@ internal class BuilderBookLifecycle(
         return pending.blueprint
     }
 
-    fun confirmPreviewActivation(player: Player, expected: BuildBookData): Boolean = try {
-        val pending = pendingMints[player.uniqueId] ?: fail("book.quote-expired")
-        if (!matchesPendingSource(expected, pending)) fail("book.source-changed")
-        confirmMint(player)
-        true
-    } catch (failure: BuilderUserFailure) {
-        send(player, failure.path, failure.values)
-        false
-    } catch (failure: Throwable) {
-        error("Builder-book preview activation failed for ${player.name}", failure)
-        send(player, "book.failed")
-        false
+    fun confirmPreviewActivation(player: Player, expected: BuildBookData, complete: (Boolean) -> Unit) {
+        try {
+            val pending = pendingMints[player.uniqueId] ?: fail("book.quote-expired")
+            if (!matchesPendingSource(expected, pending)) fail("book.source-changed")
+            confirmMint(player, completed = complete)
+        } catch (failure: BuilderUserFailure) {
+            send(player, failure.path, failure.values)
+            complete(false)
+        } catch (failure: Throwable) {
+            error("Builder-book preview activation failed for ${player.name}", failure)
+            send(player, "book.failed")
+            complete(false)
+        }
+    }
+
+    fun invalidateSchematicRequests(playerId: UUID): Boolean {
+        val loading = schematicRequests.invalidate(playerId)
+        val quoting = quoteRequests.invalidate(playerId)
+        return loading || quoting
     }
 
     fun cancelPreviewActivation(playerId: UUID) {
+        invalidateSchematicRequests(playerId)
         if (pendingMints[playerId]?.kind == BuilderBookMintKind.CREATE) pendingMints.remove(playerId)
     }
 
@@ -371,6 +416,8 @@ internal class BuilderBookLifecycle(
     }
 
     fun onPlayerQuit(playerId: UUID) {
+        schematicRequests.invalidate(playerId)
+        quoteRequests.invalidate(playerId)
         pendingMints.remove(playerId)
         drafts.onPlayerQuit(playerId)
     }
@@ -539,6 +586,7 @@ internal class BuilderBookLifecycle(
         source: BuilderLocatedBook,
         announce: Boolean,
         complete: (BuilderBookBlueprint?) -> Unit,
+        loaded: Building? = null,
     ) {
         if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
         val activeRegistry = requireRegistry()
@@ -546,17 +594,22 @@ internal class BuilderBookLifecycle(
         if (source.item.amount != 1) fail("book.duplicate")
         if (data.creatorId != player.uniqueId) fail("book.creator-only")
         requireExactDraftPreview(player, data)
-        verifySchematic(data)
+        if (loaded == null) {
+            loadSchematic(player, source, failed = { complete(null) }) {
+                prepareActivation(player, source, announce, complete, it)
+            }
+            return
+        }
+        verifySchematic(data, loaded)
         val blueprintId = checkNotNull(data.blueprintId)
-        activeRegistry.loadBlueprint(blueprintId).whenComplete { existing, failure ->
-            taskScope.runSync {
-                if (!player.isOnline) return@runSync
-                if (failure != null) {
-                    warn("Builder-book blueprint lookup failed for {}: type={}", player.name, BuilderToolsFailureType.of(failure))
-                    send(player, "book.registry-unavailable")
-                    complete(null)
-                    return@runSync
-                }
+        quoteRequests.run(player, source,
+            request = { activeRegistry.loadBlueprint(blueprintId).thenApply { it to Unit } },
+            failed = { failure ->
+                if (player.isOnline) send(player, if (failure == null) "book.source-changed" else "book.registry-unavailable")
+                complete(null)
+            },
+            ready = { result ->
+                val existing = result.first
                 try {
                     requireExactDraftPreview(player, data)
                     if (inventoryBooks(player).count { (_, item, candidate) -> item.amount == 1 && candidate == data } != 1) {
@@ -566,8 +619,7 @@ internal class BuilderBookLifecycle(
                         if (!matchesBlueprint(data, existing)) fail("book.invalid")
                         existing
                     } else {
-                        val building = BuildingManager.getBuilding(data.buildingId) ?: fail("book.invalid")
-                        when (val quoted = pricing.quote(player, building)) {
+                        when (val quoted = pricing.quote(player, loaded)) {
                             is BuilderBookQuoteResult.Ready -> BuilderBookBlueprint(
                                 blueprintId = blueprintId,
                                 creatorId = checkNotNull(data.creatorId),
@@ -609,11 +661,11 @@ internal class BuilderBookLifecycle(
                     send(player, "book.failed")
                     complete(null)
                 }
-            }
-        }
+            },
+        )
     }
 
-    private fun prepareCopy(player: Player) {
+    private fun prepareCopy(player: Player, loaded: Building? = null) {
         if (!player.hasPermission("arcbuild.book.create")) fail("errors.no-permission")
         val activeRegistry = requireRegistry()
         val held = player.inventory.itemInMainHand
@@ -622,54 +674,50 @@ internal class BuilderBookLifecycle(
         if (held.amount != 1) fail("book.duplicate")
         if (BuilderBookAuctionTokenCodec.read(held) != null) fail("book.auction-locked")
         if (player.inventory.firstEmpty() == -1) fail("book.inventory-full")
-        verifySchematic(data)
-        val instanceId = checkNotNull(data.instanceId)
-        activeRegistry.loadInstance(instanceId).whenComplete { instance, instanceFailure ->
-            taskScope.runSync instanceLookup@{
-                if (!player.isOnline) return@instanceLookup
-                if (instanceFailure != null || instance == null) {
-                    send(player, if (instanceFailure == null) "book.duplicate" else "book.registry-unavailable")
-                    return@instanceLookup
-                }
-                if (
-                    instance.status != BuilderBookInstanceStatus.AVAILABLE || instance.blueprintId != data.blueprintId ||
-                    instance.ownerId != player.uniqueId || instance.generation != data.instanceGeneration
-                ) {
-                    send(player, "book.stale")
-                    return@instanceLookup
-                }
-                activeRegistry.loadBlueprint(instance.blueprintId).whenComplete { blueprint, blueprintFailure ->
-                    taskScope.runSync blueprintLookup@{
-                        if (!player.isOnline) return@blueprintLookup
-                        if (blueprintFailure != null || blueprint == null) {
-                            send(player, if (blueprintFailure == null) "book.invalid" else "book.registry-unavailable")
-                            return@blueprintLookup
-                        }
-                        if (!BuilderBookCopyPolicy.canConfirm(player.uniqueId, data.creatorId, blueprint.creatorId)) {
-                            send(player, "book.creator-only")
-                            return@blueprintLookup
-                        }
-                        if (!matchesBlueprint(data, blueprint)) {
-                            send(player, "book.invalid")
-                            return@blueprintLookup
-                        }
-                        pendingMints[player.uniqueId] = PendingMint(
-                            kind = BuilderBookMintKind.COPY,
-                            sourceBlueprintId = blueprint.blueprintId,
-                            sourceInstanceId = instanceId,
-                            sourceInstanceGeneration = data.instanceGeneration,
-                            blueprint = blueprint,
-                            outputInstanceId = UUID.randomUUID(),
-                            expiresAtMillis = System.currentTimeMillis() + config.planTtl.toMillis(),
-                        )
-                        sendMintQuote(player, blueprint, "copy")
-                    }
-                }
-            }
+        if (loaded == null) {
+            loadSchematic(player, BuilderLocatedBook(player.inventory.heldItemSlot, held, data)) { prepareCopy(player, it) }
+            return
         }
+        verifySchematic(data, loaded)
+        val instanceId = checkNotNull(data.instanceId)
+        quoteRequests.run(player, BuilderLocatedBook(player.inventory.heldItemSlot, held, data),
+            request = {
+                activeRegistry.loadInstance(instanceId).thenCompose { instance ->
+                    if (instance == null) CompletableFuture.completedFuture(null to null)
+                    else activeRegistry.loadBlueprint(instance.blueprintId).thenApply { blueprint -> instance to blueprint }
+                }
+            },
+            failed = { failure ->
+                if (player.isOnline) send(player, if (failure == null) "book.source-changed" else "book.registry-unavailable")
+            },
+            ready = ready@{ (instance, blueprint) ->
+                if (instance == null) { send(player, "book.duplicate"); return@ready }
+                if (instance.status != BuilderBookInstanceStatus.AVAILABLE || instance.blueprintId != data.blueprintId ||
+                    instance.ownerId != player.uniqueId || instance.generation != data.instanceGeneration) {
+                    send(player, "book.stale")
+                    return@ready
+                }
+                if (blueprint == null) { send(player, "book.invalid"); return@ready }
+                if (!BuilderBookCopyPolicy.canConfirm(player.uniqueId, data.creatorId, blueprint.creatorId)) {
+                    send(player, "book.creator-only")
+                    return@ready
+                }
+                if (!matchesBlueprint(data, blueprint)) { send(player, "book.invalid"); return@ready }
+                pendingMints[player.uniqueId] = PendingMint(
+                    kind = BuilderBookMintKind.COPY,
+                    sourceBlueprintId = blueprint.blueprintId,
+                    sourceInstanceId = instanceId,
+                    sourceInstanceGeneration = data.instanceGeneration,
+                    blueprint = blueprint,
+                    outputInstanceId = UUID.randomUUID(),
+                    expiresAtMillis = System.currentTimeMillis() + config.planTtl.toMillis(),
+                )
+                sendMintQuote(player, blueprint, "copy")
+            },
+        )
     }
 
-    private fun sell(player: Player, rawPrice: String?) {
+    private fun sell(player: Player, rawPrice: String?, loaded: Building? = null) {
         if (!player.hasPermission("arcbuild.book.sell")) fail("errors.no-permission")
         requireRegistry()
         if (operationLocks.isPlayerLocked(player.uniqueId)) fail("errors.busy")
@@ -678,12 +726,16 @@ internal class BuilderBookLifecycle(
         val data = BuildBookCodec.read(held)?.takeIf { it.available } ?: fail("book.active-required")
         if (held.amount != 1) fail("book.duplicate")
         if (BuilderBookAuctionTokenCodec.read(held) != null) fail("book.auction-locked")
-        verifySchematic(data)
+        if (loaded == null) {
+            loadSchematic(player, BuilderLocatedBook(player.inventory.heldItemSlot, held, data)) { sell(player, rawPrice, it) }
+            return
+        }
+        verifySchematic(data, loaded)
         val coordinator = auctionCoordinator ?: fail("book.auction-unavailable")
         coordinator.sell(player, data, held.clone(), price)
     }
 
-    private fun confirmMint(player: Player) {
+    private fun confirmMint(player: Player, loaded: Building? = null, completed: (Boolean) -> Unit = {}) {
         val activeRegistry = requireRegistry()
         val coordinator = mintCoordinator ?: fail("book.registry-unavailable")
         if (operationLocks.isPlayerLocked(player.uniqueId)) fail("errors.busy")
@@ -694,7 +746,7 @@ internal class BuilderBookLifecycle(
         }
         val sources = matchingInventorySources(player, pending)
         if (sources.size != 1) fail("book.source-changed")
-        val (_, held, data) = sources.single()
+        val (sourceSlot, held, data) = sources.single()
         if (
             pending.kind == BuilderBookMintKind.COPY &&
             !BuilderBookCopyPolicy.canConfirm(player.uniqueId, data.creatorId, pending.blueprint.creatorId)
@@ -705,7 +757,13 @@ internal class BuilderBookLifecycle(
         if (!matchesPendingSource(data, pending) || held.amount != 1) fail("book.source-changed")
         if (pending.kind == BuilderBookMintKind.CREATE) requireExactDraftPreview(player, data)
         if (pending.kind == BuilderBookMintKind.COPY && player.inventory.firstEmpty() == -1) fail("book.inventory-full")
-        verifySchematic(data)
+        if (loaded == null) {
+            loadSchematic(player, BuilderLocatedBook(sourceSlot, held, data), failed = { completed(false) }) {
+                confirmMint(player, it, completed)
+            }
+            return
+        }
+        verifySchematic(data, loaded)
         pendingMints.remove(player.uniqueId)
         operationLocks.lockBook(player.uniqueId)
         val transactionId = UUID.randomUUID()
@@ -724,6 +782,7 @@ internal class BuilderBookLifecycle(
         val sourceId = pending.sourceInstanceId
         if (sourceId == null) {
             startMint(player, intent, coordinator)
+            completed(true)
             return
         }
         val serverName = ARC.serverName ?: run {
@@ -740,6 +799,7 @@ internal class BuilderBookLifecycle(
             playerId = player.uniqueId,
             serverName = serverName,
         )
+        completed(true)
         activeRegistry.oneTimeUses.claim(sourceClaimRequest).whenComplete { reservation, failure ->
             taskScope.runSync {
                 if (failure != null || reservation == null) {
@@ -914,9 +974,11 @@ internal class BuilderBookLifecycle(
         )
     }
 
-    private fun cancelMint(player: Player) {
+    fun cancelMint(player: Player, previewLoading: Boolean = false) {
+        val loading = invalidateSchematicRequests(player.uniqueId)
         if (pendingMints.remove(player.uniqueId) != null) send(player, "book.quote-cancelled")
         else if (BuildingManager.closePreview(player.uniqueId)) send(player, "book.preview-cancelled")
+        else if (loading || previewLoading) send(player, "book.quote-cancelled")
         else fail("book.nothing-to-cancel")
     }
 
@@ -1444,6 +1506,8 @@ internal class BuilderBookLifecycle(
     override fun close() {
         if (closed) return
         closed = true
+        schematicRequests.close()
+        quoteRequests.close()
         auctionCoordinator?.close()
         statusVerifier?.close()
         drafts.close()

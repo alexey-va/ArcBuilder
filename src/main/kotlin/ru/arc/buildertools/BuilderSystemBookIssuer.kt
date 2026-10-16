@@ -7,7 +7,7 @@ import org.bukkit.entity.Player
 import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.Building
-import ru.arc.autobuild.BuildingManager
+import java.util.concurrent.CompletableFuture
 import ru.arc.autobuild.SystemBuildBookDefinition
 import kotlin.random.Random
 
@@ -19,6 +19,10 @@ internal object BuilderSystemBookIssuer {
         resolve: (BuildBookData) -> SystemBuildBookDefinition?,
         maxScanVolume: Long,
         randomBuildingIds: () -> List<String> = { emptyList() },
+        load: (String, String?) -> CompletableFuture<Building> = { _, _ ->
+            CompletableFuture.failedFuture(IllegalStateException("Schematic service is unavailable"))
+        },
+        requests: BuilderBookRequests? = null,
         permissionDenied: () -> Unit,
     ): Boolean {
         if (!canIssue(sender)) {
@@ -29,16 +33,10 @@ internal object BuilderSystemBookIssuer {
             listOf(sender.name) + args
         } else args
         if (issueArgs.size !in 2..3) {
-            sender.sendMessage("Usage: builder systembook <online-player> <default.schem|random> [alternative.schem,...|@starter]")
+            sender.sendMessage("Usage: builder systembook <online-player> <building-id|random> [alternative-id,...|@starter]")
             return true
         }
         try {
-            val loadedBuildings = mutableMapOf<String, Building>()
-            fun building(id: String): Building = loadedBuildings.getOrPut(id) {
-                (BuildingManager.getBuilding(id) ?: Building(id).also { BuildingManager.addBuilding(it) }).also {
-                    require(it.volume <= maxScanVolume) { "Schematic exceeds the configured scan volume: $id" }
-                }
-            }
             val player = requireNotNull(Bukkit.getPlayerExact(issueArgs[0])) { "Player must be online on this server" }
             val requestedId = issueArgs[1]
             require(!requestedId.equals(RANDOM_SELECTOR, ignoreCase = true) || issueArgs.size == 3) {
@@ -54,13 +52,13 @@ internal object BuilderSystemBookIssuer {
                     },
                     resolve,
                     maxScanVolume,
-                    volume = { building(it).volume },
+                    volume = { 0L },
                 )
                 options = selected.second
                 selected.first
             } else {
                 val resolved = requireNotNull(resolve(BuildBookData(requestedId, "System book").validated())) {
-                    "Catalogue entry is disabled, missing, or its schematic digest changed"
+                    "Catalogue entry is disabled or missing"
                 }
                 options = if (issueArgs.size == 3) {
                     (listOf(resolved.buildingId) + issueArgs[2].split(',')).distinct()
@@ -69,20 +67,33 @@ internal object BuilderSystemBookIssuer {
             }
             options.forEach { id ->
                 requireNotNull(resolve(BuildBookData(id, "System book").validated())) { "Selector entry is unavailable: $id" }
-                building(id)
             }
-            val bookData = data(definition).copy(
-                selectableBuildingIds = options,
-                cooldownSeconds = if (requestedId.equals(RANDOM_SELECTOR, ignoreCase = true)) 0L else null,
-                blockCount = building(definition.buildingId).blockCount,
-            ).validated()
-            val slot = player.inventory.firstEmpty()
-            require(slot >= 0) { "Player inventory has no empty slot" }
-            val item = BuildBookItems.create(bookData)
-            player.inventory.setItem(slot, item)
-            if (sender !is Player) {
-                sender.sendMessage("SYSTEM_BOOK_ISSUED player=${player.name} schematic=${definition.buildingId} slot=$slot sha256=${definition.schematicSha256}")
-            }
+            val requester = requireNotNull(requests) { "Schematic service is unavailable" }
+            require(player.inventory.firstEmpty() >= 0) { "Player inventory has no empty slot" }
+            requester.run(player, null,
+                latestOnly = false,
+                request = { load(definition.buildingId, definition.schematicSha256) },
+                failed = { failure -> sender.sendMessage("SYSTEM_BOOK_REFUSED ${failure?.message ?: "Recipient changed context"}") },
+                ready = { building ->
+                    try {
+                        require(canIssue(sender) && (sender !is Player || sender.isOnline)) { "Issuer is no longer available" }
+                        require(building.volume <= maxScanVolume) { "Schematic exceeds the configured scan volume" }
+                        val bookData = data(definition).copy(
+                            selectableBuildingIds = options,
+                            cooldownSeconds = if (requestedId.equals(RANDOM_SELECTOR, ignoreCase = true)) 0L else null,
+                            blockCount = building.blockCount,
+                        ).validated()
+                        val slot = player.inventory.firstEmpty()
+                        require(slot >= 0) { "Player inventory has no empty slot" }
+                        player.inventory.setItem(slot, BuildBookItems.create(bookData))
+                        if (sender !is Player) sender.sendMessage(
+                            "SYSTEM_BOOK_ISSUED player=${player.name} schematic=${definition.buildingId} slot=$slot sha256=${definition.schematicSha256}",
+                        )
+                    } catch (failure: IllegalArgumentException) {
+                        sender.sendMessage("SYSTEM_BOOK_REFUSED ${failure.message}")
+                    }
+                },
+            )
         } catch (failure: IllegalArgumentException) {
             sender.sendMessage("SYSTEM_BOOK_REFUSED ${failure.message}")
         }

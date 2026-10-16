@@ -1,5 +1,7 @@
 package ru.arc.autobuild
 
+import ru.arc.paper.api.ArcSchematicIds
+
 import de.tr7zw.changeme.nbtapi.NBT
 import net.kyori.adventure.text.Component
 import org.bukkit.Material
@@ -142,12 +144,12 @@ data class BuildBookData(
     val selectableBuildingIds: List<String> = emptyList(),
 ) {
     fun validated(): BuildBookData = apply {
-        require(BUILDING_ID.matches(buildingId)) { "Build-book building id is invalid" }
+        require(buildingId.length <= 160 && ArcSchematicIds.isValid(buildingId)) { "Build-book building id is invalid" }
         require(title.isNotBlank() && title.length <= 48 && title.none(Char::isISOControl)) { "Build-book title is invalid" }
         require(selectableBuildingIds.isEmpty() || (
             !playerCreated && selectableBuildingIds.size in 2..256 &&
                 selectableBuildingIds.distinct().size == selectableBuildingIds.size &&
-                buildingId in selectableBuildingIds && selectableBuildingIds.all(BUILDING_ID::matches)
+                buildingId in selectableBuildingIds && selectableBuildingIds.all { it.length <= 160 && ArcSchematicIds.isValid(it) }
             )) { "Build-book selector options are invalid" }
         transform.validated()
         require(sourceRotation in BuildBookTransform.CARDINAL_ROTATIONS) {
@@ -196,7 +198,6 @@ data class BuildBookData(
     val available: Boolean get() = registered && !deliveryPending
 
     companion object {
-        private val BUILDING_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}")
         private val CREATOR_NAME = Regex("[A-Za-z0-9_]{1,16}")
         private val SHA256 = Regex("[a-f0-9]{64}")
     }
