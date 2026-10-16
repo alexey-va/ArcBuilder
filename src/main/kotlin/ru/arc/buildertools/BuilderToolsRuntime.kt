@@ -847,6 +847,7 @@ internal class BuilderToolsRuntime(
                 args.drop(1),
                 systemBuildBookResolver,
                 config.maxScanVolume,
+                messages,
                 { systemBuildBookStarterIds },
                 loadBuilding,
                 systemBookRequests,

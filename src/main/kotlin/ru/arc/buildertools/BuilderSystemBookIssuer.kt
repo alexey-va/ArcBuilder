@@ -7,8 +7,13 @@ import org.bukkit.entity.Player
 import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.Building
-import java.util.concurrent.CompletableFuture
 import ru.arc.autobuild.SystemBuildBookDefinition
+import ru.arc.text.LocalizedMiniMessage
+import ru.arc.util.Logging
+import java.util.concurrent.CancellationException
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.concurrent.ExecutionException
 import kotlin.random.Random
 
 /** Administrative issuance of reviewed catalogue books through the native item codec. */
@@ -18,6 +23,7 @@ internal object BuilderSystemBookIssuer {
         args: List<String>,
         resolve: (BuildBookData) -> SystemBuildBookDefinition?,
         maxScanVolume: Long,
+        messages: LocalizedMiniMessage,
         randomBuildingIds: () -> List<String> = { emptyList() },
         load: (String, String?) -> CompletableFuture<Building> = { _, _ ->
             CompletableFuture.failedFuture(IllegalStateException("Schematic service is unavailable"))
@@ -33,15 +39,34 @@ internal object BuilderSystemBookIssuer {
             listOf(sender.name) + args
         } else args
         if (issueArgs.size !in 2..3) {
-            sender.sendMessage("Usage: builder systembook <online-player> <building-id|random> [alternative-id,...|@starter]")
+            if (sender is Player) sender.sendMessage(messages.render("book.system-issue.usage", BuilderLocalePolicy.localeTag(sender)))
+            else sender.sendMessage("Usage: builder systembook <online-player> <building-id|random> [alternative-id,...|@starter]")
             return true
         }
+        var schematicId = issueArgs[1]
+        fun refused(failure: Throwable?) {
+            val cause = generateSequence(failure) {
+                if (it is CompletionException || it is ExecutionException) it.cause else null
+            }.lastOrNull()
+            if (cause != null && cause !is Exception && cause !is LinkageError) throw cause
+            val reason = cause?.message ?: cause?.javaClass?.simpleName ?: "Recipient changed context"
+            Logging.warn("SYSTEM_BOOK_REFUSED issuer={} recipient={} schematic={} reason={}",
+                logField(sender.name), logField(issueArgs[0]), logField(schematicId), logField(reason), cause)
+            if (sender is Player) {
+                val key = when (cause) {
+                    is Refused -> cause.key
+                    is CancellationException, null -> "cancelled"
+                    else -> "failed"
+                }
+                sender.sendMessage(messages.render("book.system-issue.$key", BuilderLocalePolicy.localeTag(sender)))
+            } else sender.sendMessage("SYSTEM_BOOK_REFUSED ${failure?.message ?: "Recipient changed context"}")
+        }
         try {
-            val player = requireNotNull(Bukkit.getPlayerExact(issueArgs[0])) { "Player must be online on this server" }
+            val player = Bukkit.getPlayerExact(issueArgs[0])
+                ?: throw Refused("recipient-unavailable", "Player must be online on this server")
             val requestedId = issueArgs[1]
-            require(!requestedId.equals(RANDOM_SELECTOR, ignoreCase = true) || issueArgs.size == 3) {
-                "Random system-book selection requires an explicit ID list or @starter"
-            }
+            if (requestedId.equals(RANDOM_SELECTOR, ignoreCase = true) && issueArgs.size != 3)
+                throw Refused("pool-required", "Random system-book selection requires an explicit ID list or @starter")
             val options: List<String>
             val definition = if (requestedId.equals(RANDOM_SELECTOR, ignoreCase = true)) {
                 val selected = selectRandomDefinition(
@@ -57,45 +82,55 @@ internal object BuilderSystemBookIssuer {
                 options = selected.second
                 selected.first
             } else {
-                val resolved = requireNotNull(resolve(BuildBookData(requestedId, "System book").validated())) {
-                    "Catalogue entry is disabled or missing"
-                }
+                val resolved = resolve(BuildBookData(requestedId, "System book").validated())
+                    ?: throw Refused("catalogue-unavailable", "Catalogue entry is disabled or missing")
                 options = if (issueArgs.size == 3) {
                     (listOf(resolved.buildingId) + issueArgs[2].split(',')).distinct()
                 } else emptyList()
                 resolved
             }
+            schematicId = definition.buildingId
             options.forEach { id ->
-                requireNotNull(resolve(BuildBookData(id, "System book").validated())) { "Selector entry is unavailable: $id" }
+                if (resolve(BuildBookData(id, "System book").validated()) == null)
+                    throw Refused("catalogue-unavailable", "Selector entry is unavailable: $id")
             }
             val requester = requireNotNull(requests) { "Schematic service is unavailable" }
-            require(player.inventory.firstEmpty() >= 0) { "Player inventory has no empty slot" }
+            if (player.inventory.firstEmpty() < 0)
+                throw Refused("inventory-full", "Player inventory has no empty slot")
+            if (sender is Player) sender.sendMessage(messages.render("book.system-issue.loading", BuilderLocalePolicy.localeTag(sender)))
             requester.run(player, null,
                 latestOnly = false,
                 request = { load(definition.buildingId, definition.schematicSha256) },
-                failed = { failure -> sender.sendMessage("SYSTEM_BOOK_REFUSED ${failure?.message ?: "Recipient changed context"}") },
-                ready = { building ->
-                    try {
-                        require(canIssue(sender) && (sender !is Player || sender.isOnline)) { "Issuer is no longer available" }
-                        require(building.volume <= maxScanVolume) { "Schematic exceeds the configured scan volume" }
+                failed = ::refused,
+                ready = ready@{ building ->
+                    val slot = try {
+                        if (!canIssue(sender) || sender is Player && !sender.isOnline)
+                            throw Refused("issuer-unavailable", "Issuer is no longer available")
+                        if (building.volume > maxScanVolume)
+                            throw Refused("too-large", "Schematic exceeds the configured scan volume")
                         val bookData = data(definition).copy(
                             selectableBuildingIds = options,
                             cooldownSeconds = if (requestedId.equals(RANDOM_SELECTOR, ignoreCase = true)) 0L else null,
                             blockCount = building.blockCount,
                         ).validated()
                         val slot = player.inventory.firstEmpty()
-                        require(slot >= 0) { "Player inventory has no empty slot" }
+                        if (slot < 0) throw Refused("inventory-full", "Player inventory has no empty slot")
                         player.inventory.setItem(slot, BuildBookItems.create(bookData))
-                        if (sender !is Player) sender.sendMessage(
-                            "SYSTEM_BOOK_ISSUED player=${player.name} schematic=${definition.buildingId} slot=$slot sha256=${definition.schematicSha256}",
-                        )
-                    } catch (failure: IllegalArgumentException) {
-                        sender.sendMessage("SYSTEM_BOOK_REFUSED ${failure.message}")
+                        slot
+                    } catch (failure: Throwable) {
+                        refused(failure)
+                        return@ready
                     }
+                    if (sender is Player) sender.sendMessage(messages.render(
+                        "book.system-issue.success", BuilderLocalePolicy.localeTag(sender),
+                        mapOf("player" to messages.literal(player.name), "name" to messages.literal(definition.title)),
+                    )) else sender.sendMessage(
+                        "SYSTEM_BOOK_ISSUED player=${player.name} schematic=${definition.buildingId} slot=$slot sha256=${definition.schematicSha256}",
+                    )
                 },
             )
-        } catch (failure: IllegalArgumentException) {
-            sender.sendMessage("SYSTEM_BOOK_REFUSED ${failure.message}")
+        } catch (failure: Throwable) {
+            refused(failure)
         }
         return true
     }
@@ -144,6 +179,9 @@ internal object BuilderSystemBookIssuer {
     internal const val PERMISSION = "arcbuild.admin.systembook"
     internal const val RANDOM_SELECTOR = "random"
     internal const val STARTER_SELECTOR = "@starter"
+
+    private class Refused(val key: String, message: String) : IllegalArgumentException(message)
+    private fun logField(value: String) = value.filterNot(Char::isISOControl).take(180)
 
     internal fun canIssue(sender: CommandSender): Boolean =
         sender is ConsoleCommandSender || sender is Player && sender.hasPermission(PERMISSION)

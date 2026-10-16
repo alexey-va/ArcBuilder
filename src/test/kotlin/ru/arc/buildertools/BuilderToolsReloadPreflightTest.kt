@@ -248,6 +248,26 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         BuilderToolsConfig.mergeBundledDefaults(root) shouldBe false
     }
 
+    test("existing configs gain system-book issuance messages without replacing operator text") {
+        val root = configRoot()
+        Config(root, "modules/builder-tools.yml").apply {
+            removeKey("locales.ru.book.system-issue")
+            removeKey("locales.en.book.system-issue")
+            setString("locales.ru.book.system-issue.failed", "<prefix><red>Сообщите администратору")
+            setString("operator-owned-note", "keep-me")
+            saveStrict()
+        }
+
+        BuilderToolsConfig.mergeBundledDefaults(root) shouldBe true
+        val candidate = BuilderToolsReloadPreflight.load(root)
+        val plain = PlainTextComponentSerializer.plainText()
+        plain.serialize(candidate.messages().render("book.system-issue.loading", "ru")) shouldContain "Загружаем схему"
+        plain.serialize(candidate.messages().render("book.system-issue.loading", "en")) shouldContain "Loading the schematic"
+        plain.serialize(candidate.messages().render("book.system-issue.failed", "ru")) shouldContain "Сообщите администратору"
+        Config(root, "modules/builder-tools.yml").string("operator-owned-note") shouldBe "keep-me"
+        BuilderToolsConfig.mergeBundledDefaults(root) shouldBe false
+    }
+
     test("reload preflight rejects overlapping construction menu slots") {
         val root = configRoot()
         Config(root, "modules/builder-tools.yml").apply {

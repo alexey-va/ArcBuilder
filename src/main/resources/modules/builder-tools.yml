@@ -597,6 +597,18 @@ locales:
       retained: "<#d48763>Чертёж сохранён <#8c8c8c>— <#e6fff3>можно вставить снова"
     book:
       loading: "<prefix><#e6fff3>Загружаем постройку…"
+      system-issue:
+        loading: "<prefix><#e6fff3>Загружаем схему для книги…"
+        success: "\n  <prefix><#2bba43>Книга выдана игроку <#e6fff3><player><#2bba43>.\n  <#e6fff3><name>\n"
+        failed: "<prefix><#c42323>Не удалось завершить выдачу книги.\n  <#e6fff3>Проверьте инвентарь и журнал сервера."
+        cancelled: "<prefix><#ff9f0f>Выдача книги отменена. Повторите команду."
+        inventory-full: "<prefix><#ff9f0f>В инвентаре получателя нет места.\n  <#e6fff3>Освободите один слот и повторите команду."
+        recipient-unavailable: "<prefix><#ff9f0f>Получатель должен быть на этом сервере.\n  <#e6fff3>Повторите команду после его подключения."
+        issuer-unavailable: "<prefix><#ff9f0f>Ваш доступ к выдаче книги изменился.\n  <#e6fff3>Переподключитесь или проверьте права."
+        catalogue-unavailable: "<prefix><#ff9f0f>Схема отсутствует в каталоге или отключена.\n  <#e6fff3>Выберите доступную схему через Tab."
+        pool-required: "<prefix><#ff9f0f>Укажите список схем для случайной книги.\n  <#e6fff3>Для стартовых домов: /builder systembook random @starter"
+        too-large: "<prefix><#ff9f0f>Схема превышает допустимый объём.\n  <#e6fff3>Выберите постройку меньшего размера."
+        usage: "<prefix><#e6fff3>/builder systembook <id> — получить книгу\n  <#e6fff3>/builder systembook <player> <id> — выдать игроку"
       draft-saving: "<prefix><#e6fff3>Сохраняем чертёж…"
       draft-recovery-starting: "<prefix><#e6fff3>Проверяем незавершённые черновики после перезапуска…"
       draft-pending: |-
@@ -1531,6 +1543,18 @@ locales:
       retained: "<aqua>Blueprint retained <dark_gray>— <white>you can paste it again"
     book:
       loading: "<prefix><gray>Loading the build…"
+      system-issue:
+        loading: "<prefix><#e6fff3>Loading the schematic for your book…"
+        success: "\n  <prefix><green>Book delivered to <white><player><green>.\n  <white><name>\n"
+        failed: "<prefix><red>Book delivery could not be completed.\n  <white>Check the inventory and server log."
+        cancelled: "<prefix><yellow>Book delivery was cancelled. Run the command again."
+        inventory-full: "<prefix><yellow>The recipient's inventory is full.\n  <white>Free one slot and run the command again."
+        recipient-unavailable: "<prefix><yellow>The recipient must be on this server.\n  <white>Run the command again after they connect."
+        issuer-unavailable: "<prefix><yellow>Your access to book issuance has changed.\n  <white>Reconnect or check your permissions."
+        catalogue-unavailable: "<prefix><yellow>The schematic is missing from the catalogue or disabled.\n  <white>Use Tab to choose an available schematic."
+        pool-required: "<prefix><yellow>Choose a schematic pool for the random book.\n  <white>For starter homes: /builder systembook random @starter"
+        too-large: "<prefix><yellow>The schematic exceeds the allowed volume.\n  <white>Choose a smaller build."
+        usage: "<prefix><white>/builder systembook <id> — get a book\n  <white>/builder systembook <player> <id> — give a book"
       draft-saving: "<prefix><gray>Saving the blueprint…"
       draft-recovery-starting: "<prefix><gray>Checking unfinished drafts after restart…"
       draft-pending: |-

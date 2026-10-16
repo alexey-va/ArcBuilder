@@ -163,6 +163,14 @@ Administrators can use `/builder systembook <catalogue-file.schem>` to issue
 to themselves, or `/builder systembook <online-player> <catalogue-file.schem>`
 to select a recipient. Command blocks cannot issue books.
 
+Issuance loads and verifies the schematic asynchronously. An in-game issuer sees
+loading feedback, then either the delivered catalogue title and recipient or a
+localized refusal with a recovery action. No success is reported before the book
+occupies a recipient slot. Refusals are also logged with issuer, recipient,
+schematic ID and the original cause; technical loader exceptions stay out of
+player chat. Console `SYSTEM_BOOK_ISSUED` / `SYSTEM_BOOK_REFUSED` responses remain
+stable for native operations tooling.
+
 Use `random @starter` to issue a random starter book, or provide an explicit
 pool: `builder systembook <online-player> random house-a.schem,house-b.schem`.
 The `@starter` pool consists of validated catalogue entries marked
