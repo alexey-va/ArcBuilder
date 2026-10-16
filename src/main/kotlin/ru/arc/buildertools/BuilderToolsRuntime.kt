@@ -1459,7 +1459,6 @@ internal class BuilderToolsRuntime(
         }
         if (BuilderBookAuctionTokenCodec.read(book) != null) throw BuilderUserFailure("book.auction-locked")
         if (!BuildBookCodec.matches(book, data)) throw BuilderUserFailure("book.missing")
-        if (site.transforming) throw BuilderUserFailure("book.loading")
         if (site.building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
 
         val lootTableKey = systemDefinition?.containerLootTableKey?.also { requiredLootTable(it) }
@@ -1755,7 +1754,7 @@ internal class BuilderToolsRuntime(
         site: ConstructionSite,
         book: ItemStack,
         announce: Boolean = true,
-    ): Boolean = try {
+    ): Boolean = if (site.transforming) false else try {
         ensureBuildBookAvailable(player)
         val planned = planBuildBook(player, site, book)
         site.cancelSilently()
@@ -1796,7 +1795,7 @@ internal class BuilderToolsRuntime(
         site: ConstructionSite,
         complete: (BuilderBookPreviewConfirmation?) -> Unit,
     ) {
-        if (site.transforming) { send(player, "book.loading"); return complete(null) }
+        if (site.transforming) return complete(null)
         val located = runBookPreviewAction(player) { requireMatchingPreviewBook(player, site) }
             ?: return complete(null)
         val data = located.data
@@ -3308,7 +3307,6 @@ internal class BuilderToolsRuntime(
     ) {
         val definition = if (data.playerCreated) null else systemBuildBookResolver(data)
         if (!data.playerCreated && definition == null) { send(player, "book.invalid"); failed(); return }
-        send(player, "book.loading")
         bookRequests.run(player, source,
             request = { loadBuilding(data.buildingId, data.schematicSha256 ?: definition?.schematicSha256) },
             failed = { failure ->

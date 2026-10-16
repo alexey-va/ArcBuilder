@@ -274,7 +274,6 @@ internal class BuilderBookLifecycle(
         ready: (Building) -> Unit,
     ) {
         quoteRequests.invalidate(player.uniqueId)
-        send(player, "book.loading")
         schematicRequests.run(player, source,
             request = { loadBuilding(source.data.buildingId, source.data.schematicSha256) },
             failed = { failure ->

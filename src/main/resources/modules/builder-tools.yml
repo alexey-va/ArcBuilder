@@ -596,7 +596,6 @@ locales:
         <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Вставить здесь]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать книгу]</click>
       retained: "<#d48763>Чертёж сохранён <#8c8c8c>— <#e6fff3>можно вставить снова"
     book:
-      loading: "<prefix><#e6fff3>Загружаем постройку…"
       system-issue:
         loading: "<prefix><#e6fff3>Загружаем схему для книги…"
         success: "\n  <prefix><#2bba43>Книга выдана игроку <#e6fff3><player><#2bba43>.\n  <#e6fff3><name>\n"
@@ -1542,7 +1541,6 @@ locales:
         <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Paste here]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create book]</click>
       retained: "<aqua>Blueprint retained <dark_gray>— <white>you can paste it again"
     book:
-      loading: "<prefix><gray>Loading the build…"
       system-issue:
         loading: "<prefix><#e6fff3>Loading the schematic for your book…"
         success: "\n  <prefix><green>Book delivered to <white><player><green>.\n  <white><name>\n"

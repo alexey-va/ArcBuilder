@@ -229,6 +229,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.isSneaking = false
             journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
             BuildingManager.pending(player.uniqueId) shouldBe null
+            player.nextComponentMessage() shouldBe null
             player.isSneaking = true
             player.setRotation(-90f, 0f)
             loading.complete(schematicTestBuilding(definition.buildingId))
@@ -237,6 +238,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             preview.rotation shouldBe 0
             preview.transforming shouldBe false
             journey.renderer.hasBook(player.uniqueId) shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(player.nextComponentMessage())) shouldContain "House"
         }
     }
 
@@ -252,7 +254,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(BuildBookItems.create(BuildBookData(definition.buildingId, definition.title)))
             journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
             checkNotNull(BuildingManager.pending(player.uniqueId)).transforming shouldBe true
-            player.performCommand("builder book menu") shouldBe true
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(player.nextComponentMessage())) shouldContain "House"
+            repeat(3) { player.performCommand("builder book menu") shouldBe true }
+            player.nextComponentMessage() shouldBe null
             journey.renderer.hasBook(player.uniqueId) shouldBe false
             transformed.complete(base.snapshot)
             journey.paper.performTicks(2)
@@ -260,6 +264,26 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.renderer.hasBook(player.uniqueId) shouldBe true
             player.performCommand("builder book menu") shouldBe true
             player.openInventory.topInventory.type shouldBe org.bukkit.event.inventory.InventoryType.CHEST
+        }
+    }
+
+    test("quiet schematic loading still reports a failed load") {
+        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val loading = java.util.concurrent.CompletableFuture<Building>()
+        strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }, schematicLoader = { _, _ -> loading }) }) { journey ->
+            val player = journey.builder("FailedBookLoad", GameMode.CREATIVE)
+            player.inventory.setItemInMainHand(BuildBookItems.create(BuildBookData(definition.buildingId, definition.title)))
+            journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
+            player.nextComponentMessage() shouldBe null
+
+            loading.completeExceptionally(IllegalStateException("schematic unavailable"))
+            journey.paper.performTicks(3)
+
+            PlainTextComponentSerializer.plainText().serialize(checkNotNull(player.nextComponentMessage())) shouldContain
+                "Эта книга повреждена или её чертёж недоступен."
+            player.nextComponentMessage() shouldBe null
+            BuildingManager.pending(player.uniqueId) shouldBe null
+            journey.renderer.hasBook(player.uniqueId) shouldBe false
         }
     }
 

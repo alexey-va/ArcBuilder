@@ -290,10 +290,7 @@ internal class BuilderBookPreviewPresentation(
         val playerId = player.uniqueId
         val site = placementSites[playerId] ?: panels[playerId]?.site ?: return player.closeInventory()
         if (playerId in preparing) return
-        if (site.transforming) {
-            player.sendMessage(messages.render("book.loading", locale(player)))
-            return
-        }
+        if (site.transforming) return
         val preparation = Any()
         preparing[playerId] = preparation
         snapshots[playerId] = site.snapshot()
@@ -392,8 +389,7 @@ internal class BuilderBookPreviewPresentation(
         val site = pending ?: placementSites[player.uniqueId]
             ?.takeIf { host.currentConfirmation(player) != null }
             ?: return false
-        if (site.transforming) player.sendMessage(messages.render("book.loading", locale(player)))
-        else openPlacementForOwner(player, site)
+        if (!site.transforming) openPlacementForOwner(player, site)
         return true
     }
 

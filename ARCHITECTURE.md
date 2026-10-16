@@ -394,7 +394,9 @@ player context, exact source item/slot and newest preview request. Activation an
 copy quotes retain the fence through registry lookups. Independent administrative
 grants use bounded individual tickets and check the current recipient session
 and space before issuance. Preview rotations have their own latest-transform
-fence, and confirmation waits for the transformed snapshot. Draft file writes and
+fence, and confirmation waits for the transformed snapshot. Routine schematic
+loads and interactions while a transform is pending stay silent in chat; preview
+readiness and failures retain their existing feedback. Draft file writes and
 their create-only publication/reconciliation remain domain-owned storage-worker
 operations; loaded content verification is delegated to the shared service.
 

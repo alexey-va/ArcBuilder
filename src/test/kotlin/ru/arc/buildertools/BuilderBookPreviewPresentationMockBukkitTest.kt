@@ -272,6 +272,13 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     click(paper, player, 37).isCancelled.shouldBeTrue()
                     host.adjustments.last() shouldBe BuildBookPreviewAdjustment.ToggleMirror
 
+                    every { site.transforming } returns true
+                    repeat(3) { click(paper, player, 25).isCancelled.shouldBeTrue() }
+                    player.nextComponentMessage() shouldBe null
+                    host.confirmCalls shouldBe 0
+                    io.mockk.verify(exactly = 0) { site.snapshot() }
+                    every { site.transforming } returns false
+
                     click(paper, player, 25).isCancelled.shouldBeTrue()
                     plain(checkNotNull(player.nextComponentMessage())) shouldContain "7 ч 0 мин"
                     paper.performTicks(1)
