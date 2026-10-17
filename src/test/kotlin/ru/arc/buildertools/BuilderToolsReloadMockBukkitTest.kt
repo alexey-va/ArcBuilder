@@ -27,7 +27,6 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 class BuilderToolsReloadMockBukkitTest : FunSpec({
@@ -199,7 +198,7 @@ private fun withReloadPlugin(block: (MockBukkitTestRuntime, ArcBuilderPlugin) ->
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             awaitArcBuilderBootstrap(paper, plugin)
-            installArcVisualPacketBudgetFixture(plugin)
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
             try {
                 block(paper, plugin)
             } finally {
@@ -218,7 +217,7 @@ private fun withBlockedReloadPublication(
 ) {
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)
-    val executor = plugin.configurationExecutor as ThreadPoolExecutor
+    val executor = plugin.configurationExecutor
     BuilderToolsModule.onCommand(
         paper.server.consoleSender, checkNotNull(plugin.getCommand("builder")), "builder", arrayOf("reload"),
     ) shouldBe true
@@ -228,12 +227,16 @@ private fun withBlockedReloadPublication(
     }
     try {
         entered.await(5, TimeUnit.SECONDS) shouldBe true
+        val probe = paper.server.worlds.first().getBlockAt(4, 64, 4)
+        fun guarded() = paper.callEvent(BlockPhysicsEvent(probe, Material.STONE.createBlockData())).isCancelled
         val deadline = System.nanoTime() + 5_000_000_000L
-        while (executor.queue.isEmpty() && System.nanoTime() < deadline) {
+        // A disabled old generation is already null before preflight. Wait for the actual
+        // native publication guard, rather than a particular executor queue implementation.
+        while (!guarded() && System.nanoTime() < deadline) {
             paper.performTicks(1)
             Thread.yield()
         }
-        executor.queue.size shouldBe 1
+        guarded() shouldBe true
         activeRuntime() shouldBe null
         BuilderToolsModule.runtimeHealthContribution().state shouldBe RuntimeHealthState.STARTING
         checkWhileBlocked()

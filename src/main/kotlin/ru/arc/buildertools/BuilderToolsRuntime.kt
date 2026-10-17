@@ -65,9 +65,7 @@ import ru.arc.util.Logging.warn
 import java.time.Duration
 import java.util.Locale
 import java.util.UUID
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
@@ -190,9 +188,9 @@ internal class BuilderToolsRuntime(
     private val constructionStore = BuilderConstructionProjectStore(plugin.dataPath, config.maxConstructionChanges)
     private val stateService = PaperPlayerStateService()
     private val stateCodec = PaperPlayerStateCodec()
-    private val storageExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "arc-builder-tools-storage").apply { isDaemon = false }
-    }
+    private val storageExecutor = ru.arc.core.BoundedAsyncExecutor("arc-builder-tools-storage", 1, 256)
+    private val storageFinalizers = mutableListOf<() -> Unit>()
+    private var storageSealed = false
     private val debugLine = StructuredDebugLine("ARC_BUILDER_TOOLS")
     private val wandKey = org.bukkit.NamespacedKey(plugin, "builder_selector")
     private val selections = BuilderSelectionController(
@@ -748,6 +746,7 @@ internal class BuilderToolsRuntime(
                 messages = messages,
                 taskScope = taskScope,
                 storageExecutor = storageExecutor,
+                registerStorageFinalizer = { storageFinalizers += it },
                 operationLocks = operationLocks,
                 draftJournal = BuilderDraftJournal(plugin.dataPath, BuilderPlan.ABSOLUTE_MAX_CHANGES),
                 draftStorage = draftStorage ?: PlayerBuildBookDraftStorage(
@@ -886,28 +885,36 @@ internal class BuilderToolsRuntime(
                 "Builder selection action panel task was not scheduled"
             }
         } catch (failure: Throwable) {
-            HandlerList.unregisterAll(this)
-            selectionActionPanel?.close()
-            crownSelectionDialog?.close()
-            materialPicker?.close()
-            initializedPlayerRecoveries?.close()
-            runCatching { initializedBooks?.close() }.onFailure(failure::addSuppressed)
-            initializedCrown?.close()
-            initializedPreviews?.close()
-            initializedConstructionSiteDisplays?.close()
-            initializedBookPreviewPresentation?.close()
-            initializedConstructionProjectsMenu?.close()
-            initializedConstructionMenus?.close()
-            bookRequests.close()
-            planningTasks.close()
-            schematics.close()
-            taskScope.close()
-            operationLocks.close()
-            closeStorageExecutor()
-            shop.close()
-            BuildingManager.clearPreviews()
-            BuildingManager.installPreviewBridge(null)
-            displayRenderer.close()
+            fun attempt(action: () -> Unit) {
+                try { action() } catch (closeFailure: Throwable) {
+                    if (failure !== closeFailure) failure.addSuppressed(closeFailure)
+                }
+            }
+            attempt { HandlerList.unregisterAll(this) }
+            attempt { selectionActionPanel?.close() }
+            attempt { crownSelectionDialog?.close() }
+            attempt { materialPicker?.close() }
+            attempt { initializedPlayerRecoveries?.close() }
+            attempt { initializedBooks?.close() }
+            attempt { initializedCrown?.close() }
+            attempt { initializedPreviews?.close() }
+            attempt { initializedConstructionSiteDisplays?.close() }
+            attempt { initializedConstructionProjectsMenu?.close() }
+            attempt { initializedConstructionMenus?.close() }
+            val visualDrains = listOf(
+                runCatching { initializedBookPreviewPresentation?.closeAsync() ?: CompletableFuture.completedFuture(null) }
+                    .getOrElse { CompletableFuture.failedFuture(it) },
+                runCatching { displayRenderer.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
+            )
+            attempt { bookRequests.close() }
+            attempt { planningTasks.close() }
+            attempt { schematics.close() }
+            attempt { taskScope.close() }
+            attempt { operationLocks.close() }
+            attempt { shop.close() }
+            attempt { BuildingManager.clearPreviews() }
+            attempt { BuildingManager.installPreviewBridge(null) }
+            closeStorageExecutor(failure, visualDrains)
             throw BuilderToolsRuntimeActivationException(failure, closeCompletion)
         }
     }
@@ -3455,7 +3462,7 @@ internal class BuilderToolsRuntime(
     private fun <T> writeAsync(action: () -> T, callback: (T?, Throwable?) -> Unit) {
         if (closed) return
         try {
-            storageExecutor.submit {
+            storageExecutor.execute {
                 val result = runCatching(action)
                 taskScope.runSync { callback(result.getOrNull(), result.exceptionOrNull()) }
             }
@@ -3869,68 +3876,87 @@ internal class BuilderToolsRuntime(
     override fun close() {
         if (closed) return
         closed = true
-        publishRuntimeHealth()
-        HandlerList.unregisterAll(this)
-        selectionActionPanel?.close()
-        crownSelectionDialog?.close()
-        materialPicker?.close()
+        var failure: Throwable? = null
+        fun attempt(action: () -> Unit) {
+            try { action() } catch (error: Throwable) {
+                if (failure == null) failure = error else failure!!.addSuppressed(error)
+            }
+        }
+        attempt(::publishRuntimeHealth)
+        attempt { HandlerList.unregisterAll(this) }
+        attempt { selectionActionPanel?.close() }
+        attempt { crownSelectionDialog?.close() }
+        attempt { materialPicker?.close() }
         materialScans.clear()
         panelPlanSummaries.clear()
         selectionUndoAvailable.clear()
         selectionPanelPages.clear()
-        crown.close()
-        previews.close()
-        operationLocks.operations().forEach { operation ->
+        attempt { crown.close() }
+        attempt { previews.close() }
+        operationLocks.operations().forEach { operation -> attempt {
             if (operation.interruptionDeferred) {
                 finishOperation(operation)
-                return@forEach
+            } else {
+                if (operation.record.phase == BuilderJournalPhase.APPLYING && (operation.appliedChanges > 0 || operation.inventoryMutated)) {
+                    // Keep the durable preimage for sliced startup recovery; never refund
+                    // while shutdown leaves world changes without a completed rollback.
+                    playerRecoveries.hold(operation.record)
+                    warn("Builder operation {} retained for startup recovery during shutdown", operation.record.operationId)
+                }
+                finishOperation(operation)
             }
-            if (operation.record.phase == BuilderJournalPhase.APPLYING && (operation.appliedChanges > 0 || operation.inventoryMutated)) {
-                // A disabled plugin has no future ticks. Keep the durable preimage for
-                // sliced startup recovery; never refund while world changes remain.
-                playerRecoveries.hold(operation.record)
-                warn("Builder operation {} retained for startup recovery during shutdown", operation.record.operationId)
-            }
-            finishOperation(operation)
-        }
-        playerRecoveries.close()
-        runCatching { books.close() }.onFailure { error("Builder book lifecycle close failed", it) }
-        constructionSiteDisplays.close()
-        constructionProjectsMenu.close()
-        constructionMenus.close()
+        } }
+        attempt { playerRecoveries.close() }
+        attempt { books.close() }
+        attempt { constructionSiteDisplays.close() }
+        attempt { constructionProjectsMenu.close() }
+        attempt { constructionMenus.close() }
         constructionPauseRequests.clear()
         constructionInstantRequests.clear()
         bookHoldHints.clear()
-        bookPreviewPresentation.close()
-        bookRequests.close()
-        planningTasks.close()
-        schematics.close()
-        taskScope.close()
-        closeStorageExecutor()
-        shop.close()
-        constructionPlayerLeases.close()
-        operationLocks.close()
+        val visualDrains = listOf(
+            runCatching { bookPreviewPresentation.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
+            runCatching { displayRenderer.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
+        )
+        attempt { bookRequests.close() }
+        attempt { planningTasks.close() }
+        attempt { schematics.close() }
+        attempt { taskScope.close() }
+        attempt { shop.close() }
+        attempt { constructionPlayerLeases.close() }
+        attempt { operationLocks.close() }
         selections.clear()
-        clipboardController.close()
-        BuildingManager.clearPreviews()
-        BuildingManager.installPreviewBridge(null)
-        displayRenderer.close()
+        attempt { clipboardController.close() }
+        attempt { BuildingManager.clearPreviews() }
+        attempt { BuildingManager.installPreviewBridge(null) }
+        closeStorageExecutor(failure, visualDrains)
     }
 
-    private fun closeStorageExecutor() {
-        if (storageExecutor.isShutdown) return
-        // A terminal marker is ordered after all accepted durable writes. Reload waits on
-        // this future asynchronously before opening another owner for these files.
-        try {
-            storageExecutor.execute {
-                bookCloseCompletion.whenComplete { _, failure ->
-                    if (failure == null) closeCompletion.complete(Unit) else closeCompletion.completeExceptionally(failure)
+    private fun closeStorageExecutor(nativeFailure: Throwable? = null, nativeDrains: List<CompletableFuture<*>> = emptyList()) {
+        if (storageSealed) return
+        storageSealed = true
+        val finalizers = storageFinalizers.toList()
+        storageFinalizers.clear()
+        val storageDrain = storageExecutor.closeAsync {
+            var failure: Throwable? = nativeFailure
+            finalizers.forEach { finalizer ->
+                try { finalizer() } catch (error: Throwable) {
+                    if (failure == null) failure = error else failure!!.addSuppressed(error)
                 }
             }
-        } catch (failure: RejectedExecutionException) {
-            closeCompletion.completeExceptionally(failure)
-        } finally {
-            storageExecutor.shutdown()
+            try { bookCloseCompletion.join() } catch (error: Throwable) {
+                if (failure == null) failure = error else failure!!.addSuppressed(error)
+            }
+            failure?.let { throw it }
+        }
+        val drains = nativeDrains + storageDrain
+        CompletableFuture.allOf(*drains.toTypedArray()).whenComplete { _, _ ->
+            var failure: Throwable? = null
+            drains.forEach { drain -> runCatching { drain.join() }.exceptionOrNull()?.let { error ->
+                val cause = error.cause ?: error
+                if (failure == null) failure = cause else if (failure !== cause) failure!!.addSuppressed(cause)
+            } }
+            if (failure == null) closeCompletion.complete(Unit) else closeCompletion.completeExceptionally(failure)
         }
     }
 

@@ -15,7 +15,7 @@ internal class BuilderPacketScene : AutoCloseable {
         val desired: MutableMap<Int, BuilderPacketDisplay>,
     )
 
-    private val viewers = mutableMapOf<UUID, Viewer>()
+    private var viewers = mutableMapOf<UUID, Viewer>()
 
     fun update(displays: Collection<BuilderPacketDisplay>, audience: Map<UUID, BuilderPacketViewer>) {
         (viewers.keys - audience.keys).forEach(::removeViewer)
@@ -52,9 +52,19 @@ internal class BuilderPacketScene : AutoCloseable {
         if (viewer.desired.isNotEmpty()) viewer.connection.submit(emptyList(), viewer.desired.keys)
     }
 
-    override fun close() {
-        viewers.keys.toList().forEach(::removeViewer)
+    /** Detaches ownership immediately; callers advance one viewer per aggregate native step. */
+    fun closeSteps(): Iterator<Unit> {
+        val detached = viewers.values.iterator()
+        viewers = mutableMapOf()
+        return sequence {
+            for (viewer in detached) {
+                if (viewer.desired.isNotEmpty()) viewer.connection.submit(emptyList(), viewer.desired.keys)
+                yield(Unit)
+            }
+        }.iterator()
     }
+
+    override fun close() { closeSteps().forEachRemaining {} }
 }
 
 internal fun BuilderPacketDisplay.chunkKey(): Long {

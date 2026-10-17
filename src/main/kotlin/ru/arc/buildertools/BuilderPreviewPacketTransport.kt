@@ -17,12 +17,16 @@ import org.bukkit.Bukkit
 import org.bukkit.block.data.BlockData
 import org.bukkit.entity.Player
 import org.bukkit.plugin.Plugin
+import ru.arc.paper.api.ArcNativeCleanupService
 import ru.arc.paper.api.VisualPacketAdmission
 import ru.arc.paper.packet.PaperVisualPackets
 import java.lang.ref.WeakReference
 import java.util.Optional
 import java.util.WeakHashMap
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -57,6 +61,8 @@ internal interface BuilderPreviewPacketTransport : AutoCloseable {
     fun connection(player: Player): BuilderPreviewConnection?
 
     fun forget(player: Player) = Unit
+    /** Completion means terminal packet cleanup, not merely scheduling it. */
+    fun closeAsync(): CompletableFuture<Void> { close(); return CompletableFuture.completedFuture(null) }
     override fun close() = Unit
 }
 
@@ -166,11 +172,14 @@ internal class BuilderPacketAttachment(
 ) : BuilderPreviewConnection {
     private val channelRef = WeakReference(channel)
     private val lock = Any()
-    private var latestDesired = emptyMap<Int, BuilderPacketDisplay>()
+    private var latestDesired = emptyList<BuilderPacketDisplay>()
+    private var pendingResets = mutableListOf<Set<Int>>()
     private var desiredRevision = 0L
     private var scheduled = false
-    private var closed = false
-    private var terminated = false
+    @Volatile private var closed = false
+    @Volatile private var terminated = false
+    @Volatile private var retained = 0
+    private val terminal = CompletableFuture<Void>()
     private val admitted = linkedMapOf<Int, BuilderPacketDisplay>()
     private val uncertain = linkedSetOf<Int>()
     private val forcedResetIds = linkedSetOf<Int>()
@@ -179,19 +188,17 @@ internal class BuilderPacketAttachment(
 
     override val identity: Any = Any()
 
-    fun accepts(channel: Any): Boolean = synchronized(lock) {
-        !closed && !terminated && channelRef.get() === channel
-    }
+    fun accepts(channel: Any): Boolean = !closed && !terminated && channelRef.get() === channel
 
-    internal fun retainedEntityCount(): Int = synchronized(lock) {
-        (admitted.keys + uncertain + forcedResetIds + latestDesired.keys).toSet().size
-    }
+    internal fun retainedEntityCount(): Int = if (terminated) 0 else retained
 
     override fun submit(desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int>) {
         synchronized(lock) {
             if (closed || terminated) return
-            latestDesired = desired.associateBy(BuilderPacketDisplay::entityId)
-            this.forcedResetIds += forceResetIds
+            // Callers hand off detached collections and never mutate them afterwards.
+            // The lock owns admission only; map/set aggregation belongs to Netty.
+            latestDesired = desired
+            if (forceResetIds.isNotEmpty()) pendingResets.add(forceResetIds)
             desiredRevision++
             if (!scheduled) scheduled = true else return
         }
@@ -199,15 +206,20 @@ internal class BuilderPacketAttachment(
     }
 
     /** Stops accepting scenes but leaves cleanup retries alive until the channel closes. */
-    fun close() {
-        synchronized(lock) {
-            if (closed || terminated) return
-            closed = true
-            latestDesired = emptyMap()
-            desiredRevision++
-            if (!scheduled) scheduled = true else return
+    fun close() { closeAsync() }
+
+    fun closeAsync(): CompletableFuture<Void> {
+        val enqueue = synchronized(lock) {
+            if (closed || terminated) false
+            else {
+                closed = true
+                latestDesired = emptyList()
+                desiredRevision++
+                if (scheduled) false else { scheduled = true; true }
+            }
         }
-        queue(retry = false)
+        if (enqueue) queue(retry = false)
+        return terminal.copy()
     }
 
     private fun queue(retry: Boolean) {
@@ -224,12 +236,12 @@ internal class BuilderPacketAttachment(
             } else {
                 logFailure(failure)
                 if (retry) {
-                    synchronized(lock) { scheduled = false }
+                    terminate(failure)
                 } else {
                     try {
                         gateway.retry(channel) { drain() }
-                    } catch (_: Exception) {
-                        synchronized(lock) { scheduled = false }
+                    } catch (retryFailure: Exception) {
+                        terminate(retryFailure)
                     }
                 }
             }
@@ -242,32 +254,33 @@ internal class BuilderPacketAttachment(
             terminate()
             return
         }
-        val (desired, revision) = synchronized(lock) { latestDesired to desiredRevision }
+        val (snapshot, revision, resets) = synchronized(lock) {
+            Triple(latestDesired, desiredRevision, pendingResets).also { pendingResets = mutableListOf() }
+        }
+        val desired = snapshot.associateBy(BuilderPacketDisplay::entityId)
+        resets.forEach(forcedResetIds::addAll)
         var shouldRetry = false
         var terminalAdmission = false
 
-        val staleIds = synchronized(lock) {
-            (admitted.keys + uncertain + forcedResetIds).filter { id ->
+        val staleIds = (admitted.keys + uncertain + forcedResetIds).filter { id ->
                 val shown = admitted[id]
                 id in forcedResetIds || id in uncertain ||
                     (shown != desired[id] && !shown.isGlowOnlyUpdate(desired[id]))
             }.distinct()
-        }
         if (staleIds.isNotEmpty()) {
             try {
                 when (gateway.destroy(channel, staleIds)) {
                     VisualPacketAdmission.ALLOWED -> {
                         gateway.flush(channel)
-                        synchronized(lock) {
-                            staleIds.forEach { id ->
-                                admitted.remove(id)
-                                uncertain.remove(id)
-                                forcedResetIds.remove(id)
-                            }
+                        staleIds.forEach { id ->
+                            admitted.remove(id)
+                            uncertain.remove(id)
+                            forcedResetIds.remove(id)
                         }
                     }
                     VisualPacketAdmission.CHANNEL_BACKPRESSURE -> shouldRetry = true
                     VisualPacketAdmission.CLOSED -> terminalAdmission = true
+                    VisualPacketAdmission.STARTING,
                     VisualPacketAdmission.VIEWER_RATE,
                     VisualPacketAdmission.SERVER_RATE -> shouldRetry = true
                 }
@@ -282,14 +295,10 @@ internal class BuilderPacketAttachment(
         }
 
         // Do not add replacements until stale IDs have actually been cleaned up.
-        val cleanupStillPending = synchronized(lock) {
-            staleIds.any { it in admitted || it in uncertain || it in forcedResetIds }
-        }
+        val cleanupStillPending = staleIds.any { it in admitted || it in uncertain || it in forcedResetIds }
         if (!cleanupStillPending && !terminalAdmission) {
-            val candidates = synchronized(lock) {
-                desired.values.filter {
-                    admitted[it.entityId] != it && it.entityId !in uncertain
-                }
+            val candidates = desired.values.filter {
+                admitted[it.entityId] != it && it.entityId !in uncertain
             }
             if (candidates.isNotEmpty()) {
                 val start = candidates.indexOfFirst { it.entityId == nextCandidateId }.let { if (it < 0) 0 else it }
@@ -297,27 +306,24 @@ internal class BuilderPacketAttachment(
                 var nextCursor: Int? = null
                 rotated.forEachIndexed { index, display ->
                     try {
-                        val isGlowUpdate = synchronized(lock) {
-                            admitted[display.entityId].isGlowOnlyUpdate(display)
-                        }
+                        val isGlowUpdate = admitted[display.entityId].isGlowOnlyUpdate(display)
                         val admission = if (isGlowUpdate) gateway.glow(channel, display)
                         else gateway.display(channel, display)
                         when (admission) {
                             VisualPacketAdmission.ALLOWED -> {
                                 gateway.flush(channel)
-                                synchronized(lock) {
-                                    admitted[display.entityId] = display
-                                    uncertain.remove(display.entityId)
-                                }
+                                admitted[display.entityId] = display
+                                uncertain.remove(display.entityId)
                             }
                             VisualPacketAdmission.CHANNEL_BACKPRESSURE,
-                            VisualPacketAdmission.VIEWER_RATE,
+                            VisualPacketAdmission.STARTING,
+                    VisualPacketAdmission.VIEWER_RATE,
                             VisualPacketAdmission.SERVER_RATE -> shouldRetry = true
                             VisualPacketAdmission.CLOSED -> terminalAdmission = true
                         }
                     } catch (failure: Exception) {
                         // A failed write may have reached the client; destroy and replay it safely.
-                        synchronized(lock) { uncertain += display.entityId }
+                        uncertain += display.entityId
                         logFailure(failure)
                         if (!isOpen(channel)) {
                             terminate()
@@ -333,6 +339,9 @@ internal class BuilderPacketAttachment(
             shouldRetry = true
         }
 
+        if (terminalAdmission) { terminate(); return }
+        retained = (admitted.keys + uncertain + forcedResetIds + desired.keys).toSet().size
+        var complete = false
         val action = synchronized(lock) {
             when {
                 terminated -> QueueAction.STOP
@@ -340,10 +349,12 @@ internal class BuilderPacketAttachment(
                 shouldRetry && !terminalAdmission -> QueueAction.LATER
                 else -> {
                     scheduled = false
+                    complete = closed && admitted.isEmpty() && uncertain.isEmpty() && forcedResetIds.isEmpty()
                     QueueAction.STOP
                 }
             }
         }
+        if (complete) terminal.complete(null)
         when (action) {
             QueueAction.NOW -> queue(retry = false)
             QueueAction.LATER -> queue(retry = true)
@@ -357,15 +368,10 @@ internal class BuilderPacketAttachment(
         false
     }
 
-    private fun terminate() {
-        synchronized(lock) {
-            terminated = true
-            latestDesired = emptyMap()
-            admitted.clear()
-            uncertain.clear()
-            forcedResetIds.clear()
-            scheduled = false
-        }
+    private fun terminate(failure: Throwable = IllegalStateException("Preview channel closed before cleanup was flushed")) {
+        // No worker-held monitor or bulk clear on the calling/native thread.
+        terminated = true
+        terminal.completeExceptionally(failure)
     }
 
     private fun logFailure(failure: Exception) {
@@ -392,7 +398,22 @@ internal class PacketEventsBuilderPreviewTransport(
     private val gateway: BuilderPreviewPacketGateway = PaperBuilderPreviewPacketGateway(plugin),
 ) : BuilderPreviewPacketTransport {
     /* Weak keys keep one attachment per live Bukkit player without retaining disconnected players. */
-    private val attachments = WeakHashMap<Player, BuilderPacketAttachment>()
+    private var attachments = WeakHashMap<Player, BuilderPacketAttachment>()
+    private val cleanup = requireNotNull(plugin.server.servicesManager.load(ArcNativeCleanupService::class.java)) {
+        "ArcBuilder preview cleanup requires ArcCore's native cleanup service"
+    }
+    private var closed = false
+    private val terminal = CompletableFuture<Void>()
+    private val retiring = AtomicInteger()
+    private val terminalFailure = AtomicReference<Throwable?>()
+
+    private fun retire(attachment: BuilderPacketAttachment) {
+        retiring.incrementAndGet()
+        attachment.closeAsync().whenComplete { _, failure ->
+            if (failure != null) terminalFailure.compareAndSet(null, failure)
+            retiring.decrementAndGet()
+        }
+    }
 
     override fun blockStateId(blockData: BlockData): Int =
         SpigotConversionUtil.fromBukkitBlockData(blockData).globalId
@@ -401,28 +422,37 @@ internal class PacketEventsBuilderPreviewTransport(
     override fun nextEntityId(): Int = Bukkit.getUnsafe().nextEntityId()
 
     override fun connection(player: Player): BuilderPreviewConnection? {
+        if (closed) return null
         val channel = PacketEvents.getAPI().playerManager.getChannel(player) ?: return null
         if (!gateway.isOpen(channel)) return null
 
-        synchronized(attachments) {
-            val current = attachments[player]
-            if (current != null && current.accepts(channel)) return current
-            current?.close()
-            val replacement = BuilderPacketAttachment(channel, gateway, logger)
-            attachments[player] = replacement
-            return replacement
-        }
+        val current = attachments[player]
+        if (current != null && current.accepts(channel)) return current
+        current?.let(::retire)
+        return BuilderPacketAttachment(channel, gateway, logger).also { attachments[player] = it }
     }
 
     override fun forget(player: Player) {
-        val removed = synchronized(attachments) { attachments.remove(player) }
-        removed?.close()
+        attachments.remove(player)?.let(::retire)
     }
 
-    override fun close() {
-        val current = synchronized(attachments) {
-            attachments.values.toList().also { attachments.clear() }
+    override fun closeAsync(): CompletableFuture<Void> {
+        if (closed) return terminal.copy()
+        closed = true
+        val remaining = attachments.values.iterator()
+        attachments = WeakHashMap()
+        val accepted = try {
+            cleanup.submit("builder-preview-packets") {
+                if (remaining.hasNext()) { retire(remaining.next()); false }
+                else if (retiring.get() != 0) false
+                else { terminalFailure.get()?.let { throw it }; true }
+            }
+        } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
+        accepted.whenComplete { _, failure ->
+            if (failure == null) terminal.complete(null) else terminal.completeExceptionally(failure)
         }
-        current.forEach(BuilderPacketAttachment::close)
+        return terminal.copy()
     }
+
+    override fun close() { closeAsync() }
 }

@@ -32,7 +32,7 @@ import ru.arc.util.Logging.warn
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
 
 internal class BuilderUserFailure(
@@ -87,7 +87,7 @@ internal class BuilderBookLifecycle(
     private val config: BuilderToolsConfig,
     private val messages: LocalizedMiniMessage,
     private val taskScope: LifecycleTaskScope,
-    private val storageExecutor: ExecutorService,
+    private val storageExecutor: Executor,
     private val operationLocks: BuilderOperationLocks,
     private val host: BuilderBookLifecycleHost,
     draftJournal: BuilderDraftJournal,
@@ -96,6 +96,7 @@ internal class BuilderBookLifecycle(
     private val loadBuilding: (String, String?) -> CompletableFuture<Building>,
     private val registryFactory: (() -> BuilderBookRegistry)? = null,
     private val walletFactory: () -> BuilderBookWallet = { RedisEconomyBuilderBookWallet() },
+    private val registerStorageFinalizer: ((() -> Unit) -> Unit) = { finalizer -> storageExecutor.execute(finalizer) },
 ) : AutoCloseable {
     private data class PendingMint(
         val kind: BuilderBookMintKind,
@@ -1164,6 +1165,7 @@ internal class BuilderBookLifecycle(
                 failFast = connection.failFast,
             )
             val lease = service.acquire(owner, settings)
+            try { lease.retainDuringShutdown() } catch (failure: Throwable) { lease.close(); throw failure }
             val runtime = SqlRuntime.borrow(
                 dataSource = lease.dataSource,
                 executor = lease.executor,
@@ -1573,7 +1575,7 @@ internal class BuilderBookLifecycle(
     private fun <T> writeAsync(action: () -> T, callback: (T?, Throwable?) -> Unit) {
         if (closed) return
         try {
-            storageExecutor.submit {
+            storageExecutor.execute {
                 val result = runCatching(action)
                 taskScope.runSync { callback(result.getOrNull(), result.exceptionOrNull()) }
             }
@@ -1607,7 +1609,7 @@ internal class BuilderBookLifecycle(
             mintCoordinator?.clear()
         } finally {
             try {
-                storageExecutor.execute {
+                registerStorageFinalizer {
                     try {
                         registry?.close()
                         registry = null

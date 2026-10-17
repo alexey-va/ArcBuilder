@@ -39,6 +39,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
             awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
@@ -76,6 +77,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 previewPresentation(plugin, config, host, packet.owner, unblockedPlaqueSpace()).use { presentation ->
                     presentation.close(player.uniqueId)
                     presentation.retainConfirmation(site)
+                    presentation.captureMockedPlaqueControls()
                     packet.texts.size shouldBe 2
                     packet.texts.forEach { record ->
                         io.mockk.verify(exactly = 1) { record.display.displayWidth = 3f }
@@ -84,6 +86,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     io.mockk.verify(exactly = 1) { panel.interactionWidth = 3f }
                     io.mockk.verify(exactly = 1) { panel.interactionHeight = 1.5f }
                     presentation.refresh(site)
+                    presentation.captureMockedPlaqueControls()
                     packet.texts.size shouldBe 2
                     io.mockk.verify(exactly = 1) {
                         panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<Consumer<org.bukkit.entity.Interaction>>())
@@ -126,6 +129,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
             awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
@@ -178,6 +182,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
             awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
@@ -234,6 +239,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
             awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
@@ -347,6 +353,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
             awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
@@ -439,6 +446,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
             awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
@@ -593,6 +601,15 @@ private fun previewPresentation(
     displays = displays,
     space = space,
 )
+
+/** The mocked display owner has no tick; drive its Core participant's native capture explicitly. */
+private fun BuilderBookPreviewPresentation.captureMockedPlaqueControls() {
+    val controls = javaClass.getDeclaredField("controls").apply { isAccessible = true }.get(this)
+    val participant = controls.javaClass.getDeclaredField("participant").apply { isAccessible = true }.get(controls)
+    val capture = participant.javaClass.getMethod("captureSteps", List::class.java).apply { isAccessible = true }
+    val steps = capture.invoke(participant, emptyList<Any>()) as Iterator<*>
+    while (steps.hasNext()) steps.next()
+}
 
 private fun plan(playerId: UUID, worldId: UUID): BuilderPlan {
     val now = 1_800_000_000_000L

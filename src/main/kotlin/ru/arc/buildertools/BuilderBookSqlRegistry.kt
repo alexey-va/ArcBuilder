@@ -692,8 +692,18 @@ internal class BuilderBookSqlRegistry(
         runtime.executor.read { connection -> loadMint(connection, transactionId) }
 
     override fun close() {
-        durableOneTimeUses.close()
-        runtime.close()
+        // Called only by the Builder storage owner, after native admission is sealed.
+        // Ledger completion may still own advisory sessions on the provider reserve lane.
+        var failure: Throwable? = null
+        fun attempt(action: () -> Unit) {
+            try { action() } catch (error: Throwable) {
+                if (failure == null) failure = error else failure!!.addSuppressed(error)
+            }
+        }
+        attempt { durableOneTimeUses.closeAsync().join() }
+        attempt { runtime.executor.closeAsync().join() }
+        attempt(runtime::close)
+        failure?.let { throw it }
     }
 
     private fun insertOrVerifyBlueprint(connection: Connection, blueprint: BuilderBookBlueprint) {

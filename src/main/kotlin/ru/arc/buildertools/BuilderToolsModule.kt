@@ -32,6 +32,9 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
     @Volatile private var loading: Boolean = true
     private val pendingLoadingFeedback = linkedSetOf<CommandSender>()
     private var startupLocks: BuilderOperationLocks? = null
+    private var shutdownDrain = CompletableFuture.completedFuture(Unit)
+
+    internal fun drained(): CompletableFuture<Unit> = shutdownDrain.copy()
 
     /** Bind immediately, while worker preparation is still in flight. */
     internal fun beginStartup(plugin: ArcBuilderPlugin) {
@@ -94,15 +97,33 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
     override fun shutdown() {
         loading = true
         pendingLoadingFeedback.clear()
+        val previous = runtime
+        val reload = reloadService
+        var failure: Throwable? = null
+        fun attempt(action: () -> Unit) {
+            try { action() } catch (error: Throwable) {
+                if (failure == null) failure = error else failure!!.addSuppressed(error)
+            }
+        }
         try {
-            BuildBookEditorGui.close()
-            reloadService?.close() ?: runtime?.close()
-            BuildingManager.clearPreviews()
+            attempt { BuildBookEditorGui.close() }
+            attempt { reload?.close() ?: previous?.close() }
+            attempt { BuildingManager.clearPreviews() }
             reloadService = null
             runtime = null
             messages = null
         } finally {
-            closeStartupBarrier()
+            attempt(::closeStartupBarrier)
+            val actual = reload?.closeCompletion ?: previous?.closeCompletion ?: CompletableFuture.completedFuture(Unit)
+            val nativeFailure = failure
+            shutdownDrain = actual.handle { _, storageFailure ->
+                val primary = nativeFailure ?: storageFailure
+                if (primary != null) {
+                    if (nativeFailure != null && storageFailure != null && storageFailure !== nativeFailure) nativeFailure.addSuppressed(storageFailure)
+                    throw java.util.concurrent.CompletionException(primary)
+                }
+                Unit
+            }
         }
     }
 

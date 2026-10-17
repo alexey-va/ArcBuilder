@@ -174,6 +174,25 @@ class BuilderToolsReloadServiceTest : FunSpec({
         pending.join().shouldBeInstanceOf<BuilderToolsReloadResult.Rejected>().rollbackFailure shouldBe null
     }
 
+    test("disable during retirement waits for actual old storage and failed activation cleanup") {
+        listOf(false, true).forEach { failActivation ->
+            val harness = ReloadHarness()
+            val actualDrain = CompletableFuture<Unit>()
+            val service = harness.service(
+                active = FakeReloadRuntime(),
+                create = { if (failActivation) error("partial activation") else FakeReloadRuntime() },
+                awaitClosed = { if (failActivation) CompletableFuture.completedFuture(Unit) else actualDrain },
+                activationFailureDrain = { actualDrain },
+            )
+            service.reload()
+            harness.drain()
+            service.close()
+            service.closeCompletion.isDone shouldBe false
+            actualDrain.complete(Unit)
+            service.closeCompletion.join() shouldBe Unit
+        }
+    }
+
     test("disable cancels a pending prepare and a duplicate reload does not enqueue another load") {
         val harness = ReloadHarness()
         val active = FakeReloadRuntime()

@@ -90,7 +90,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: alexey-va/ARC
-          ref: 75724dab83674e5a410fa0bac3ba21cfb117f64f # ARC 1.4.409 release pair; standalone ArcCore 0.1.9 is pinned in build.gradle.kts
+          ref: 75724dab83674e5a410fa0bac3ba21cfb117f64f # ARC 1.4.409 baseline; standalone ArcCore 0.1.12 is pinned in build.gradle.kts
           path: e2e-arc
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:

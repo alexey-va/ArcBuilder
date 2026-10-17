@@ -27,7 +27,7 @@ import java.nio.file.Path
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
-import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executor
 import ru.arc.autobuild.Building
 import java.util.concurrent.RejectedExecutionException
 
@@ -118,7 +118,7 @@ internal class BuilderDraftLifecycle(
     private val config: BuilderToolsConfig,
     private val messages: LocalizedMiniMessage,
     private val taskScope: LifecycleTaskScope,
-    private val storageExecutor: ExecutorService,
+    private val storageExecutor: Executor,
     private val operationLocks: BuilderOperationLocks,
     private val host: BuilderBookLifecycleHost,
     private val journal: BuilderDraftJournal,
@@ -820,7 +820,7 @@ internal class BuilderDraftLifecycle(
     private fun <T> writeAsync(action: () -> T, callback: (T?, Throwable?) -> Unit) {
         if (closed) return
         try {
-            storageExecutor.submit {
+            storageExecutor.execute {
                 val result = runCatching(action)
                 taskScope.runSync {
                     if (!closed) callback(result.getOrNull(), result.exceptionOrNull())

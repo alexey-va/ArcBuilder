@@ -1,13 +1,14 @@
 package ru.arc.buildertools
 
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.BudgetedTaskQueue
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 
 /** Runtime-owned scheduling boundary; workers receive detached calculation inputs only. */
 internal class BuilderPlanningWork(private val scope: LifecycleTaskScope) : BuilderPlanningTasks, AutoCloseable {
-    private val pump = BuilderPlanningPump(scope)
+    private val pump = BudgetedTaskQueue(scope)
     private val pending = ConcurrentHashMap.newKeySet<CompletableFuture<*>>()
     @Volatile private var closed = false
 

@@ -139,7 +139,7 @@ inventory exchange, block-safety policy, placement-cost rules, and optional
 CoreProtect bridge. `BuilderPlayerRecoveryCoordinator` owns delayed player-state
 recovery after disconnects or uncertain acknowledgement.
 
-`BuilderPlanningWork` owns one `BuilderPlanningPump` for the runtime. All native
+`BuilderPlanningWork` owns one shared Core `BudgetedTaskQueue` for the runtime. All native
 planning and revalidation requests share a round-robin budget of at most 128
 steps and approximately 2 ms per tick. The time limit is checked between native
 calls; a single Bukkit call cannot be interrupted. A step captures one block or

@@ -24,7 +24,9 @@ import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.ScheduledTask
+import ru.arc.paper.api.ArcNativeCleanupService
 import ru.arc.text.LocalizedMiniMessage
+import java.util.concurrent.CompletableFuture
 import java.util.UUID
 import java.util.PriorityQueue
 
@@ -42,6 +44,7 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
     fun clearPlan(playerId: UUID)
     fun clearPlayer(playerId: UUID)
     fun syncBookViewer(viewer: Player) = Unit
+    fun closeAsync(): CompletableFuture<Void> { close(); return CompletableFuture.completedFuture(null) }
 }
 
 /** Keeps every small preview and turns large previews into a deterministic player-centred window. */
@@ -136,17 +139,21 @@ internal class BuilderBlockDisplayRenderer(
     private data class BookBlock(val location: Location, val blockData: BlockData)
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private class PlanCalculation(val plan: BuilderPlan)
-    private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
-    private val suppressedSelectionGlow = mutableSetOf<UUID>()
-    private val movingPreviews = mutableMapOf<Pair<UUID, Layer>, MovingPreview>()
-    private val pendingPlans = mutableMapOf<UUID, PlanCalculation>()
-    private val bookSites = mutableMapOf<UUID, ConstructionSite>()
-    private val bookBossBars = mutableMapOf<UUID, BossBar>()
+    private var scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
+    private var suppressedSelectionGlow = mutableSetOf<UUID>()
+    private var movingPreviews = mutableMapOf<Pair<UUID, Layer>, MovingPreview>()
+    private var pendingPlans = mutableMapOf<UUID, PlanCalculation>()
+    private var bookSites = mutableMapOf<UUID, ConstructionSite>()
+    private var bookBossBars = mutableMapOf<UUID, BossBar>()
     private var viewerRefresh: ScheduledTask? = null
     private val movementTask: ScheduledTask
     private val guidanceTask: ScheduledTask
     private val blockTransform = BuilderDisplayGeometry.blockTransform(blockDisplayScale)
     private var closed = false
+    private val terminal = CompletableFuture<Void>()
+    private val nativeCleanup = requireNotNull(plugin.server.servicesManager.load(ArcNativeCleanupService::class.java)) {
+        "ArcBuilder display cleanup requires ArcCore's native cleanup service"
+    }
 
     init {
         require(maxPlanDisplays in 32..4096)
@@ -351,11 +358,13 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun open(site: ConstructionSite) {
+        if (closed) return
         openBookWindow(site)
         showBookGuidance(site, showTitle = true)
     }
 
     override fun refresh(site: ConstructionSite) {
+        if (closed) return
         openBookWindow(site)
         showBookGuidance(site, showTitle = false)
     }
@@ -662,21 +671,53 @@ internal class BuilderBlockDisplayRenderer(
         closeBookGuidance(playerId)
     }
 
-    override fun close() {
-        if (closed) return
+    override fun close() { closeAsync() }
+
+    override fun closeAsync(): CompletableFuture<Void> {
+        if (closed) return terminal.copy()
         closed = true
         HandlerList.unregisterAll(this)
         movementTask.cancel()
         guidanceTask.cancel()
         viewerRefresh?.cancel()
         viewerRefresh = null
-        bookBossBars.keys.toList().forEach(::closeBookGuidance)
-        scenes.values.forEach { it.audience.close() }
-        scenes.clear()
-        suppressedSelectionGlow.clear()
-        movingPreviews.values.forEach(MovingPreview::close)
-        movingPreviews.clear()
-        pendingPlans.clear()
-        packets.close()
+        val bars = bookBossBars.entries.iterator()
+        val sites = bookSites
+        val oldScenes = scenes.values.iterator()
+        val moving = movingPreviews.values.iterator()
+        bookBossBars = mutableMapOf()
+        bookSites = mutableMapOf()
+        scenes = mutableMapOf()
+        movingPreviews = mutableMapOf()
+        pendingPlans = mutableMapOf()
+        suppressedSelectionGlow = mutableSetOf()
+        val server = plugin.server
+        val packetDrain = try { packets.closeAsync() } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
+        var sceneSteps: Iterator<Unit>? = null
+        var cleanupFailure: Throwable? = null
+        fun attempt(action: () -> Unit) { try { action() } catch (failure: Throwable) { if (cleanupFailure == null) cleanupFailure = failure } }
+        val nativeDrain = try {
+            nativeCleanup.submit("builder-preview-renderer") {
+                when {
+                    bars.hasNext() -> {
+                        val (id, bar) = bars.next()
+                        attempt {
+                            val player = sites[id]?.player ?: server.getPlayer(id)
+                            player?.hideBossBar(bar)
+                            player?.sendActionBar(Component.empty())
+                        }
+                        false
+                    }
+                    moving.hasNext() -> { attempt { moving.next().close() }; false }
+                    sceneSteps?.hasNext() == true -> { attempt { sceneSteps!!.next() }; false }
+                    oldScenes.hasNext() -> { sceneSteps = oldScenes.next().audience.closeSteps(); false }
+                    else -> { cleanupFailure?.let { throw it }; true }
+                }
+            }.toCompletableFuture()
+        } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
+        CompletableFuture.allOf(packetDrain, nativeDrain).whenComplete { _, failure ->
+            if (failure == null) terminal.complete(null) else terminal.completeExceptionally(failure)
+        }
+        return terminal.copy()
     }
 }

@@ -13,6 +13,9 @@ import io.kotest.matchers.shouldBe
 import io.github.retrooper.packetevents.impl.netty.NettyManagerImpl
 import ru.arc.paper.api.VisualPacketAdmission
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.logging.Logger
 
 class BuilderPacketAttachmentTest : FunSpec({
@@ -75,13 +78,19 @@ class BuilderPacketAttachmentTest : FunSpec({
             VisualPacketAdmission.CHANNEL_BACKPRESSURE,
             VisualPacketAdmission.ALLOWED,
         )
-        attachment.close()
+        val observer = attachment.closeAsync()
+        observer.cancel(false)
+        val actual = attachment.closeAsync()
+        actual.isDone shouldBe false
         gateway.runImmediate()
+        actual.isDone shouldBe false
         gateway.visibleIds shouldBe setOf(20)
         gateway.runRetry()
 
         gateway.destroyAttempts shouldBe listOf(listOf(20), listOf(20))
         gateway.visibleIds shouldBe emptySet()
+        actual.isDone shouldBe true
+        actual.isCompletedExceptionally shouldBe false
         attachment.retainedEntityCount() shouldBe 0
     }
 
@@ -164,6 +173,39 @@ class BuilderPacketAttachmentTest : FunSpec({
         onMetadata.metadataValue(0) shouldBe 0x40.toByte()
     }
 
+    test("native admission and close do not wait for blocked Netty snapshot aggregation") {
+        val channel = FakePreviewChannel()
+        val gateway = RecordingPreviewGateway()
+        val attachment = BuilderPacketAttachment(channel, gateway, Logger.getAnonymousLogger())
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        var reads = 0
+        val snapshot = object : AbstractList<BuilderPacketDisplay>() {
+            override val size = 1000
+            override fun get(index: Int): BuilderPacketDisplay {
+                reads++
+                if (index == 0) { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+                return display(1000 + index)
+            }
+        }
+        attachment.submit(snapshot)
+        reads shouldBe 0
+        val netty = CompletableFuture.runAsync { gateway.runImmediate() }
+        try {
+            entered.await(2, TimeUnit.SECONDS) shouldBe true
+            val admission = CompletableFuture.supplyAsync {
+                attachment.submit(listOf(display(9)))
+                attachment.closeAsync()
+            }.get(2, TimeUnit.SECONDS)
+            admission.isDone shouldBe false
+        } finally { release.countDown() }
+        netty.get(5, TimeUnit.SECONDS)
+        gateway.runImmediate()
+        attachment.closeAsync().isCompletedExceptionally shouldBe false
+        attachment.closeAsync().isDone shouldBe true
+        gateway.visibleIds shouldBe emptySet()
+    }
+
     test("a disconnected channel drops its captured per-viewer state") {
         val channel = FakePreviewChannel()
         val gateway = RecordingPreviewGateway()
@@ -173,7 +215,7 @@ class BuilderPacketAttachmentTest : FunSpec({
         attachment.retainedEntityCount() shouldBe 1
 
         channel.open = false
-        attachment.close()
+        attachment.closeAsync().isCompletedExceptionally shouldBe true
 
         attachment.retainedEntityCount() shouldBe 0
         attachment.accepts(channel) shouldBe false

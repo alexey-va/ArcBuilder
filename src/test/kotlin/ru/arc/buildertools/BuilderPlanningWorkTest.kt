@@ -4,12 +4,13 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.TestTaskScheduler
+import ru.arc.core.BudgetedTaskQueue
 
-class BuilderPlanningPumpTest : FunSpec({
+class BuilderPlanningWorkTest : FunSpec({
     test("one count budget is shared fairly across one hundred simultaneous captures") {
         val scheduler = TestTaskScheduler()
         val scope = LifecycleTaskScope(scheduler)
-        val pump = BuilderPlanningPump(scope, nanoTime = { 0 })
+        val pump = BudgetedTaskQueue(scope, nanoTime = { 0 })
         val counts = IntArray(100)
         val results = counts.indices.map { index -> pump.submit({ true }) { ++counts[index] == 3 } }
         scheduler.tick()
@@ -28,7 +29,7 @@ class BuilderPlanningPumpTest : FunSpec({
         val scheduler = TestTaskScheduler()
         val scope = LifecycleTaskScope(scheduler)
         var nanos = 0L
-        val pump = BuilderPlanningPump(scope, nanoTime = { nanos })
+        val pump = BudgetedTaskQueue(scope, nanoTime = { nanos })
         var count = 0
         val result = pump.submit({ true }) { nanos += 1_000_000; ++count == 5 }
         scheduler.tick()
@@ -44,7 +45,7 @@ class BuilderPlanningPumpTest : FunSpec({
     test("stale context and close revoke queued native work without another step") {
         val scheduler = TestTaskScheduler()
         val scope = LifecycleTaskScope(scheduler)
-        val pump = BuilderPlanningPump(scope, maximumSteps = 1, nanoTime = { 0 })
+        val pump = BudgetedTaskQueue(scope, maximumSteps = 1, nanoTime = { 0 })
         var current = true
         var nativeSteps = 0
         val stale = pump.submit({ current }) { nativeSteps++; false }
@@ -64,7 +65,7 @@ class BuilderPlanningPumpTest : FunSpec({
     test("large capture spans ticks and close cancels worker completion publication") {
         val scheduler = TestTaskScheduler()
         val scope = LifecycleTaskScope(scheduler)
-        val pump = BuilderPlanningPump(scope, nanoTime = { 0 })
+        val pump = BudgetedTaskQueue(scope, nanoTime = { 0 })
         var count = 0
         val capture = pump.submit({ true }) { ++count == 10_000 }
         scheduler.tick(78)

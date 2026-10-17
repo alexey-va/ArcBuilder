@@ -77,6 +77,9 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
         private set
     private var completion: CompletableFuture<BuilderToolsReloadResult<C>>? = null
     private var closed = false
+    private var retiring: CompletionStage<Unit> = CompletableFuture.completedFuture(Unit)
+    private val terminal = CompletableFuture<Unit>()
+    val closeCompletion: CompletableFuture<Unit> get() = terminal.copy()
 
     fun reload(): CompletableFuture<BuilderToolsReloadResult<C>> {
         if (closed) return CompletableFuture.completedFuture(BuilderToolsReloadResult.Cancelled)
@@ -114,8 +117,11 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
             } catch (closeFailure: Throwable) {
                 finish(BuilderToolsReloadResult.Rejected(closeFailure, closeFailure))
                 return@prepare
+            } finally {
+                retainDrain(runCatching { previous?.let(awaitClosed) ?: CompletableFuture.completedFuture(Unit) }
+                    .getOrElse { CompletableFuture.failedFuture(it) })
             }
-            val drained = previous?.let(awaitClosed) ?: CompletableFuture.completedFuture(Unit)
+            val drained = retiring
             drained.whenCompleteSync(tasks, token) { _, drainFailure ->
                 if (drainFailure != null) {
                     val cause = unwrap(drainFailure)
@@ -140,7 +146,10 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
                 setRuntime(replacement)
                 finish(BuilderToolsReloadResult.Applied(candidate))
             } catch (activationFailure: Throwable) {
-                activationFailureDrain(activationFailure).whenCompleteSync(tasks, token) { _, drainFailure ->
+                val activationDrain = runCatching { activationFailureDrain(activationFailure) }
+                    .getOrElse { CompletableFuture.failedFuture(it) }
+                retainDrain(activationDrain)
+                activationDrain.whenCompleteSync(tasks, token) { _, drainFailure ->
                     if (drainFailure != null) {
                         val cause = unwrap(drainFailure)
                         activationFailure.addSuppressed(cause)
@@ -162,6 +171,8 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
                 try {
                     setRuntime(createRuntime(config))
                 } catch (runtimeFailure: Throwable) {
+                    retainDrain(runCatching { activationFailureDrain(runtimeFailure) }
+                        .getOrElse { CompletableFuture.failedFuture(it) })
                     restoreFailure = runtimeFailure
                 }
             }
@@ -198,6 +209,10 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
         runtimeChanged(value)
     }
 
+    private fun retainDrain(drain: CompletionStage<Unit>) {
+        retiring = CompletableFuture.allOf(retiring.toCompletableFuture(), drain.toCompletableFuture()).thenApply { Unit }
+    }
+
     override fun close() {
         if (closed) return
         closed = true
@@ -205,7 +220,16 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
         val previous = runtime
         setRuntime(null)
         finish(BuilderToolsReloadResult.Cancelled)
-        previous?.close()
+        val closeFailure = runCatching { previous?.close() }.exceptionOrNull()
+        val currentDrain = runCatching { previous?.let(awaitClosed) ?: CompletableFuture.completedFuture(Unit) }
+            .getOrElse { CompletableFuture.failedFuture(it) }
+        CompletableFuture.allOf(retiring.toCompletableFuture(), currentDrain.toCompletableFuture()).whenComplete { _, failure ->
+            val primary = closeFailure ?: failure
+            if (primary == null) terminal.complete(Unit) else {
+                if (closeFailure != null && failure != null && failure !== closeFailure) closeFailure.addSuppressed(failure)
+                terminal.completeExceptionally(primary)
+            }
+        }
     }
 
     private fun unwrap(failure: Throwable): Throwable =

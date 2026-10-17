@@ -16,6 +16,7 @@ class BuilderPacketRendererTest : FunSpec({
         failOnUnsupportedMockBukkitOperation {
             MockBukkitTestRuntime.open().use { paper ->
                 val plugin = paper.createSimplePlugin("PacketPreviewTest")
+                installArcVisualPacketBudgetFixture(plugin)
                 val world = paper.addSimpleWorld("packet-preview")
                 val player = paper.addPlayer("PreviewOwner")
                 player.teleport(world.getBlockAt(4, 64, 4).location)

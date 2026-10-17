@@ -37,6 +37,7 @@ import ru.arc.paper.menu.PaperMenuEntry
 import ru.arc.paper.menu.PaperMenuItemsAdderResolver
 import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
+import ru.arc.paper.api.ArcNativeCleanupService
 import ru.arc.paper.display.PacketDisplayAudienceGroup
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.paper.scene.PaperSpatialControls
@@ -49,6 +50,7 @@ import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 internal enum class BuilderBookPreviewConfirmationKind {
     CONSTRUCTION,
@@ -100,12 +102,12 @@ internal class BuilderBookPreviewPresentation(
         val audience: PacketDisplayAudienceGroup,
     )
 
-    private val panels = mutableMapOf<UUID, PanelScene>()
-    private val snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
-    private val placementSites = mutableMapOf<UUID, ConstructionSite>()
-    private val preparing = mutableMapOf<UUID, Any>()
-    private val displayedConfirmations = mutableMapOf<UUID, BuilderBookPreviewConfirmation>()
-    private val confirmationInventories = mutableMapOf<UUID, org.bukkit.inventory.Inventory>()
+    private var panels = mutableMapOf<UUID, PanelScene>()
+    private var snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
+    private var placementSites = mutableMapOf<UUID, ConstructionSite>()
+    private var preparing = mutableMapOf<UUID, Any>()
+    private var displayedConfirmations = mutableMapOf<UUID, BuilderBookPreviewConfirmation>()
+    private var confirmationInventories = mutableMapOf<UUID, org.bukkit.inventory.Inventory>()
     private val menuConfiguration = loadMenuConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
     private val menuItems = PaperMenuItemFactory(
@@ -115,6 +117,11 @@ internal class BuilderBookPreviewPresentation(
         ),
     )
     private var closed = false
+    private var menuViewers = mutableMapOf<UUID, Player>()
+    private val terminal = CompletableFuture<Void>()
+    private val nativeCleanup = requireNotNull(plugin.server.servicesManager.load(ArcNativeCleanupService::class.java)) {
+        "ArcBuilder book preview cleanup requires ArcCore's native cleanup service"
+    }
     private val controls = PaperSpatialControls(plugin, displays, object : SpatialControlController<ConstructionSite, Unit>() {
         override fun current(player: Player, scene: SpatialSceneKey): SpatialControlFrame<ConstructionSite, Unit>? {
             val panel = panels[UUID.fromString(scene.value)] ?: return null
@@ -162,8 +169,9 @@ internal class BuilderBookPreviewPresentation(
                 messages.render("book.selector.$template", locale),
                 emptyList(),
             ),
-            onClick = action,
+            onClick = { if (!closed) action(it) },
         )
+        menuViewers[player.uniqueId] = player
         menus.open(player, SELECTOR_MENU) {
             PaperMenuContent(
                 title = messages.render("book.selector.title", locale),
@@ -187,7 +195,7 @@ internal class BuilderBookPreviewPresentation(
                             messages.render(if (selected) "book.selector.selected-name" else "book.selector.name", locale, values),
                             messages.renderLines("book.selector.lore", locale, values),
                         ),
-                        onClick = { onSelect(definition.buildingId) },
+                        onClick = { if (!closed) onSelect(definition.buildingId) },
                     )
                 }),
             )
@@ -254,6 +262,7 @@ internal class BuilderBookPreviewPresentation(
 
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
+        menuViewers.remove(event.player.uniqueId)
         clearPlayer(event.player.uniqueId)
     }
 
@@ -372,6 +381,7 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun openPlacement(player: Player, site: ConstructionSite) {
+        if (closed) return
         if (menus.session(player)?.menuId == PLACEMENT_MENU) {
             menus.session(player)?.requestRefresh()
             return
@@ -381,6 +391,7 @@ internal class BuilderBookPreviewPresentation(
         if (player.uniqueId in snapshots && host.currentConfirmation(player) == null) {
             snapshots.remove(player.uniqueId)
         }
+        menuViewers[player.uniqueId] = player
         menus.open(player, PLACEMENT_MENU) { menuContent(player) }
         if (player.uniqueId in snapshots && host.currentConfirmation(player) != null) {
             menus.session(player)?.inventory?.let { confirmationInventories[player.uniqueId] = it }
@@ -407,6 +418,8 @@ internal class BuilderBookPreviewPresentation(
     internal fun openInspectionForTest(player: Player, site: ConstructionSite) = openInspection(player, site)
 
     private fun openInspection(player: Player, site: ConstructionSite) {
+        if (closed) return
+        menuViewers[player.uniqueId] = player
         menus.open(player, INSPECTION_MENU) { inspectionContent(player, site) }
     }
 
@@ -525,7 +538,7 @@ internal class BuilderBookPreviewPresentation(
             messages.render("book.preview-menu.placement.$key.name", locale, values),
             messages.renderLines("book.preview-menu.placement.$key.lore", locale, values),
         ),
-        onClick = click,
+        onClick = { if (!closed) click(it) },
     )
 
     private fun background(menu: MenuId) = menuItems.create(
@@ -616,19 +629,49 @@ internal class BuilderBookPreviewPresentation(
         requiredTemplates = emptySet(),
     )
 
-    override fun close() {
-        if (closed) return
+    override fun close() { closeAsync() }
+
+    /** Actual host-owned native and packet cleanup; cancelling an observer cannot cancel cleanup. */
+    fun closeAsync(): CompletableFuture<Void> {
+        if (closed) return terminal.copy()
         closed = true
         HandlerList.unregisterAll(this)
-        panels.keys.toList().forEach(::removePanel)
-        controls.close()
-        displays.close()
-        snapshots.clear()
-        confirmationInventories.clear()
-        placementSites.clear()
-        preparing.clear()
-        displayedConfirmations.clear()
-        menus.close()
+        val remaining = panels.values.iterator()
+        val viewers = menuViewers.values.iterator()
+        panels = mutableMapOf()
+        menuViewers = mutableMapOf()
+        snapshots = mutableMapOf()
+        confirmationInventories = mutableMapOf()
+        placementSites = mutableMapOf()
+        preparing = mutableMapOf()
+        displayedConfirmations = mutableMapOf()
+        var cleanupFailure: Throwable? = null
+        fun attempt(action: () -> Unit) { try { action() } catch (failure: Throwable) { if (cleanupFailure == null) cleanupFailure = failure } }
+        attempt { controls.close() }
+        val packetDrain = try { displays.closeAsync() } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
+        val nativeDrain = try {
+            nativeCleanup.submit("builder-book-preview") {
+                when {
+                    remaining.hasNext() -> {
+                        val scene = remaining.next()
+                        attempt { scene.plaque.close() }
+                        attempt { scene.audience.close() }
+                        false
+                    }
+                    viewers.hasNext() -> { attempt { menus.session(viewers.next())?.close() }; false }
+                    else -> {
+                        // All owned viewer sessions were retired one at a time above.
+                        attempt { menus.close() }
+                        cleanupFailure?.let { throw it }
+                        true
+                    }
+                }
+            }.toCompletableFuture()
+        } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
+        CompletableFuture.allOf(packetDrain, nativeDrain).whenComplete { _, failure ->
+            if (failure == null) terminal.complete(null) else terminal.completeExceptionally(failure)
+        }
+        return terminal.copy()
     }
 
     private companion object {

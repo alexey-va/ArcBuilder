@@ -19,6 +19,7 @@ import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ArcBuilderBootstrapMockBukkitTest : FunSpec({
@@ -75,7 +76,7 @@ class ArcBuilderBootstrapMockBukkitTest : FunSpec({
             MockBukkitTestRuntime.open().use { paper ->
                 val plugin = paper.loadPlugin<ArcBuilderPlugin>()
                 paper.server.pluginManager.disablePlugin(plugin)
-                plugin.configurationExecutor.awaitTermination(10, TimeUnit.SECONDS) shouldBe true
+                plugin.drained().get(10, TimeUnit.SECONDS) shouldBe Unit
                 paper.performTicks(3)
 
                 plugin.isEnabled shouldBe false
@@ -87,6 +88,51 @@ class ArcBuilderBootstrapMockBukkitTest : FunSpec({
             }
         }
     }
+    test("replacement and superseded waiting generation cannot pass accepted predecessor work") {
+        failOnUnsupportedMockBukkitOperation {
+            ConfigManager.clear()
+            MockBukkitTestRuntime.open().use { paper ->
+                val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+                awaitArcBuilderBootstrap(paper, plugin)
+                awaitBootstrapRecovery(paper)
+                val entered = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                plugin.configurationExecutor.execute {
+                    entered.countDown()
+                    check(release.await(10, TimeUnit.SECONDS))
+                }
+                entered.await(5, TimeUnit.SECONDS) shouldBe true
+                try {
+                    paper.server.pluginManager.disablePlugin(plugin)
+                    val firstDrain = plugin.drained()
+                    firstDrain.isDone shouldBe false
+                    paper.server.pluginManager.enablePlugin(plugin)
+                    paper.performTicks(3)
+                    plugin.bootstrapComplete shouldBe false
+                    ARC.plugin shouldBe null
+                    shouldThrow<IllegalStateException> { BuilderToolsConfiguration.current() }
+                    val block = paper.addSimpleWorld("waiting-predecessor").getBlockAt(0, 64, 0)
+                    paper.callEvent(BlockPhysicsEvent(block, Material.STONE.createBlockData())).isCancelled shouldBe true
+                    // Disabling twice and replacing a still-waiting generation must retain the original fence.
+                    paper.server.pluginManager.disablePlugin(plugin)
+                    plugin.onDisable()
+                    val waitingDrain = plugin.drained()
+                    waitingDrain.isDone shouldBe false
+                    paper.server.pluginManager.enablePlugin(plugin)
+                    paper.performTicks(3)
+                    plugin.bootstrapComplete shouldBe false
+                    firstDrain.isDone shouldBe false
+                    release.countDown()
+                    awaitArcBuilderBootstrap(paper, plugin)
+                    awaitBootstrapRecovery(paper)
+                    firstDrain.get(5, TimeUnit.SECONDS) shouldBe Unit
+                    waitingDrain.get(5, TimeUnit.SECONDS) shouldBe Unit
+                    paper.callEvent(BlockPhysicsEvent(block, Material.STONE.createBlockData())).isCancelled shouldBe false
+                } finally { release.countDown() }
+            }
+        }
+    }
+
 })
 
 private fun awaitBootstrapRecovery(paper: MockBukkitTestRuntime) {

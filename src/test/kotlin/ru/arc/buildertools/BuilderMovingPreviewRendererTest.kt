@@ -190,6 +190,7 @@ private fun withMovingPreview(test: (MovingPreviewFixture) -> Unit) {
             mockkStatic(BukkitAdapter::class)
             try {
                 val plugin = paper.createSimplePlugin("MovingPreviewTest")
+                installArcVisualPacketBudgetFixture(plugin)
                 val world = paper.addSimpleWorld("moving-preview")
                 val otherWorld = paper.addSimpleWorld("outside-preview")
                 val player = paper.addPlayer("PreviewOwner")
