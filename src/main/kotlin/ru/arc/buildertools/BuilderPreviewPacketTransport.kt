@@ -17,7 +17,6 @@ import org.bukkit.Bukkit
 import org.bukkit.block.data.BlockData
 import org.bukkit.entity.Player
 import org.bukkit.plugin.Plugin
-import ru.arc.paper.api.ArcNativeCleanupService
 import ru.arc.paper.api.VisualPacketAdmission
 import ru.arc.paper.packet.PaperVisualPackets
 import java.lang.ref.WeakReference
@@ -399,20 +398,26 @@ internal class PacketEventsBuilderPreviewTransport(
 ) : BuilderPreviewPacketTransport {
     /* Weak keys keep one attachment per live Bukkit player without retaining disconnected players. */
     private var attachments = WeakHashMap<Player, BuilderPacketAttachment>()
-    private val cleanup = requireNotNull(plugin.server.servicesManager.load(ArcNativeCleanupService::class.java)) {
-        "ArcBuilder preview cleanup requires ArcCore's native cleanup service"
-    }
     private var closed = false
     private val terminal = CompletableFuture<Void>()
     private val retiring = AtomicInteger()
+    @Volatile private var closeSubmitted = false
     private val terminalFailure = AtomicReference<Throwable?>()
 
     private fun retire(attachment: BuilderPacketAttachment) {
         retiring.incrementAndGet()
-        attachment.closeAsync().whenComplete { _, failure ->
+        val work = runCatching { attachment.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) }
+        work.whenComplete { _, failure ->
             if (failure != null) terminalFailure.compareAndSet(null, failure)
             retiring.decrementAndGet()
+            completeCloseIfDrained()
         }
+    }
+
+    private fun completeCloseIfDrained() {
+        if (!closeSubmitted || retiring.get() != 0) return
+        val failure = terminalFailure.get()
+        if (failure == null) terminal.complete(null) else terminal.completeExceptionally(failure)
     }
 
     override fun blockStateId(blockData: BlockData): Int =
@@ -439,18 +444,11 @@ internal class PacketEventsBuilderPreviewTransport(
     override fun closeAsync(): CompletableFuture<Void> {
         if (closed) return terminal.copy()
         closed = true
-        val remaining = attachments.values.iterator()
-        attachments = WeakHashMap()
-        val accepted = try {
-            cleanup.submit("builder-preview-packets") {
-                if (remaining.hasNext()) { retire(remaining.next()); false }
-                else if (retiring.get() != 0) false
-                else { terminalFailure.get()?.let { throw it }; true }
-            }
-        } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
-        accepted.whenComplete { _, failure ->
-            if (failure == null) terminal.complete(null) else terminal.completeExceptionally(failure)
-        }
+        val remaining = attachments.values.toList()
+        attachments.clear()
+        remaining.forEach(::retire)
+        closeSubmitted = true
+        completeCloseIfDrained()
         return terminal.copy()
     }
 

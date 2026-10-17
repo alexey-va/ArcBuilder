@@ -96,7 +96,7 @@ private data class BuilderConstructionWorldMutation(
 
 internal class BuilderToolsRuntimeActivationException(
     cause: Throwable,
-    val closeCompletion: CompletableFuture<Unit>,
+    val cleanupFailure: Throwable,
 ) : RuntimeException(cause)
 
 internal class BuilderToolsRuntime(
@@ -140,7 +140,6 @@ internal class BuilderToolsRuntime(
     private val bookRequests = BuilderBookRequests(taskScope)
     private val planningTasks = BuilderPlanningWork(taskScope)
     internal val closeCompletion = CompletableFuture<Unit>()
-    private var bookCloseCompletion: CompletableFuture<Unit> = CompletableFuture.completedFuture(Unit)
     private val capturedMaximumRange = config.maximumRange
     private val capturedRequireLands = config.requireLands
     private val messages: LocalizedMiniMessage = config.messages()
@@ -189,7 +188,6 @@ internal class BuilderToolsRuntime(
     private val stateService = PaperPlayerStateService()
     private val stateCodec = PaperPlayerStateCodec()
     private val storageExecutor = ru.arc.core.BoundedAsyncExecutor("arc-builder-tools-storage", 1, 256)
-    private val storageFinalizers = mutableListOf<() -> Unit>()
     private var storageSealed = false
     private val debugLine = StructuredDebugLine("ARC_BUILDER_TOOLS")
     private val wandKey = org.bukkit.NamespacedKey(plugin, "builder_selector")
@@ -746,7 +744,6 @@ internal class BuilderToolsRuntime(
                 messages = messages,
                 taskScope = taskScope,
                 storageExecutor = storageExecutor,
-                registerStorageFinalizer = { storageFinalizers += it },
                 operationLocks = operationLocks,
                 draftJournal = BuilderDraftJournal(plugin.dataPath, BuilderPlan.ABSOLUTE_MAX_CHANGES),
                 draftStorage = draftStorage ?: PlayerBuildBookDraftStorage(
@@ -790,7 +787,7 @@ internal class BuilderToolsRuntime(
                     override fun send(player: Player, path: String, values: Map<String, Component>) =
                         this@BuilderToolsRuntime.send(player, path, values)
                 },
-            ).also { initializedBooks = it; bookCloseCompletion = it.closeCompletion }
+            ).also { initializedBooks = it }
             playerRecoveries = BuilderPlayerRecoveryCoordinator(
                 taskScope = taskScope,
                 retryPeriodTicks = config.playerRecoveryRetryPeriodTicks,
@@ -885,9 +882,11 @@ internal class BuilderToolsRuntime(
                 "Builder selection action panel task was not scheduled"
             }
         } catch (failure: Throwable) {
+            var cleanupFailure: Throwable? = null
             fun attempt(action: () -> Unit) {
                 try { action() } catch (closeFailure: Throwable) {
-                    if (failure !== closeFailure) failure.addSuppressed(closeFailure)
+                    if (cleanupFailure == null) cleanupFailure = closeFailure
+                    else if (cleanupFailure !== closeFailure) cleanupFailure!!.addSuppressed(closeFailure)
                 }
             }
             attempt { HandlerList.unregisterAll(this) }
@@ -914,8 +913,9 @@ internal class BuilderToolsRuntime(
             attempt { shop.close() }
             attempt { BuildingManager.clearPreviews() }
             attempt { BuildingManager.installPreviewBridge(null) }
-            closeStorageExecutor(failure, visualDrains)
-            throw BuilderToolsRuntimeActivationException(failure, closeCompletion)
+            attempt { closeStorageExecutor(visualDrains) { initializedBooks?.closeRegistry() } }
+            cleanupFailure?.let { throw BuilderToolsRuntimeActivationException(failure, it) }
+            throw failure
         }
     }
 
@@ -3929,35 +3929,28 @@ internal class BuilderToolsRuntime(
         attempt { clipboardController.close() }
         attempt { BuildingManager.clearPreviews() }
         attempt { BuildingManager.installPreviewBridge(null) }
-        closeStorageExecutor(failure, visualDrains)
+        runCatching { closeStorageExecutor(visualDrains, books::closeRegistry) }
+            .exceptionOrNull()?.let { closeFailure ->
+                if (failure == null) failure = closeFailure else failure!!.addSuppressed(closeFailure)
+            }
+        failure?.let { throw it }
     }
 
-    private fun closeStorageExecutor(nativeFailure: Throwable? = null, nativeDrains: List<CompletableFuture<*>> = emptyList()) {
+    /** Maintenance may block for I/O, but never for a continuation scheduled on Paper. */
+    private fun closeStorageExecutor(
+        nativeDrains: List<CompletableFuture<*>>,
+        closeRegistry: () -> Unit,
+    ) {
         if (storageSealed) return
         storageSealed = true
-        val finalizers = storageFinalizers.toList()
-        storageFinalizers.clear()
-        val storageDrain = storageExecutor.closeAsync {
-            var failure: Throwable? = nativeFailure
-            finalizers.forEach { finalizer ->
-                try { finalizer() } catch (error: Throwable) {
-                    if (failure == null) failure = error else failure!!.addSuppressed(error)
-                }
-            }
-            try { bookCloseCompletion.join() } catch (error: Throwable) {
-                if (failure == null) failure = error else failure!!.addSuppressed(error)
-            }
-            failure?.let { throw it }
-        }
-        val drains = nativeDrains + storageDrain
-        CompletableFuture.allOf(*drains.toTypedArray()).whenComplete { _, _ ->
-            var failure: Throwable? = null
-            drains.forEach { drain -> runCatching { drain.join() }.exceptionOrNull()?.let { error ->
-                val cause = error.cause ?: error
-                if (failure == null) failure = cause else if (failure !== cause) failure!!.addSuppressed(cause)
-            } }
+        // Native scopes are already sealed. This FIFO contains only accepted disk work
+        // and SQL cleanup, whose completions do not require another server tick.
+        val storageDrain = storageExecutor.closeAsync(closeRegistry)
+        val actualCleanup = nativeDrains + storageDrain
+        CompletableFuture.allOf(*actualCleanup.toTypedArray()).whenComplete { _, failure ->
             if (failure == null) closeCompletion.complete(Unit) else closeCompletion.completeExceptionally(failure)
         }
+        storageDrain.join()
     }
 
     private companion object {

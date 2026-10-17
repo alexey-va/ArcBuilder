@@ -1,6 +1,5 @@
 package ru.arc.buildertools
 
-import ru.arc.awaitArcBuilderBootstrap
 import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
 import com.mojang.brigadier.suggestion.SuggestionsBuilder
 import io.kotest.core.spec.style.FunSpec
@@ -414,7 +413,6 @@ private fun withCommandFixture(
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
-            awaitArcBuilderBootstrap(paper, plugin)
             installArcVisualPacketBudgetFixture(plugin)
             try {
                 val config = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml").apply {

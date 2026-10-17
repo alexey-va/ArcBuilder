@@ -22,7 +22,6 @@ abstract class KotestTestBase(
             ConfigManager.clear()
             paper = MockBukkitTestRuntime.open()
             plugin = paper.loadPlugin<ArcBuilderPlugin>()
-            awaitArcBuilderBootstrap(paper, plugin)
             dataPath = plugin.dataPath
         }
         afterSpec {

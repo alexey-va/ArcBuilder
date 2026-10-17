@@ -11,8 +11,6 @@ import ru.arc.autobuild.BuilderStoragePaths
 import ru.arc.autobuild.SystemBuildBookCatalog
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
-import ru.arc.core.LifecycleTaskScope
-import ru.arc.core.whenCompleteSync
 import ru.arc.persistence.AtomicFileStore
 import java.nio.file.Files
 import java.nio.file.Path
@@ -20,10 +18,6 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 import java.util.Comparator
 import java.security.MessageDigest
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletionException
-import java.util.concurrent.CompletionStage
-import java.util.concurrent.Executor
 
 internal enum class BuilderToolsReloadBlocker {
     STARTING_OR_RECOVERING,
@@ -43,15 +37,9 @@ internal sealed interface BuilderToolsReloadResult<out C> {
     data class Applied<C>(val config: C) : BuilderToolsReloadResult<C>
     data class Busy(val blocker: BuilderToolsReloadBlocker) : BuilderToolsReloadResult<Nothing>
     data class Rejected(val failure: Throwable, val rollbackFailure: Throwable? = null) : BuilderToolsReloadResult<Nothing>
-    data object Cancelled : BuilderToolsReloadResult<Nothing>
 }
 
-/**
- * Main-thread transaction owner for one runtime generation. Only candidate preparation,
- * publication and publication rollback run on [executor]; all native lifecycle work is
- * resumed through [tasks]. There is at most one transaction in flight. Accepted storage
- * work drains before another generation can touch the same journals; close never waits.
- */
+/** Sequential maintenance transaction; gameplay admission is checked before touching the active runtime. */
 internal class BuilderToolsReloadService<C, R : AutoCloseable>(
     initialConfig: C,
     initialRuntime: R?,
@@ -59,181 +47,58 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
     private val createRuntime: (C) -> R?,
     private val reloadBlocker: (R) -> BuilderToolsReloadBlocker?,
     private val publishConfig: (C) -> (() -> Unit),
-    private val executor: Executor,
-    private val tasks: LifecycleTaskScope,
     private val validateCandidate: (C) -> Unit = {},
-    private val awaitClosed: (R) -> CompletionStage<Unit> = { CompletableFuture.completedFuture(Unit) },
-    private val activationFailureDrain: (Throwable) -> CompletionStage<Unit> = { CompletableFuture.completedFuture(Unit) },
-    private val runtimeChanged: (R?) -> Unit = {},
 ) : AutoCloseable {
     var config: C = initialConfig
         private set
-
     var runtime: R? = initialRuntime
         private set
-
-    @Volatile
-    var inProgress: Boolean = false
-        private set
-    private var completion: CompletableFuture<BuilderToolsReloadResult<C>>? = null
     private var closed = false
-    private var retiring: CompletionStage<Unit> = CompletableFuture.completedFuture(Unit)
-    private val terminal = CompletableFuture<Unit>()
-    val closeCompletion: CompletableFuture<Unit> get() = terminal.copy()
 
-    fun reload(): CompletableFuture<BuilderToolsReloadResult<C>> {
-        if (closed) return CompletableFuture.completedFuture(BuilderToolsReloadResult.Cancelled)
-        if (inProgress) return CompletableFuture.completedFuture(
-            BuilderToolsReloadResult.Busy(BuilderToolsReloadBlocker.STARTING_OR_RECOVERING),
-        )
-        runtime?.let(reloadBlocker)?.let {
-            return CompletableFuture.completedFuture(BuilderToolsReloadResult.Busy(it))
-        }
-        val result = CompletableFuture<BuilderToolsReloadResult<C>>()
-        completion = result
-        inProgress = true
-        val token = tasks.restart()
-        prepare(token, loadCandidate) { candidate, failure ->
-            if (failure != null) {
-                finish(BuilderToolsReloadResult.Rejected(failure))
-                return@prepare
-            }
-            val validated = checkNotNull(candidate)
-            try {
-                validateCandidate(validated)
-            } catch (invalid: Throwable) {
-                finish(BuilderToolsReloadResult.Rejected(invalid))
-                return@prepare
-            }
-            // Gameplay may have started during disk preparation. Recheck before any close.
-            runtime?.let(reloadBlocker)?.let {
-                finish(BuilderToolsReloadResult.Busy(it))
-                return@prepare
-            }
-            val previous = runtime
-            setRuntime(null)
-            try {
-                previous?.close()
-            } catch (closeFailure: Throwable) {
-                finish(BuilderToolsReloadResult.Rejected(closeFailure, closeFailure))
-                return@prepare
-            } finally {
-                retainDrain(runCatching { previous?.let(awaitClosed) ?: CompletableFuture.completedFuture(Unit) }
-                    .getOrElse { CompletableFuture.failedFuture(it) })
-            }
-            val drained = retiring
-            drained.whenCompleteSync(tasks, token) { _, drainFailure ->
-                if (drainFailure != null) {
-                    val cause = unwrap(drainFailure)
-                    finish(BuilderToolsReloadResult.Rejected(cause, cause))
-                } else {
-                    publish(token, validated)
-                }
-            }
-        }
-        return result
-    }
-
-    private fun publish(token: LifecycleTaskScope.Token, candidate: C) {
-        prepare(token, { publishConfig(candidate) }) { rollback, failure ->
-            if (failure != null) {
-                restore(token, failure, null)
-                return@prepare
-            }
-            try {
-                val replacement = createRuntime(candidate)
-                config = candidate
-                setRuntime(replacement)
-                finish(BuilderToolsReloadResult.Applied(candidate))
-            } catch (activationFailure: Throwable) {
-                val activationDrain = runCatching { activationFailureDrain(activationFailure) }
-                    .getOrElse { CompletableFuture.failedFuture(it) }
-                retainDrain(activationDrain)
-                activationDrain.whenCompleteSync(tasks, token) { _, drainFailure ->
-                    if (drainFailure != null) {
-                        val cause = unwrap(drainFailure)
-                        activationFailure.addSuppressed(cause)
-                        finish(BuilderToolsReloadResult.Rejected(activationFailure, cause))
-                    } else {
-                        restore(token, activationFailure, rollback)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun restore(token: LifecycleTaskScope.Token, failure: Throwable, rollback: (() -> Unit)?) {
-        prepare(token, { rollback?.invoke() }) { _, rollbackFailure ->
-            var restoreFailure = rollbackFailure
-                ?: (failure as? BuilderToolsConfigPublicationException)?.rollbackFailure
-            // Never construct a runtime against a failed/unknown publication rollback.
-            if (restoreFailure == null) {
-                try {
-                    setRuntime(createRuntime(config))
-                } catch (runtimeFailure: Throwable) {
-                    retainDrain(runCatching { activationFailureDrain(runtimeFailure) }
-                        .getOrElse { CompletableFuture.failedFuture(it) })
-                    restoreFailure = runtimeFailure
-                }
-            }
-            finish(BuilderToolsReloadResult.Rejected(failure, restoreFailure))
-        }
-    }
-
-    private fun <T> prepare(
-        token: LifecycleTaskScope.Token,
-        action: () -> T,
-        completed: (T?, Throwable?) -> Unit,
-    ) {
-        val work = try {
-            CompletableFuture.supplyAsync({
-                if (!tasks.isCurrent(token)) throw java.util.concurrent.CancellationException()
-                action()
-            }, executor)
+    fun reload(): BuilderToolsReloadResult<C> {
+        if (closed) return BuilderToolsReloadResult.Busy(BuilderToolsReloadBlocker.STARTING_OR_RECOVERING)
+        runtime?.let(reloadBlocker)?.let { return BuilderToolsReloadResult.Busy(it) }
+        val candidate = try {
+            loadCandidate().also(validateCandidate)
         } catch (failure: Throwable) {
-            completed(null, failure)
-            return
+            return BuilderToolsReloadResult.Rejected(failure)
         }
-        work.whenCompleteSync(tasks, token) { value, failure -> completed(value, failure?.let(::unwrap)) }
-    }
-
-    private fun finish(result: BuilderToolsReloadResult<C>) {
-        val pending = completion
-        completion = null
-        inProgress = false
-        pending?.complete(result)
-    }
-
-    private fun setRuntime(value: R?) {
-        runtime = value
-        runtimeChanged(value)
-    }
-
-    private fun retainDrain(drain: CompletionStage<Unit>) {
-        retiring = CompletableFuture.allOf(retiring.toCompletableFuture(), drain.toCompletableFuture()).thenApply { Unit }
+        val previous = runtime
+        runtime = null
+        try {
+            // close seals native callbacks and finishes accepted I/O before returning.
+            previous?.close()
+        } catch (failure: Throwable) {
+            return BuilderToolsReloadResult.Rejected(failure, failure)
+        }
+        var rollback: (() -> Unit)? = null
+        return try {
+            rollback = publishConfig(candidate)
+            runtime = createRuntime(candidate)
+            config = candidate
+            BuilderToolsReloadResult.Applied(candidate)
+        } catch (failure: Throwable) {
+            var restoreFailure = (failure as? BuilderToolsConfigPublicationException)?.rollbackFailure
+                ?: (failure as? BuilderToolsRuntimeActivationException)?.cleanupFailure
+            try { rollback?.invoke() } catch (rollbackFailure: Throwable) {
+                if (restoreFailure == null) restoreFailure = rollbackFailure else restoreFailure.addSuppressed(rollbackFailure)
+            }
+            if (restoreFailure == null) {
+                try { runtime = createRuntime(config) } catch (rollbackFailure: Throwable) {
+                    restoreFailure = rollbackFailure
+                }
+            }
+            BuilderToolsReloadResult.Rejected(failure, restoreFailure)
+        }
     }
 
     override fun close() {
         if (closed) return
         closed = true
-        tasks.close()
         val previous = runtime
-        setRuntime(null)
-        finish(BuilderToolsReloadResult.Cancelled)
-        val closeFailure = runCatching { previous?.close() }.exceptionOrNull()
-        val currentDrain = runCatching { previous?.let(awaitClosed) ?: CompletableFuture.completedFuture(Unit) }
-            .getOrElse { CompletableFuture.failedFuture(it) }
-        CompletableFuture.allOf(retiring.toCompletableFuture(), currentDrain.toCompletableFuture()).whenComplete { _, failure ->
-            val primary = closeFailure ?: failure
-            if (primary == null) terminal.complete(Unit) else {
-                if (closeFailure != null && failure != null && failure !== closeFailure) closeFailure.addSuppressed(failure)
-                terminal.completeExceptionally(primary)
-            }
-        }
+        runtime = null
+        previous?.close()
     }
-
-    private fun unwrap(failure: Throwable): Throwable =
-        if (failure is CompletionException && failure.cause != null) checkNotNull(failure.cause) else failure
 }
 
 /** Strict, side-effect-free validation of the files consumed by a new runtime. */
@@ -534,7 +399,7 @@ internal object BuilderToolsConfigPublication {
         return publish(prepared.dataRoot)
     }
 
-    /** Worker only. The returned rollback restores exact pre-publication bytes and permissions. */
+    /** The returned rollback restores exact pre-publication bytes and permissions. */
     fun publish(dataRoot: Path): () -> Unit {
         val paths = listOf(
             ConfigManager.moduleYamlPath(dataRoot, "builder-tools.yml"),
@@ -598,7 +463,7 @@ internal object BuilderToolsConfigPublication {
 }
 
 
-/** Worker-only content fence: delayed activation must publish the files it actually validated. */
+/** Publication must use the same operator files that were validated. */
 private fun requireBuilderConfigSourcesUnchanged(expected: Map<Path, String?>) {
     expected.forEach { (path, hash) ->
         require(builderConfigSourceHash(path) == hash) {

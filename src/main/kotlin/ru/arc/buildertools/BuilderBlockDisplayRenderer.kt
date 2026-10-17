@@ -24,7 +24,6 @@ import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.ScheduledTask
-import ru.arc.paper.api.ArcNativeCleanupService
 import ru.arc.text.LocalizedMiniMessage
 import java.util.concurrent.CompletableFuture
 import java.util.UUID
@@ -151,9 +150,6 @@ internal class BuilderBlockDisplayRenderer(
     private val blockTransform = BuilderDisplayGeometry.blockTransform(blockDisplayScale)
     private var closed = false
     private val terminal = CompletableFuture<Void>()
-    private val nativeCleanup = requireNotNull(plugin.server.servicesManager.load(ArcNativeCleanupService::class.java)) {
-        "ArcBuilder display cleanup requires ArcCore's native cleanup service"
-    }
 
     init {
         require(maxPlanDisplays in 32..4096)
@@ -681,42 +677,34 @@ internal class BuilderBlockDisplayRenderer(
         guidanceTask.cancel()
         viewerRefresh?.cancel()
         viewerRefresh = null
-        val bars = bookBossBars.entries.iterator()
-        val sites = bookSites
-        val oldScenes = scenes.values.iterator()
-        val moving = movingPreviews.values.iterator()
-        bookBossBars = mutableMapOf()
-        bookSites = mutableMapOf()
-        scenes = mutableMapOf()
-        movingPreviews = mutableMapOf()
-        pendingPlans = mutableMapOf()
-        suppressedSelectionGlow = mutableSetOf()
-        val server = plugin.server
-        val packetDrain = try { packets.closeAsync() } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
-        var sceneSteps: Iterator<Unit>? = null
-        var cleanupFailure: Throwable? = null
-        fun attempt(action: () -> Unit) { try { action() } catch (failure: Throwable) { if (cleanupFailure == null) cleanupFailure = failure } }
-        val nativeDrain = try {
-            nativeCleanup.submit("builder-preview-renderer") {
-                when {
-                    bars.hasNext() -> {
-                        val (id, bar) = bars.next()
-                        attempt {
-                            val player = sites[id]?.player ?: server.getPlayer(id)
-                            player?.hideBossBar(bar)
-                            player?.sendActionBar(Component.empty())
-                        }
-                        false
-                    }
-                    moving.hasNext() -> { attempt { moving.next().close() }; false }
-                    sceneSteps?.hasNext() == true -> { attempt { sceneSteps!!.next() }; false }
-                    oldScenes.hasNext() -> { sceneSteps = oldScenes.next().audience.closeSteps(); false }
-                    else -> { cleanupFailure?.let { throw it }; true }
-                }
-            }.toCompletableFuture()
-        } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
-        CompletableFuture.allOf(packetDrain, nativeDrain).whenComplete { _, failure ->
-            if (failure == null) terminal.complete(null) else terminal.completeExceptionally(failure)
+        var failure: Throwable? = null
+        fun attempt(action: () -> Unit) {
+            try { action() } catch (error: Throwable) {
+                if (failure == null) failure = error else failure!!.addSuppressed(error)
+            }
+        }
+        // Lifecycle cleanup is deliberately immediate; gameplay window updates remain budgeted.
+        bookBossBars.forEach { (id, bar) -> attempt {
+            val player = bookSites[id]?.player ?: plugin.server.getPlayer(id)
+            player?.hideBossBar(bar)
+            player?.sendActionBar(Component.empty())
+        } }
+        movingPreviews.values.forEach { attempt(it::close) }
+        scenes.values.forEach { scene -> attempt { scene.audience.close() } }
+        bookBossBars.clear()
+        bookSites.clear()
+        scenes.clear()
+        movingPreviews.clear()
+        pendingPlans.clear()
+        suppressedSelectionGlow.clear()
+        val nativeFailure = failure
+        val packetDrain = runCatching { packets.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) }
+        packetDrain.whenComplete { _, packetFailure ->
+            val primary = nativeFailure ?: packetFailure
+            if (primary == null) terminal.complete(null) else {
+                if (nativeFailure != null && packetFailure != null && nativeFailure !== packetFailure) nativeFailure.addSuppressed(packetFailure)
+                terminal.completeExceptionally(primary)
+            }
         }
         return terminal.copy()
     }

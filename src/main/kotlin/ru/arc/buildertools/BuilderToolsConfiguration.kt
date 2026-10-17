@@ -5,7 +5,7 @@ import ru.arc.config.Config
 import ru.arc.text.LocalizedMiniMessage
 import java.nio.file.Path
 
-/** Prepared entirely on the configuration worker; its Config trees are never reloaded in place. */
+/** Loaded during startup/reload; its Config trees are never reloaded in place. */
 internal data class BuilderToolsPreparedConfiguration(
     val dataRoot: Path,
     val settings: BuilderToolsConfig,

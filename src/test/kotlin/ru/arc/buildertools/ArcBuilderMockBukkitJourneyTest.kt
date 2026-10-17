@@ -1,6 +1,5 @@
 package ru.arc.buildertools
 
-import ru.arc.awaitArcBuilderBootstrap
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.PacketEventsAPI
 import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
@@ -2033,7 +2032,6 @@ private class ArcBuilderJourney private constructor(
             }
             try {
                 val plugin = paper.loadPlugin<ArcBuilderPlugin>()
-                awaitArcBuilderBootstrap(paper, plugin)
                 installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreJourneyVisualHost"))
                 val config = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml").apply {
                     setBoolean("enabled", true)

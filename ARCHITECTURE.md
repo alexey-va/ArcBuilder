@@ -149,12 +149,15 @@ startup rollback use the same sliced boundary. Request identity and current
 player, world, book, slot and selection state are checked before applying a
 deferred result.
 
-No server-thread path waits for storage completion. Closing a runtime cancels
-native continuations and drains accepted writes on its storage executor. Reload
-waits for that drain asynchronously before opening the replacement journal.
-Shutdown during an unfinished mutation retains its durable preimage and an
-explicit recovery hold; startup reconciles it in slices before refunding or
-acknowledging the operation.
+Gameplay never waits for storage completion on the server thread. Startup and
+manual reload prepare configuration sequentially. Closing a runtime cancels
+native continuations, finishes accepted writes on its storage executor, and
+closes SQL before returning. Maintenance may block for this I/O; it never waits
+for work scheduled on a future Paper tick. Local preview bindings close inline;
+Core's detached packet cleanup remains asynchronous and owns only the captured
+old handles and connections. Shutdown during an unfinished mutation retains its
+durable preimage and an explicit recovery hold; startup reconciles it in slices
+before refunding or acknowledging the operation.
 
 ## Committed neighbour physics
 
@@ -366,13 +369,12 @@ The book subsystem is larger and should be entered through
 - `BuildingManager` and `ConstructionSite` own interactive book previews and
   transforms.
 
-The book SQL lifecycle captures the typed shared service and owner on Paper,
-then acquires its lease and constructs the registry on the storage executor.
-Existing coordinators bind on Paper after creation; migrations remain
-asynchronous and readiness remains false until they finish. The same FIFO owns
-final registry/lease close. Its failure propagates to runtime drain, preventing a
-replacement from silently overtaking an unsuccessful close. Pool settings and
-financial behavior are unchanged.
+The book SQL lifecycle acquires its shared lease and binds its coordinators
+synchronously during startup. Migrations remain asynchronous and readiness
+remains false until they finish. Native callbacks are sealed before the storage
+FIFO closes the registry and SQL lease; maintenance waits for that I/O-only
+terminal work before opening replacement journals. A failed close stops reload.
+Pool settings and financial behavior are unchanged.
 
 Confirmed build books do not use the ordinary all-at-once mutation path.
 `BuilderConstructionProject.kt` owns a durable, restart-safe project that
@@ -518,11 +520,11 @@ runtime copy. `auto-build.yml` and `system-build-books.yml` are also reload
 inputs: the former is validated and the latter is path/hash checked when the
 candidate is enabled (`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:103-130`).
 
-Startup and an accepted reload read YAML, prepare the full catalogue, validate
-paths and merge missing bundled defaults on the owned configuration executor.
-Preparation uses an isolated staging directory and preserves operator values
-and unknown keys through arc-core's `mergeMissingFromBundled`. Native material
-registry checks and runtime installation remain on the server thread.
+Startup and an accepted reload synchronously read YAML, prepare the full
+catalogue, validate paths and merge missing bundled defaults. Preparation uses
+an isolated staging directory and preserves operator values and unknown keys
+through arc-core's `mergeMissingFromBundled`. Native material checks and runtime
+installation run in the same maintenance call.
 `BuilderToolsConfiguration` publishes the prepared in-memory configuration as
 one generation. Books and menus read that generation directly; their getters
 do not reopen files or enter `ConfigManager`'s filesystem-backed lookup.
@@ -532,8 +534,8 @@ Publication snapshots the exact bytes and POSIX permissions of both writable
 files. Each merge-forward is a single-file replacement through arc-core
 `Config.saveStrict`; exact rollback restores use `AtomicFileStore`. The two
 files are not one cross-file transaction. Publication or activation failure
-therefore drains the candidate, restores exact snapshots on the worker, and
-recreates the previous prepared runtime. Rollback failure takes the fail-closed
+therefore closes the candidate, restores exact snapshots, and recreates the
+previous prepared runtime in order. Rollback failure takes the fail-closed
 path.
 Malformed YAML, wrong scalar types, missing required files, invalid
 limits/locales, and enabled catalogue/auto-build failures reject the candidate.
@@ -551,10 +553,9 @@ locale trees at `src/main/resources/modules/builder-tools.yml:225-234,840-849`.
 
 An accepted reload is a runtime-generation replacement, not an in-place field
 edit. The active-state barrier is checked first. A safe candidate is then
-strictly parsed and validated asynchronously while the old generation is
-intact. The server thread rechecks the barrier, closes the old runtime and
-asynchronously waits for accepted storage work to drain. Only after worker
-publication succeeds does it install the new configuration and runtime. Consequently
+strictly parsed and validated while the old runtime is intact. The same
+maintenance call closes the old runtime, finishes its accepted I/O, publishes
+configuration, and installs the replacement. Consequently
 all settings consumed by `BuilderToolsRuntime` are applied together, but the
 following states must be drained first:
 

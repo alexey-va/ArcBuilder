@@ -1,6 +1,5 @@
 package ru.arc.buildertools
 
-import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
@@ -40,7 +39,6 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
-            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -130,7 +128,6 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
-            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -183,7 +180,6 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
-            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -240,7 +236,6 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
-            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val moduleConfig = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")
@@ -354,7 +349,6 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
-            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -447,7 +441,6 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
             installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
-            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()

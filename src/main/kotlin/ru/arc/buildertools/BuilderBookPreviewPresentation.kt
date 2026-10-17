@@ -37,7 +37,6 @@ import ru.arc.paper.menu.PaperMenuEntry
 import ru.arc.paper.menu.PaperMenuItemsAdderResolver
 import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
-import ru.arc.paper.api.ArcNativeCleanupService
 import ru.arc.paper.display.PacketDisplayAudienceGroup
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.paper.scene.PaperSpatialControls
@@ -119,9 +118,6 @@ internal class BuilderBookPreviewPresentation(
     private var closed = false
     private var menuViewers = mutableMapOf<UUID, Player>()
     private val terminal = CompletableFuture<Void>()
-    private val nativeCleanup = requireNotNull(plugin.server.servicesManager.load(ArcNativeCleanupService::class.java)) {
-        "ArcBuilder book preview cleanup requires ArcCore's native cleanup service"
-    }
     private val controls = PaperSpatialControls(plugin, displays, object : SpatialControlController<ConstructionSite, Unit>() {
         override fun current(player: Player, scene: SpatialSceneKey): SpatialControlFrame<ConstructionSite, Unit>? {
             val panel = panels[UUID.fromString(scene.value)] ?: return null
@@ -631,45 +627,39 @@ internal class BuilderBookPreviewPresentation(
 
     override fun close() { closeAsync() }
 
-    /** Actual host-owned native and packet cleanup; cancelling an observer cannot cancel cleanup. */
+    /** Local native bindings close inline; only Core's detached packet cleanup may finish later. */
     fun closeAsync(): CompletableFuture<Void> {
         if (closed) return terminal.copy()
         closed = true
         HandlerList.unregisterAll(this)
-        val remaining = panels.values.iterator()
-        val viewers = menuViewers.values.iterator()
-        panels = mutableMapOf()
-        menuViewers = mutableMapOf()
-        snapshots = mutableMapOf()
-        confirmationInventories = mutableMapOf()
-        placementSites = mutableMapOf()
-        preparing = mutableMapOf()
-        displayedConfirmations = mutableMapOf()
-        var cleanupFailure: Throwable? = null
-        fun attempt(action: () -> Unit) { try { action() } catch (failure: Throwable) { if (cleanupFailure == null) cleanupFailure = failure } }
+        var failure: Throwable? = null
+        fun attempt(action: () -> Unit) {
+            try { action() } catch (error: Throwable) {
+                if (failure == null) failure = error else failure!!.addSuppressed(error)
+            }
+        }
         attempt { controls.close() }
-        val packetDrain = try { displays.closeAsync() } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
-        val nativeDrain = try {
-            nativeCleanup.submit("builder-book-preview") {
-                when {
-                    remaining.hasNext() -> {
-                        val scene = remaining.next()
-                        attempt { scene.plaque.close() }
-                        attempt { scene.audience.close() }
-                        false
-                    }
-                    viewers.hasNext() -> { attempt { menus.session(viewers.next())?.close() }; false }
-                    else -> {
-                        // All owned viewer sessions were retired one at a time above.
-                        attempt { menus.close() }
-                        cleanupFailure?.let { throw it }
-                        true
-                    }
-                }
-            }.toCompletableFuture()
-        } catch (failure: Throwable) { CompletableFuture.failedFuture<Void>(failure) }
-        CompletableFuture.allOf(packetDrain, nativeDrain).whenComplete { _, failure ->
-            if (failure == null) terminal.complete(null) else terminal.completeExceptionally(failure)
+        panels.values.forEach { scene ->
+            attempt { scene.plaque.close() }
+            attempt { scene.audience.close() }
+        }
+        menuViewers.values.toList().forEach { player -> attempt { menus.session(player)?.close() } }
+        attempt { menus.close() }
+        panels.clear()
+        menuViewers.clear()
+        snapshots.clear()
+        confirmationInventories.clear()
+        placementSites.clear()
+        preparing.clear()
+        displayedConfirmations.clear()
+        val nativeFailure = failure
+        val packetDrain = runCatching { displays.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) }
+        packetDrain.whenComplete { _, packetFailure ->
+            val primary = nativeFailure ?: packetFailure
+            if (primary == null) terminal.complete(null) else {
+                if (nativeFailure != null && packetFailure != null && nativeFailure !== packetFailure) nativeFailure.addSuppressed(packetFailure)
+                terminal.completeExceptionally(primary)
+            }
         }
         return terminal.copy()
     }

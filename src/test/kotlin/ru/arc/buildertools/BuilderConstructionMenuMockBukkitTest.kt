@@ -1,6 +1,5 @@
 package ru.arc.buildertools
 
-import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContain
@@ -359,7 +358,6 @@ private inline fun withMenuFixture(block: (ConstructionMenuFixture) -> Unit) {
     ConfigManager.clear()
     MockBukkitTestRuntime.open().use { paper ->
         val plugin = paper.loadPlugin<ArcBuilderPlugin>()
-        awaitArcBuilderBootstrap(paper, plugin)
         BuilderToolsModule.shutdown()
         try {
             ConstructionMenuFixture(paper, plugin).use(block)

@@ -1,6 +1,5 @@
 package ru.arc.buildertools
 
-import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -88,7 +87,6 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
-            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val worldId = UUID.randomUUID()
