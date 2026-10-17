@@ -598,7 +598,7 @@ locales:
     book:
       system-issue:
         loading: "<prefix><#e6fff3>Загружаем схему для книги…"
-        success: "\n  <prefix><#2bba43>Книга выдана игроку <#e6fff3><player><#2bba43>.\n  <#e6fff3><name>\n"
+        success: "\n  <prefix><#d48763>Книга выдана игроку <#e6fff3><player><#d48763>.\n  <#8c8c8c>   Постройка: <#e6fff3><name>\n"
         failed: "<prefix><#c42323>Не удалось завершить выдачу книги.\n  <#e6fff3>Проверьте инвентарь и журнал сервера."
         cancelled: "<prefix><#ff9f0f>Выдача книги отменена. Повторите команду."
         inventory-full: "<prefix><#ff9f0f>В инвентаре получателя нет места.\n  <#e6fff3>Освободите один слот и повторите команду."
@@ -1543,7 +1543,7 @@ locales:
     book:
       system-issue:
         loading: "<prefix><#e6fff3>Loading the schematic for your book…"
-        success: "\n  <prefix><green>Book delivered to <white><player><green>.\n  <white><name>\n"
+        success: "\n  <prefix><#d48763>Book delivered to <#e6fff3><player><#d48763>.\n  <#8c8c8c>   Build: <#e6fff3><name>\n"
         failed: "<prefix><red>Book delivery could not be completed.\n  <white>Check the inventory and server log."
         cancelled: "<prefix><yellow>Book delivery was cancelled. Run the command again."
         inventory-full: "<prefix><yellow>The recipient's inventory is full.\n  <white>Free one slot and run the command again."

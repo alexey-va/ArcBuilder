@@ -187,6 +187,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
             success.lines().first() shouldBe ""
             success.lines().last() shouldBe ""
             success.lines().filter(String::isNotEmpty).all { it.startsWith("  ") } shouldBe true
+            success.lines()[2] shouldBe "     ${if (locale == "ru") "Постройка" else "Build"}: $title"
         }
     }
 
@@ -212,6 +213,25 @@ class BuilderSystemBookIssuerTest : FunSpec({
         complete(admin, "systembook", "GrocerMC", "forest.schem", "") shouldBe emptyList()
         complete(admin, "book", "") shouldBe emptyList()
     }
+    test("schematic completion reveals one directory level and preserves exact catalogue ids") {
+        val admin = mockk<Player>()
+        every { admin.hasPermission(BuilderSystemBookIssuer.PERMISSION) } returns true
+        val ids = listOf(
+            "minecolonies/medieval/house.schem", "minecolonies/asian/tower.schematic",
+            "root.schematic", "minecolonies/medieval/workshop", "minecolonies/notice.schem",
+            "minecolonies/medieval/house.schem", "civs/cottage.schem", "root",
+        )
+        fun complete(prefix: String) = BuilderSystemBookIssuer.tabComplete(
+            admin, arrayOf("systembook", prefix), { ids }, { emptyList() })
+        complete("") shouldBe listOf("civs/", "minecolonies/", "random", "root", "root.schematic")
+        complete("mi") shouldBe listOf("minecolonies/")
+        complete("minecolonies/") shouldBe listOf("minecolonies/asian/", "minecolonies/medieval/", "minecolonies/notice.schem")
+        complete("MINECOLONIES/me") shouldBe listOf("minecolonies/medieval/")
+        complete("minecolonies/medieval/") shouldBe listOf("minecolonies/medieval/house.schem", "minecolonies/medieval/workshop")
+        complete("minecolonies/asian/t") shouldBe listOf("minecolonies/asian/tower.schematic")
+        complete("missing/") shouldBe emptyList()
+    }
+
     test("players without issuance permission cannot resolve or issue a book") {
         val sender = mockk<Player>(relaxed = true)
         var denied = false

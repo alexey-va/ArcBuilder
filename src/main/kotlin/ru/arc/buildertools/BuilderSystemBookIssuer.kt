@@ -162,15 +162,26 @@ internal object BuilderSystemBookIssuer {
         onlinePlayers: () -> List<String>,
     ): List<String> {
         if (!canIssue(sender) || args.isEmpty()) return emptyList()
+        fun schematicSuggestions(): List<String> {
+            val prefix = args.last()
+            val segmentStart = prefix.lastIndexOf('/') + 1
+            return buildingIds().asSequence()
+                .filter { it.startsWith(prefix, ignoreCase = true) }
+                .map { id ->
+                    val nextSlash = id.indexOf('/', segmentStart)
+                    if (nextSlash < 0) id else id.substring(0, nextSlash + 1)
+                }
+                .toList()
+        }
         val suggestions = when {
             args.size == 1 -> listOf("systembook")
             !args[0].equals("systembook", ignoreCase = true) -> emptyList()
-            args.size == 2 -> onlinePlayers() + if (sender is Player) listOf(RANDOM_SELECTOR) + buildingIds() else emptyList()
-            args.size == 3 && onlinePlayers().any { it == args[1] } -> listOf(RANDOM_SELECTOR) + buildingIds()
+            args.size == 2 -> onlinePlayers() + if (sender is Player) listOf(RANDOM_SELECTOR) + schematicSuggestions() else emptyList()
+            args.size == 3 && onlinePlayers().any { it == args[1] } -> listOf(RANDOM_SELECTOR) + schematicSuggestions()
             args.size == 3 && sender is Player && args[1].equals(RANDOM_SELECTOR, ignoreCase = true) ->
-                listOf(STARTER_SELECTOR) + buildingIds()
+                listOf(STARTER_SELECTOR) + schematicSuggestions()
             args.size == 4 && onlinePlayers().any { it == args[1] } && args[2].equals(RANDOM_SELECTOR, ignoreCase = true) ->
-                listOf(STARTER_SELECTOR) + buildingIds()
+                listOf(STARTER_SELECTOR) + schematicSuggestions()
             else -> emptyList()
         }
         return suggestions.filter { it.startsWith(args.last(), ignoreCase = true) }.distinct().sorted()

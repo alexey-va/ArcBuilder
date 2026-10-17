@@ -28,17 +28,27 @@ import java.util.Locale
 
 class BuilderCommandBoundaryMockBukkitTest : FunSpec({
     test("system book completions work for admin-only players and console through command boundary") {
-        withCommandFixture { fixture ->
+        withCommandFixture(listOf(
+            "atelier-house.schem", "minecolonies/medieval/house.schem",
+            "minecolonies/medieval/workshop", "minecolonies/asian/tower.schematic",
+        )) { fixture ->
             val admin = fixture.player("GrocerMC")
             fixture.grant(admin, BuilderSystemBookIssuer.PERMISSION)
             fun complete(sender: CommandSender, vararg args: String) =
-                fixture.runtime.onTabComplete(sender, fixture.command, "builder", args)
+                fixture.command.tabComplete(sender, "builder", args)
             complete(admin, "sys") shouldBe listOf("systembook")
             complete(admin, "systembook", "ATELIER") shouldBe listOf("atelier-house.schem")
-            complete(admin, "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "random")
+            complete(admin, "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "minecolonies/", "random")
+            complete(admin, "systembook", "minecolonies/") shouldBe listOf("minecolonies/asian/", "minecolonies/medieval/")
+            complete(admin, "systembook", "GrocerMC", "minecolonies/me") shouldBe listOf("minecolonies/medieval/")
+            complete(admin, "systembook", "random", "minecolonies/asian/") shouldBe listOf("minecolonies/asian/tower.schematic")
             complete(Bukkit.getConsoleSender(), "sys") shouldBe listOf("systembook")
             complete(Bukkit.getConsoleSender(), "systembook", "Gro") shouldBe listOf("GrocerMC")
-            complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "random")
+            complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "minecolonies/", "random")
+            complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "minecolonies/medieval/") shouldBe
+                listOf("minecolonies/medieval/house.schem", "minecolonies/medieval/workshop")
+            complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "random", "minecolonies/") shouldBe
+                listOf("minecolonies/asian/", "minecolonies/medieval/")
             complete(fixture.player("NoBooks"), "sys") shouldBe emptyList()
         }
     }
@@ -311,7 +321,10 @@ private object UnusedCommandDraftStorage : BuilderDraftStorage {
     override fun register(template: ru.arc.autobuild.PlayerBuildBookTemplate) = Unit
 }
 
-private fun withCommandFixture(block: (CommandFixture) -> Unit) {
+private fun withCommandFixture(
+    systemBuildBookIds: List<String> = listOf("atelier-house.schem"),
+    block: (CommandFixture) -> Unit,
+) {
     failOnUnsupportedMockBukkitOperation {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
@@ -336,7 +349,7 @@ private fun withCommandFixture(block: (CommandFixture) -> Unit) {
                     draftStorage = UnusedCommandDraftStorage,
                     bookSchematicVerifier = BuilderBookSchematicVerifier { _, _ -> true },
                     systemBuildBookResolver = { null },
-                    systemBuildBookIds = listOf("atelier-house.schem"),
+                    systemBuildBookIds = systemBuildBookIds,
                     sendPlayerMessage = messages::record,
                 )
                 val command = checkNotNull(plugin.getCommand("builder"))
