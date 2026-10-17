@@ -21,9 +21,10 @@ import org.bukkit.plugin.Plugin
 import ru.arc.text.LocalizedMiniMessage
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 /** Shared transaction and protection boundary used by the crown lifecycle. */
-internal interface BuilderCrownHost {
+internal interface BuilderCrownHost : BuilderPlanningTasks {
     fun operationLocked(playerId: UUID): Boolean
     fun ensureAvailable(player: Player)
     fun ensurePermission(player: Player)
@@ -34,6 +35,9 @@ internal interface BuilderCrownHost {
     fun materialLabel(player: Player, material: Material): Component
     fun setFirstPosition(player: Player, location: Location)
     fun createPlan(player: Player, changes: List<BuilderBlockChange>, costs: List<BuilderItemAmount>): BuilderPlan
+    fun createPlanAsync(player: Player, changes: List<BuilderBlockChange>, costs: List<BuilderItemAmount>): CompletableFuture<BuilderPlan> =
+        onMain { createPlan(player, changes, costs) }
+    fun startPlanning(player: Player, request: (isCurrent: () -> Boolean) -> CompletableFuture<BuilderPlan>)
     fun preparePlan(player: Player, plan: BuilderPlan)
     fun confirmPlan(player: Player)
     fun prepareUndo(player: Player)
@@ -78,7 +82,8 @@ internal class BuilderCrownController(
         player: Player,
         capturedSelection: BuilderSelection,
         rawOptions: BuilderCrownSelectionOptions,
-    ) {
+        isCurrent: () -> Boolean = { true },
+    ): CompletableFuture<BuilderPlan> {
         host.ensureAvailable(player)
         host.ensurePermission(player)
         if (host.operationLocked(player.uniqueId)) failure("errors.busy")
@@ -101,22 +106,37 @@ internal class BuilderCrownController(
         }
         val world = Bukkit.getWorld(current.worldId) ?: failure("errors.world-not-allowed")
         val after = host.placementData(material)
+        val afterString = after.asString
+        val playerId = player.uniqueId
+        val gameMode = player.gameMode
+        val contextCurrent = { isCurrent() && !closed && player.isOnline && player.world.uid == current.worldId &&
+            player.gameMode == gameMode && selections.selection(playerId, current.worldId) == current }
+        val minHeight = world.minHeight
+        val maxHeight = world.maxHeight
+        val cost = if (BuilderGameModePolicy.usesInventory(gameMode)) BuilderItemCodec.PrototypeCache().capture(ItemStack(material)) else null
         val changes = ArrayList<BuilderBlockChange>(minOf(maximumChanges, 512))
-        val costs = ArrayList<ItemStack>(minOf(maximumChanges, 512))
-        for (position in positions) {
-            // Minecraft block coordinates above or below this world's build height are simply clipped.
-            if (position.y !in world.minHeight until world.maxHeight) continue
-            val block = world.getBlockAt(position.x, position.y, position.z)
-            host.ensureScannable(player, block)
-            val before = block.blockData
-            if (before.asString == after.asString || !safety.isReplaceable(block)) continue
-            host.ensurePlacement(player, block, material)
-            changes += BuilderBlockChange(position, before.asString, after.asString)
-            if (BuilderGameModePolicy.usesInventory(player.gameMode)) costs += ItemStack(material)
-            if (changes.size > maximumChanges) failure("errors.selection-too-large")
+        return host.compute { positions.filter { it.y in minHeight until maxHeight }.toList() }.thenCompose { candidates ->
+            host.onMain {
+                val remaining = candidates.iterator()
+                host.capture(contextCurrent) {
+                    if (!remaining.hasNext()) return@capture true
+                    val position = remaining.next()
+                    if (!world.isChunkLoaded(position.x shr 4, position.z shr 4)) host.fail("errors.chunk-unloaded")
+                    val block = world.getBlockAt(position.x, position.y, position.z)
+                    host.ensureScannable(player, block)
+                    val before = block.blockData.asString
+                    if (before == afterString || !safety.isReplaceable(block)) return@capture false
+                    host.ensurePlacement(player, block, material)
+                    changes += BuilderBlockChange(position, before, afterString)
+                    if (changes.size > maximumChanges) failure("errors.selection-too-large")
+                    false
+                }
+            }.thenCompose { it }
+        }.thenCompose {
+            requireCurrentBuilderPlanning(contextCurrent)
+            if (changes.isEmpty()) failure("errors.nothing-to-change")
+            host.createPlanAsync(player, changes, cost?.let { listOf(it.copy(amount = changes.size)) }.orEmpty())
         }
-        if (changes.isEmpty()) failure("errors.nothing-to-change")
-        host.preparePlan(player, host.createPlan(player, changes, BuilderItemCodec.aggregate(costs)))
     }
 
     fun tabComplete(args: Array<out String>): List<String> {
@@ -332,7 +352,7 @@ internal class BuilderCrownController(
         val center = selections.first(player.uniqueId, player.world.uid) ?: failure("errors.selection-missing")
         val seed = sessions.seed(player.uniqueId, center, settings, reroll)
         clearAnchor(player.uniqueId)
-        host.preparePlan(player, plan(player, center, settings, seed))
+        host.startPlanning(player) { isCurrent -> plan(player, center, settings, seed, isCurrent) }
     }
 
     private fun selectionSeed(
@@ -351,7 +371,8 @@ internal class BuilderCrownController(
         center: BuilderBlockPos,
         settings: BuilderCrownSettings,
         seed: Long,
-    ): BuilderPlan {
+        isCurrent: () -> Boolean,
+    ): CompletableFuture<BuilderPlan> {
         val world = Bukkit.getWorld(center.worldId) ?: failure("errors.world-not-allowed")
         val materialByName = settings.palette.associate { entry ->
             val material = Material.matchMaterial(entry.materialName) ?: failure("errors.crown-material")
@@ -359,21 +380,47 @@ internal class BuilderCrownController(
             entry.materialName to material
         }
         val dataByMaterial = materialByName.values.associateWith(host::placementData)
-        val costs = mutableListOf<ItemStack>()
-        val changes = BuilderCrownGeometry.offsets(settings, seed).mapNotNull { (dx, dy, dz) ->
-            val position = BuilderBlockPos(center.worldId, center.x + dx, center.y + dy, center.z + dz).validated()
-            val block = world.getBlockAt(position.x, position.y, position.z)
-            val material = materialByName.getValue(settings.materialAt(dx, dy, dz, seed))
-            val data = dataByMaterial.getValue(material)
-            if (block.blockData.asString == data.asString) return@mapNotNull null
-            if (!safety.isReplaceable(block)) return@mapNotNull null
-            host.ensurePlacement(player, block, data.material)
-            if (BuilderGameModePolicy.usesInventory(player.gameMode)) costs += ItemStack(material)
-            BuilderBlockChange(position, block.blockData.asString, data.asString)
-        }.take(maximumChanges + 1).toList()
-        if (changes.isEmpty()) failure("errors.nothing-to-change")
-        if (changes.size > maximumChanges) failure("errors.selection-too-large")
-        return host.createPlan(player, changes, BuilderItemCodec.aggregate(costs))
+        val playerId = player.uniqueId
+        val gameMode = player.gameMode
+        val usesInventory = BuilderGameModePolicy.usesInventory(gameMode)
+        val current = { isCurrent() && !closed && player.isOnline && player.world.uid == center.worldId &&
+            player.gameMode == gameMode && selections.first(playerId, center.worldId) == center }
+        val prototypes = BuilderItemCodec.PrototypeCache()
+        val costs = mutableListOf<BuilderItemAmount>()
+        val changes = mutableListOf<BuilderBlockChange>()
+        return host.compute {
+            BuilderCrownGeometry.offsets(settings, seed).map { (dx, dy, dz) ->
+                BuilderBlockPos(center.worldId, center.x + dx, center.y + dy, center.z + dz).validated() to
+                    settings.materialAt(dx, dy, dz, seed)
+            }
+        }.thenCompose { candidates ->
+            host.onMain {
+                val positions = candidates.iterator()
+                host.capture(current) {
+                    if (!positions.hasNext()) return@capture true
+                    val (position, materialName) = positions.next()
+                    if (!world.isChunkLoaded(position.x shr 4, position.z shr 4)) host.fail("errors.chunk-unloaded")
+                    val block = world.getBlockAt(position.x, position.y, position.z)
+                    val material = materialByName.getValue(materialName)
+                    val data = dataByMaterial.getValue(material)
+                    val before = block.blockData.asString
+                    if (before == data.asString || !safety.isReplaceable(block)) return@capture false
+                    host.ensurePlacement(player, block, data.material)
+                    if (usesInventory) costs += prototypes.capture(ItemStack(material))
+                    changes += BuilderBlockChange(position, before, data.asString)
+                    if (changes.size > maximumChanges) failure("errors.selection-too-large")
+                    false
+                }
+            }.thenCompose { it }
+        }.thenCompose {
+            if (changes.isEmpty()) failure("errors.nothing-to-change")
+            host.compute { BuilderItemCodec.aggregateAmounts(costs) }
+        }.thenCompose { capturedCosts ->
+            host.onMain {
+                requireCurrentBuilderPlanning(current)
+                host.createPlanAsync(player, changes, capturedCosts)
+            }.thenCompose { it }
+        }
     }
 
     private fun materialArgument(player: Player, raw: String?): Material {

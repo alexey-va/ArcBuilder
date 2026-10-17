@@ -12,13 +12,13 @@ class BuilderConstructionPlayerLeasesTest : FunSpec({
         val locks = mockk<BuilderOperationLocks>(relaxed = true)
         val projectId = UUID.randomUUID()
         val playerId = UUID.randomUUID()
-        every { locks.isPlayerLocked(playerId) } returns false
+        every { locks.isPlayerLeaseHeld(playerId) } returns false
 
         BuilderConstructionPlayerLeases(locks).use { leases ->
             leases.acquire(projectId, playerId) shouldBe true
             leases.acquire(projectId, playerId) shouldBe true
 
-            verify(exactly = 1) { locks.isPlayerLocked(playerId) }
+            verify(exactly = 1) { locks.isPlayerLeaseHeld(playerId) }
             verify(exactly = 0) { locks.tryBookLock(playerId) }
 
             leases.release(projectId)
@@ -32,15 +32,15 @@ class BuilderConstructionPlayerLeasesTest : FunSpec({
         val secondProjectId = UUID.randomUUID()
         val playerId = UUID.randomUUID()
         val anotherPlayerId = UUID.randomUUID()
-        every { locks.isPlayerLocked(playerId) } returns false
+        every { locks.isPlayerLeaseHeld(playerId) } returns false
 
         BuilderConstructionPlayerLeases(locks).use { leases ->
             leases.acquire(firstProjectId, playerId) shouldBe true
             leases.acquire(secondProjectId, playerId) shouldBe false
             leases.acquire(firstProjectId, anotherPlayerId) shouldBe false
 
-            verify(exactly = 1) { locks.isPlayerLocked(playerId) }
-            verify(exactly = 0) { locks.isPlayerLocked(anotherPlayerId) }
+            verify(exactly = 1) { locks.isPlayerLeaseHeld(playerId) }
+            verify(exactly = 0) { locks.isPlayerLeaseHeld(anotherPlayerId) }
         }
     }
 
@@ -48,13 +48,13 @@ class BuilderConstructionPlayerLeasesTest : FunSpec({
         val locks = mockk<BuilderOperationLocks>(relaxed = true)
         val projectId = UUID.randomUUID()
         val playerId = UUID.randomUUID()
-        every { locks.isPlayerLocked(playerId) } returns true
+        every { locks.isPlayerLeaseHeld(playerId) } returns true
 
         BuilderConstructionPlayerLeases(locks).use { leases ->
             leases.acquire(projectId, playerId) shouldBe false
             leases.release(projectId)
 
-            verify(exactly = 1) { locks.isPlayerLocked(playerId) }
+            verify(exactly = 1) { locks.isPlayerLeaseHeld(playerId) }
             verify(exactly = 0) { locks.unlockBook(playerId) }
         }
     }
@@ -64,7 +64,7 @@ class BuilderConstructionPlayerLeasesTest : FunSpec({
         val projectId = UUID.randomUUID()
         val otherProjectId = UUID.randomUUID()
         val playerId = UUID.randomUUID()
-        every { locks.isPlayerLocked(playerId) } returns false
+        every { locks.isPlayerLeaseHeld(playerId) } returns false
 
         BuilderConstructionPlayerLeases(locks).use { leases ->
             leases.acquire(projectId, playerId) shouldBe true
@@ -87,8 +87,8 @@ class BuilderConstructionPlayerLeasesTest : FunSpec({
         val secondProjectId = UUID.randomUUID()
         val firstPlayerId = UUID.randomUUID()
         val secondPlayerId = UUID.randomUUID()
-        every { locks.isPlayerLocked(firstPlayerId) } returns false
-        every { locks.isPlayerLocked(secondPlayerId) } returns false
+        every { locks.isPlayerLeaseHeld(firstPlayerId) } returns false
+        every { locks.isPlayerLeaseHeld(secondPlayerId) } returns false
         val leases = BuilderConstructionPlayerLeases(locks)
 
         leases.acquire(firstProjectId, firstPlayerId) shouldBe true
@@ -107,7 +107,7 @@ class BuilderConstructionPlayerLeasesTest : FunSpec({
         val locks = mockk<BuilderOperationLocks>(relaxed = true)
         val projectId = UUID.randomUUID()
         val playerId = UUID.randomUUID()
-        every { locks.isPlayerLocked(playerId) } returns false
+        every { locks.isPlayerLeaseHeld(playerId) } returns false
         val leases = BuilderConstructionPlayerLeases(locks)
 
         leases.acquire(projectId, playerId) shouldBe true

@@ -2,6 +2,7 @@ package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
 import org.bukkit.Bukkit
+import org.bukkit.GameMode
 import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
@@ -13,14 +14,19 @@ import ru.arc.autobuild.BuildingManager
 import ru.arc.autobuild.PlayerBuildBookLimitException
 import ru.arc.autobuild.PlayerBuildBookDigestInspection
 import ru.arc.autobuild.PlayerBuildBookStore
+import ru.arc.autobuild.PlayerBuildBookStorageSettings
 import ru.arc.autobuild.PlayerBuildBookTemplate
 import ru.arc.autobuild.PreparedPlayerBuildBookTemplate
 import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.whenCompleteSync
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.error
 import ru.arc.util.Logging.warn
 import java.util.UUID
+import java.nio.file.Path
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutorService
 import ru.arc.autobuild.Building
 import java.util.concurrent.RejectedExecutionException
@@ -65,7 +71,19 @@ internal data class BuilderDraftInventoryEvidence(
 }
 
 internal interface BuilderDraftStorage {
-    fun prepare(creatorId: UUID, source: BuilderClipboard): PreparedPlayerBuildBookTemplate
+    /** Small in-memory stores may implement this adapter; durable stores prepare asynchronously. */
+    fun prepare(creatorId: UUID, source: BuilderClipboard): PreparedPlayerBuildBookTemplate =
+        throw UnsupportedOperationException("This draft store requires asynchronous preparation")
+    fun prepareAsync(
+        creatorId: UUID,
+        source: BuilderClipboard,
+        isCurrent: () -> Boolean,
+    ): CompletableFuture<PreparedPlayerBuildBookTemplate> = try {
+        requireCurrentBuilderPlanning(isCurrent)
+        CompletableFuture.completedFuture(prepare(creatorId, source))
+    } catch (failure: Throwable) {
+        CompletableFuture.failedFuture(failure)
+    }
     fun persist(prepared: PreparedPlayerBuildBookTemplate): PlayerBuildBookTemplate
     fun inspectSchematic(buildingId: String): PlayerBuildBookDigestInspection
     fun inspectContent(buildingId: String, expectedSha256: String): CompletableFuture<PlayerBuildBookDigestInspection>
@@ -74,10 +92,16 @@ internal interface BuilderDraftStorage {
 
 internal class PlayerBuildBookDraftStorage(
     private val loadBuilding: (String, String?) -> CompletableFuture<Building>,
+    private val planningTasks: BuilderPlanningTasks,
+    dataRoot: Path,
+    configuredRoot: String?,
+    maxBooksPerPlayer: Int,
 ) : BuilderDraftStorage {
-    override fun prepare(creatorId: UUID, source: BuilderClipboard) = PlayerBuildBookStore.prepare(creatorId, source)
-    override fun persist(prepared: PreparedPlayerBuildBookTemplate) = PlayerBuildBookStore.persist(prepared)
-    override fun inspectSchematic(buildingId: String) = PlayerBuildBookStore.inspectSchematic(buildingId)
+    private val settings = PlayerBuildBookStorageSettings(dataRoot, configuredRoot, maxBooksPerPlayer)
+    override fun prepareAsync(creatorId: UUID, source: BuilderClipboard, isCurrent: () -> Boolean) =
+        PlayerBuildBookStore.prepareAsync(creatorId, source, planningTasks, isCurrent)
+    override fun persist(prepared: PreparedPlayerBuildBookTemplate) = PlayerBuildBookStore.persist(prepared, settings)
+    override fun inspectSchematic(buildingId: String) = PlayerBuildBookStore.inspectSchematic(buildingId, settings)
     override fun inspectContent(buildingId: String, expectedSha256: String): CompletableFuture<PlayerBuildBookDigestInspection> =
         loadBuilding(buildingId, expectedSha256).handle { building, failure ->
             if (failure != null) PlayerBuildBookDigestInspection.Failed(failure)
@@ -100,6 +124,20 @@ internal class BuilderDraftLifecycle(
     private val journal: BuilderDraftJournal,
     private val storage: BuilderDraftStorage,
 ) : AutoCloseable {
+    private class Preparation(
+        val player: Player,
+        val clipboard: BuilderClipboard,
+        val title: String,
+        val gameMode: GameMode,
+        val worldId: UUID,
+        val heldSlot: Int,
+        val sourceSlot: Int,
+        val expectedBook: ItemStack?,
+    ) {
+        var work: CompletableFuture<*>? = null
+        val playerId: UUID = player.uniqueId
+    }
+
     private sealed interface PersistenceOutcome {
         data class Ready(val record: BuilderDraftRecord) : PersistenceOutcome
         data class CleanFailure(val failure: Throwable) : PersistenceOutcome
@@ -107,34 +145,41 @@ internal class BuilderDraftLifecycle(
     }
 
     private val pending = mutableMapOf<UUID, BuilderDraftRecord>()
+    private val preparations = mutableMapOf<UUID, Preparation>()
     private val conflictedPlayers = mutableSetOf<UUID>()
     private val recoveries = mutableMapOf<UUID, Any>()
     private val uncertainAcknowledgements = mutableSetOf<UUID>()
     private var ready = false
     private var failed = false
     private var closed = false
+    val isolationReady = CompletableFuture<Unit>()
 
     fun start() {
         writeAsync(
-            action = journal::loadAll,
+            action = { journal.loadAll().groupBy(BuilderDraftRecord::playerId) },
             callback = { records, failure ->
                 if (failure != null || records == null) {
                     failed = true
+                    isolationReady.completeExceptionally(failure ?: IllegalStateException("Missing builder-draft journal result"))
                     error(
                         "Builder-draft journal initialization failed: " +
                             "type=${BuilderToolsFailureType.of(failure)} result_present=${records != null}",
                     )
                     return@writeAsync
                 }
-                records.groupBy(BuilderDraftRecord::playerId).forEach { (playerId, playerRecords) ->
+                records.forEach { (playerId, playerRecords) ->
                     if (playerRecords.size == 1) {
                         pending[playerId] = playerRecords.single()
                     } else {
                         conflictedPlayers += playerId
                         error("Builder-draft journal has ${playerRecords.size} open records for player=$playerId")
                     }
+                    // Install every exact inventory hold while the startup barrier
+                    // still isolates unknown records, including offline owners.
+                    operationLocks.lockBook(playerId)
                 }
                 ready = true
+                isolationReady.complete(Unit)
                 Bukkit.getOnlinePlayers().forEach(::onPlayerAvailable)
             },
         )
@@ -146,10 +191,15 @@ internal class BuilderDraftLifecycle(
         recoveryBlocked = failed || conflictedPlayers.isNotEmpty() || uncertainAcknowledgements.isNotEmpty(),
     )
 
-    fun hasPending(playerId: UUID): Boolean = playerId in pending || playerId in conflictedPlayers
+    fun hasPending(playerId: UUID): Boolean =
+        playerId in preparations || playerId in pending || playerId in conflictedPlayers
 
     fun showPendingStatus(player: Player) {
-        send(player, if (player.uniqueId in conflictedPlayers) "book.manual-review" else "book.status.draft-recovery")
+        send(player, when (player.uniqueId) {
+            in conflictedPlayers -> "book.manual-review"
+            in preparations -> "book.draft-saving"
+            else -> "book.status.draft-recovery"
+        })
     }
 
     fun createDraft(player: Player, rawTitle: List<String>, fromInventory: Boolean = false) {
@@ -184,32 +234,98 @@ internal class BuilderDraftLifecycle(
         if (!sourceBookRequired && !held.type.isAir && player.inventory.firstEmpty() == -1) fail("book.inventory-full")
         val title = rawTitle.joinToString(" ").trim().ifEmpty { BuildBookSettings.defaultTitle }
         if (title.length > 48 || title.any(Char::isISOControl)) fail("book.invalid-name")
-        val prepared = try {
-            storage.prepare(player.uniqueId, clipboard)
+        if (!operationLocks.tryBookLock(player.uniqueId)) fail("errors.busy")
+        val preparation = Preparation(
+            player = player,
+            clipboard = clipboard,
+            title = title,
+            gameMode = player.gameMode,
+            worldId = player.world.uid,
+            heldSlot = player.inventory.heldItemSlot,
+            sourceSlot = sourceBookSlot ?: player.inventory.heldItemSlot,
+            expectedBook = sourceBook.clone().takeIf { sourceBookRequired },
+        )
+        preparations[player.uniqueId] = preparation
+        try {
+            send(player, "book.draft-saving")
+            val work = storage.prepareAsync(player.uniqueId, clipboard) {
+                !closed && preparations[player.uniqueId] === preparation && preparationFailure(preparation) == null
+            }
+            preparation.work = work
+            work.whenCompleteSync(taskScope) { prepared, rawFailure ->
+                if (closed || preparations[player.uniqueId] !== preparation) return@whenCompleteSync
+                val changed = preparationFailure(preparation)
+                val failure = (rawFailure as? CompletionException)?.cause ?: rawFailure
+                if (changed != null || failure != null || prepared == null) {
+                    cancelPreparation(player.uniqueId)
+                    if (failure != null && failure !is CancellationException) {
+                        error("Could not prepare player build book for ${player.name}: type=${BuilderToolsFailureType.of(failure)}")
+                    }
+                    if (player.isOnline) send(player, changed ?: "book.failed")
+                    return@whenCompleteSync
+                }
+                preparations.remove(player.uniqueId, preparation)
+                try {
+                    persistPrepared(preparation, prepared)
+                } catch (failure: Throwable) {
+                    operationLocks.unlockBook(player.uniqueId)
+                    error("Could not start player build-book draft for ${player.name}: type=${BuilderToolsFailureType.of(failure)}")
+                    if (player.isOnline) send(player, "book.failed")
+                }
+            }
         } catch (failure: Throwable) {
-            error("Could not prepare player build book for ${player.name}: type=${BuilderToolsFailureType.of(failure)}")
-            fail("book.failed")
+            cancelPreparation(player.uniqueId)
+            throw failure
         }
-        val expectedBook = sourceBook.clone().takeIf { sourceBookRequired }
+    }
+
+    /** Only preparation is cancellable; accepted journal writes retain their recovery owner. */
+    fun cancelPreparation(playerId: UUID): Boolean {
+        val preparation = preparations.remove(playerId) ?: return false
+        operationLocks.unlockBook(playerId)
+        preparation.work?.cancel(false)
+        return true
+    }
+
+    private fun preparationFailure(preparation: Preparation): String? {
+        val player = preparation.player
+        if (!player.isOnline || host.currentClipboard(player.uniqueId) !== preparation.clipboard) return "errors.expired"
+        if (player.world.uid != preparation.worldId || player.gameMode != preparation.gameMode) return "book.source-changed"
+        if (player.inventory.heldItemSlot != preparation.heldSlot) return "book.source-changed"
+        preparation.expectedBook?.let { expected ->
+            val actual = player.inventory.getItem(preparation.sourceSlot)
+            if (actual == null || actual.amount != expected.amount || !actual.isSimilar(expected)) return "book.source-changed"
+        }
+        return try {
+            host.ensureOperationalContext(player)
+            host.ensureCopyPermission(player)
+            if (player.hasPermission("arcbuild.book.create")) null else "errors.no-permission"
+        } catch (failure: BuilderUserFailure) {
+            failure.path
+        }
+    }
+
+    private fun persistPrepared(preparation: Preparation, prepared: PreparedPlayerBuildBookTemplate) {
+        val player = preparation.player
+        val expectedBook = preparation.expectedBook
+        val sourceBookSlot = preparation.sourceSlot
         val now = System.currentTimeMillis()
         val record = BuilderDraftRecord(
             operationId = UUID.randomUUID(),
             playerId = player.uniqueId,
             playerName = player.name,
-            title = title,
+            title = preparation.title,
             buildingId = prepared.fileName,
             blueprintId = UUID.randomUUID(),
             contentSha256 = prepared.contentSha256,
-            sourceRotation = clipboard.sourceRotation,
+            sourceRotation = preparation.clipboard.sourceRotation,
             blockCount = prepared.blockCount,
             phase = BuilderDraftPhase.PREPARED,
             createdAtMillis = now,
             updatedAtMillis = now,
-            sourceBookRequired = sourceBookRequired,
+            sourceBookRequired = expectedBook != null,
         ).validated(config.maxClipboardBlocks)
-        if (!operationLocks.tryBookLock(player.uniqueId)) fail("errors.busy")
         try {
-            send(player, "book.draft-saving")
             writeAsync(
                 action = { persist(record, prepared) },
                 callback = { outcome, failure ->
@@ -294,6 +410,7 @@ internal class BuilderDraftLifecycle(
     }
 
     fun onPlayerQuit(playerId: UUID) {
+        cancelPreparation(playerId)
         if (playerId in pending) operationLocks.unlockBook(playerId)
         recoveries -= playerId
     }
@@ -705,10 +822,12 @@ internal class BuilderDraftLifecycle(
         try {
             storageExecutor.submit {
                 val result = runCatching(action)
-                taskScope.runSync { callback(result.getOrNull(), result.exceptionOrNull()) }
+                taskScope.runSync {
+                    if (!closed) callback(result.getOrNull(), result.exceptionOrNull())
+                }
             }
         } catch (failure: RejectedExecutionException) {
-            taskScope.runSync { callback(null, failure) }
+            taskScope.runSync { if (!closed) callback(null, failure) }
         }
     }
 
@@ -720,6 +839,8 @@ internal class BuilderDraftLifecycle(
     override fun close() {
         if (closed) return
         closed = true
+        isolationReady.cancel(false)
+        preparations.keys.toList().forEach(::cancelPreparation)
         pending.clear()
         conflictedPlayers.clear()
         recoveries.clear()

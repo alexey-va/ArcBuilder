@@ -3,6 +3,7 @@ package ru.arc.buildertools
 import net.kyori.adventure.text.Component
 import org.bukkit.Bukkit
 import org.bukkit.Color
+import org.bukkit.Chunk
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
@@ -35,6 +36,8 @@ import ru.arc.paper.scene.SpatialSceneKey
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.util.UUID
+import java.util.concurrent.CancellationException
+import java.util.concurrent.CompletionException
 import kotlin.math.floor
 
 internal data class BuilderConstructionSiteDisplaySettings(
@@ -185,9 +188,11 @@ internal class BuilderConstructionSiteDisplayManager(
     private val onInspect: (Player, BuilderConstructionProjectRecord) -> Unit,
     private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "construction-sites"),
     private val space: PaperSpatialSpace = PaperSpatialSpace(),
+    private val planningTasks: BuilderPlanningTasks,
 ) : Listener, AutoCloseable {
     /** A new immutable source rotates native input IDs; progress updates retain this identity. */
     private class SitePanelContext
+    private class ModelCalculation(val source: BuilderConstructionProjectRecord)
 
     private data class Scene(
         var project: BuilderConstructionProjectRecord,
@@ -199,6 +204,7 @@ internal class BuilderConstructionSiteDisplayManager(
 
     private val projectKey = NamespacedKey(plugin, "construction_site_project")
     private val scenes = mutableMapOf<UUID, Scene>()
+    private val pendingModels = mutableMapOf<UUID, ModelCalculation>()
     private val reconciling = mutableSetOf<UUID>()
     private var closed = false
     private val audience = SceneAudience.Public()
@@ -241,19 +247,54 @@ internal class BuilderConstructionSiteDisplayManager(
             remove(project.projectId)
             return
         }
+        val previous = scenes[project.projectId]
+        if (previous != null && sameSource(previous.project, project)) {
+            pendingModels.remove(project.projectId)
+            applyModel(project, previous.model)
+            return
+        }
+        if (pendingModels[project.projectId]?.let { sameSource(it.source, project) } == true) return
+        val calculation = ModelCalculation(project)
+        pendingModels[project.projectId] = calculation
+        planningTasks.compute { BuilderConstructionSiteDisplayLayout.create(project, settings) }.thenCompose { model ->
+            planningTasks.onMain {
+                if (!closed && pendingModels[project.projectId] === calculation) {
+                    pendingModels.remove(project.projectId)
+                    val current = projectLookup(project.projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)
+                    when {
+                        current == null -> remove(project.projectId)
+                        sameSource(project, current) -> applyModel(current, model)
+                        else -> upsert(current)
+                    }
+                }
+            }
+        }.whenComplete { _, failure ->
+            if (failure != null) planningTasks.onMain {
+                if (!closed && pendingModels[project.projectId] === calculation) {
+                    remove(project.projectId)
+                    val cause = if (failure is CompletionException) failure.cause ?: failure else failure
+                    if (cause !is CancellationException) {
+                        warn("Builder construction site display failed for {}: {}", project.projectId, cause.message)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyModel(project: BuilderConstructionProjectRecord, model: BuilderConstructionSiteDisplayModel) {
         if (!reconciling.add(project.projectId)) return
         try {
-            runCatching { upsertChecked(project.validatedProgress()) }
-                .onFailure { failure ->
-                    remove(project.projectId)
-                    warn("Builder construction site display failed for {}: {}", project.projectId, failure.message)
-                }
+            runCatching { upsertChecked(project.validatedProgress(), model) }.onFailure { failure ->
+                remove(project.projectId)
+                warn("Builder construction site display failed for {}: {}", project.projectId, failure.message)
+            }
         } finally {
             reconciling.remove(project.projectId)
         }
     }
 
     fun remove(projectId: UUID) {
+        pendingModels.remove(projectId)
         scenes.remove(projectId)?.let { scene ->
             try {
                 controls.clear(SpatialSceneKey(projectId.toString()))
@@ -268,8 +309,7 @@ internal class BuilderConstructionSiteDisplayManager(
         if (closed || !settings.enabled) return
         val chunk = event.chunk
         // Migration-only ownership tag: Core's current native targets use its own registry.
-        chunk.entities.filter { it.persistentDataContainer.has(projectKey, PersistentDataType.STRING) }
-            .forEach(Entity::remove)
+        removeChunkOrphans(chunk)
         val projects = scenes.entries
             .asSequence()
             .filter { (_, scene) ->
@@ -281,10 +321,9 @@ internal class BuilderConstructionSiteDisplayManager(
         projects.forEach(::upsert)
     }
 
-    private fun upsertChecked(project: BuilderConstructionProjectRecord) {
+    private fun upsertChecked(project: BuilderConstructionProjectRecord, model: BuilderConstructionSiteDisplayModel) {
         val previous = scenes[project.projectId]
         val unchangedSource = previous != null && sameSource(previous.project, project)
-        val model = if (unchangedSource) checkNotNull(previous).model else BuilderConstructionSiteDisplayLayout.create(project, settings)
         val world = Bukkit.getWorld(model.worldId) ?: return
         val scene = previous ?: Scene(
             project,
@@ -365,16 +404,54 @@ internal class BuilderConstructionSiteDisplayManager(
     private fun Double.chunkCoordinate(): Int = floor(this).toInt() shr 4
 
     private fun removeLoadedOrphans() {
-        Bukkit.getWorlds().asSequence()
-            .flatMap { it.entities.asSequence() }
-            .filter { it.persistentDataContainer.has(projectKey, PersistentDataType.STRING) }
-            .forEach(Entity::remove)
+        val worlds = Bukkit.getWorlds().toList()
+        var worldIndex = 0
+        var chunks = emptyArray<Chunk>()
+        var chunkIndex = 0
+        var entities = emptyArray<Entity>()
+        var entityIndex = 0
+        planningTasks.capture({ !closed }) {
+            when {
+                entityIndex < entities.size -> removeOrphan(entities[entityIndex++])
+                chunkIndex < chunks.size -> {
+                    val chunk = chunks[chunkIndex++]
+                    entities = if (chunk.world.isChunkLoaded(chunk.x, chunk.z)) chunk.entities else emptyArray()
+                    entityIndex = 0
+                }
+                worldIndex < worlds.size -> {
+                    chunks = worlds[worldIndex++].loadedChunks
+                    chunkIndex = 0
+                }
+                else -> return@capture true
+            }
+            false
+        }
+    }
+
+    private fun removeChunkOrphans(chunk: Chunk) {
+        var entities: Array<Entity>? = null
+        var cursor = 0
+        planningTasks.capture({ !closed }) {
+            val captured = entities
+            if (captured == null) {
+                entities = if (chunk.world.isChunkLoaded(chunk.x, chunk.z)) chunk.entities else emptyArray()
+                false
+            } else if (cursor < captured.size) {
+                removeOrphan(captured[cursor++])
+                false
+            } else true
+        }
+    }
+
+    private fun removeOrphan(entity: Entity) {
+        if (entity.isValid && entity.persistentDataContainer.has(projectKey, PersistentDataType.STRING)) entity.remove()
     }
 
     override fun close() {
         if (closed) return
         closed = true
         HandlerList.unregisterAll(this)
+        pendingModels.clear()
         scenes.keys.toList().forEach(::remove)
         controls.close()
         displays.close()

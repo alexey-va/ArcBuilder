@@ -1,6 +1,7 @@
 package ru.arc.buildertools
 
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 /** Admin-only world completion; the existing journal stores intent before any batch is applied. */
 internal object BuilderInstantConstruction {
@@ -20,7 +21,9 @@ internal object BuilderInstantConstruction {
             instantBuildRequestedBy = requester,
             pendingOutput = null,
             updatedAtMillis = nowMillis,
-        ).also { BuilderConstructionProjectTransitionRules.validate(record, it) }
+        // The runtime proposes from a store-validated immutable plan. The store
+        // repeats full graph validation on its worker before publishing intent.
+        ).also { BuilderConstructionProjectTransitionRules.validateProgress(record, it) }
     }
 
     fun validateTransition(before: BuilderConstructionProjectRecord, after: BuilderConstructionProjectRecord) {
@@ -46,6 +49,62 @@ internal object BuilderInstantConstruction {
             updatedAtMillis = after.updatedAtMillis,
             completedAtMillis = after.updatedAtMillis.takeIf { completed },
         )) { "Instant construction changed unrelated state" }
+    }
+
+    /** The durable WORLD_PREPARED intent covers both stages and survives cancellation/shutdown. */
+    fun applyBatchAsync(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+        tasks: BuilderPlanningTasks,
+        isCurrent: () -> Boolean,
+    ): CompletableFuture<BuilderConstructionProjectRecord?> {
+        require(record.instantBuildRequestedBy != null && record.state == BuilderConstructionProjectState.WORLD_PREPARED)
+        val end = minOf(record.steps.size, record.cursor + MAX_STEPS_PER_BATCH)
+        var validateIndex = record.cursor
+        var applyIndex = record.cursor
+        var retry = false
+        var invalid = false
+        return tasks.capture(isCurrent) {
+            if (validateIndex < end) {
+                val step = record.steps[validateIndex++]
+                try {
+                    val current = port.currentBlockData(step.change.position)
+                    if (current != step.change.beforeBlockData && current != step.change.afterBlockData) invalid = true
+                    else if (current == step.change.beforeBlockData && !port.canModify(record, step)) invalid = true
+                } catch (_: BuilderConstructionTemporarilyUnavailableException) { retry = true }
+                catch (_: Throwable) { invalid = true }
+                retry || invalid
+            } else if (applyIndex < end) {
+                val step = record.steps[applyIndex++]
+                try {
+                    // The world may change between slices. The native port rechecks
+                    // beforeimage, protection and atomic companions at application.
+                    if (!port.isStepApplied(step)) port.apply(record, step)
+                    check(port.isStepApplied(step)) { "Instant construction block was not applied" }
+                } catch (_: Throwable) {
+                    if (runCatching { port.isStepApplied(step) }.getOrNull() != true) {
+                        val current = runCatching { port.currentBlockData(step.change.position) }.getOrNull()
+                        if (current == null || current == step.change.beforeBlockData || current == step.change.afterBlockData) retry = true
+                        else invalid = true
+                    }
+                }
+                retry || invalid || applyIndex >= end
+            } else true
+        }.thenCompose { tasks.compute {
+            when {
+                retry -> null
+                invalid -> record.recoveryRequired(nowMillis)
+                else -> {
+                    val completed = end == record.steps.size
+                    record.copy(
+                        state = if (completed) BuilderConstructionProjectState.COMPLETED else BuilderConstructionProjectState.WORLD_PREPARED,
+                        cursor = end, updatedAtMillis = nowMillis,
+                        completedAtMillis = nowMillis.takeIf { completed },
+                    ).also { BuilderConstructionProjectTransitionRules.validate(record, it) }
+                }
+            }
+        } }
     }
 
     fun applyBatch(record: BuilderConstructionProjectRecord, nowMillis: Long, port: BuilderConstructionProjectPort): BuilderConstructionProjectRecord? {

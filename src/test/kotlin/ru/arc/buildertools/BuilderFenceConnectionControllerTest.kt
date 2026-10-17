@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.*
 import org.bukkit.World
+import org.bukkit.GameMode
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.type.Wall
@@ -22,6 +23,14 @@ class BuilderFenceConnectionControllerTest : FunSpec({
         val changes = slot<List<BuilderBlockChange>>()
         every { host.requiredSelection(player) } returns BuilderSelection(position, position)
         every { host.world(position.worldId) } returns world
+        every { player.isOnline } returns true
+        every { player.world } returns world
+        every { player.gameMode } returns GameMode.SURVIVAL
+        every { world.uid } returns position.worldId
+        every { world.isChunkLoaded(0, 0) } returns true
+        every { host.capture(any(), any()) } answers {
+            ImmediateBuilderPlanningTasks.capture(firstArg(), secondArg())
+        }
         every { world.getBlockAt(0, 64, 0) } returns block
         every { block.blockData } returns before
         every { before.getHeight(BlockFace.NORTH) } returns Wall.Height.LOW
@@ -30,8 +39,13 @@ class BuilderFenceConnectionControllerTest : FunSpec({
         every { before.asString } returns "minecraft:cobblestone_wall[north=low,south=tall,up=false,waterlogged=true]"
         every { after.asString } returns "minecraft:cobblestone_wall[north=none,south=none,up=true,waterlogged=true]"
         every { host.createPlan(player, BuilderPlanKind.FENCE_DISCONNECT, capture(changes), any(), any(), any()) } returns mockk()
+        every { host.createPlanAsync(player, BuilderPlanKind.FENCE_DISCONNECT, any(), any(), any(), any()) } answers {
+            java.util.concurrent.CompletableFuture.completedFuture(
+                host.createPlan(firstArg(), secondArg(), thirdArg(), arg(3), arg(4), arg(5)),
+            )
+        }
 
-        BuilderFenceConnectionController(100, host).planDisconnect(player)
+        BuilderFenceConnectionController(100, host).planDisconnect(player).awaitBuilderPlanning()
 
         changes.captured.single().beforeBlockData shouldBe before.asString
         changes.captured.single().afterBlockData shouldBe after.asString

@@ -17,6 +17,48 @@ import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.UUID
 
 class BuilderFillControllerTest : FunSpec({
+    test("large fill yields between native capture ticks and preserves exact costs") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("fill-sliced")
+            val player = paper.addPlayer("SlicedFill")
+            player.teleport(Location(world, 0.5, 64.0, 0.5))
+            val tasks = QueuedBuilderPlanningTasks()
+            val harness = FillHarness(paper.createSimplePlugin("SlicedFill"), world, maximumChanges = 256, tasks = tasks)
+            harness.select(0, 64, 0, 15, 64, 15)
+
+            val pending = harness.controller.plan(player, Material.STONE)
+            pending.isDone shouldBe false
+            harness.mutableChecks shouldBe 0
+            tasks.tick()
+            pending.isDone shouldBe false
+            harness.mutableChecks shouldBe 128
+            val plan = tasks.finish(pending)
+
+            plan.changes.size shouldBe 256
+            plan.costs.single().amount shouldBe 256
+            world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
+        }
+    }
+
+    test("selection replacement cancels an unfinished fill without producing a plan") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("fill-stale")
+            val player = paper.addPlayer("StaleFill")
+            player.teleport(Location(world, 0.5, 64.0, 0.5))
+            val tasks = QueuedBuilderPlanningTasks()
+            val harness = FillHarness(paper.createSimplePlugin("StaleFill"), world, tasks = tasks)
+            harness.select(0, 64, 0, 8, 64, 0)
+            val pending = harness.controller.plan(player, Material.STONE)
+            tasks.tick(1)
+            harness.select(10, 64, 0, 10, 64, 0)
+            tasks.tick()
+
+            shouldThrow<java.util.concurrent.CancellationException> { pending.awaitBuilderPlanning() }
+            harness.mutableChecks shouldBe 1
+            harness.createdPlans shouldBe 0
+        }
+    }
+
     test("fill plans exact survival costs and stays free in creative without mutating the world") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderFillModesTest")
@@ -30,13 +72,13 @@ class BuilderFillControllerTest : FunSpec({
             harness.select(0, 64, 0, 3, 64, 0)
 
             player.gameMode = GameMode.SURVIVAL
-            val survival = harness.controller.plan(player, Material.STONE)
+            val survival = harness.controller.plan(player, Material.STONE).awaitBuilderPlanning()
             survival.kind shouldBe BuilderPlanKind.FILL
             survival.changes.map { it.position.x } shouldContainExactly listOf(0, 1)
             survival.costs.map { it.materialKey to it.amount } shouldContainExactly listOf("minecraft:stone" to 2)
 
             player.gameMode = GameMode.CREATIVE
-            val creative = harness.controller.plan(player, Material.STONE)
+            val creative = harness.controller.plan(player, Material.STONE).awaitBuilderPlanning()
             creative.changes.map { it.position.x } shouldContainExactly listOf(0, 1)
             creative.costs shouldBe emptyList()
             harness.permissionChecks shouldBe 2
@@ -58,7 +100,7 @@ class BuilderFillControllerTest : FunSpec({
             harness.select(0, 64, 0, 1, 64, 0)
             listOf(Material.WALL_TORCH to "minecraft:torch", Material.REDSTONE_WALL_TORCH to "minecraft:redstone_torch",
                 Material.REDSTONE_WIRE to "minecraft:redstone").forEach { (block, item) ->
-                harness.controller.plan(player, block).costs.map { it.materialKey to it.amount } shouldBe listOf(item to 2)
+                harness.controller.plan(player, block).awaitBuilderPlanning().costs.map { it.materialKey to it.amount } shouldBe listOf(item to 2)
             }
         }
     }
@@ -72,7 +114,7 @@ class BuilderFillControllerTest : FunSpec({
             val harness = FillHarness(plugin, world, mutable = false)
             harness.select(0, 64, 0, 0, 64, 0)
 
-            shouldThrow<FillFailure> { harness.controller.plan(player, Material.OAK_PLANKS) }.path shouldBe "errors.protection"
+            shouldThrow<FillFailure> { harness.controller.plan(player, Material.OAK_PLANKS).awaitBuilderPlanning() }.path shouldBe "errors.protection"
             harness.createdPlans shouldBe 0
             world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
         }
@@ -87,7 +129,7 @@ class BuilderFillControllerTest : FunSpec({
             val harness = FillHarness(plugin, world, maximumChanges = 1)
             harness.select(0, 64, 0, 1, 64, 0)
 
-            shouldThrow<FillFailure> { harness.controller.plan(player, Material.GLASS) }.path shouldBe
+            shouldThrow<FillFailure> { harness.controller.plan(player, Material.GLASS).awaitBuilderPlanning() }.path shouldBe
                 "errors.selection-too-large"
             harness.createdPlans shouldBe 0
             world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
@@ -106,7 +148,7 @@ class BuilderFillControllerTest : FunSpec({
             val harness = FillHarness(plugin, world)
             harness.select(0, 64, 0, 1, 64, 0)
 
-            shouldThrow<FillFailure> { harness.controller.plan(player, Material.STONE) }.path shouldBe
+            shouldThrow<FillFailure> { harness.controller.plan(player, Material.STONE).awaitBuilderPlanning() }.path shouldBe
                 "errors.nothing-to-change"
             harness.mutableChecks shouldBe 0
             harness.createdPlans shouldBe 0
@@ -119,6 +161,7 @@ private class FillHarness(
     private val world: World,
     maximumChanges: Int = 64,
     private val mutable: Boolean = true,
+    private val tasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
 ) {
     private var selection: BuilderSelection? = null
     var permissionChecks = 0
@@ -130,7 +173,7 @@ private class FillHarness(
     val controller = BuilderFillController(
         safety = safety,
         maximumChanges = maximumChanges,
-        host = object : BuilderPlanningHost {
+        host = object : BuilderPlanningHost, BuilderPlanningTasks by tasks {
             override fun ensurePermission(player: Player, feature: BuilderFeature) {
                 feature shouldBe BuilderFeature.FILL
                 permissionChecks++
@@ -145,6 +188,7 @@ private class FillHarness(
             override fun placementData(material: Material): BlockData = material.createBlockData()
 
             override fun ensureMutable(player: Player, block: Block, placing: Material?) {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 mutableChecks++
                 if (!mutable) throw FillFailure("errors.protection")
             }
@@ -162,6 +206,7 @@ private class FillHarness(
                 rewards: List<BuilderItemAmount>,
                 skippedUnsafeBlocks: Int,
             ): BuilderPlan {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 createdPlans++
                 return BuilderPlan(
                     id = UUID.randomUUID(),
@@ -181,6 +226,9 @@ private class FillHarness(
     )
 
     fun select(x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int) {
+        for (x in (minOf(x1, x2) shr 4)..(maxOf(x1, x2) shr 4)) {
+            for (z in (minOf(z1, z2) shr 4)..(maxOf(z1, z2) shr 4)) world.loadChunk(x, z)
+        }
         selection = BuilderSelection(
             BuilderBlockPos(world.uid, x1, y1, z1),
             BuilderBlockPos(world.uid, x2, y2, z2),

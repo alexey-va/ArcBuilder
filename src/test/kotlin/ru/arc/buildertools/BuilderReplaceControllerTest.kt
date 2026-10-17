@@ -20,6 +20,51 @@ import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.UUID
 
 class BuilderReplaceControllerTest : FunSpec({
+    test("air replacement retains every original air variant and only target costs without requiring inventory stock") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("replace-air-async")
+            val player = paper.addPlayer("AsyncAirReplace")
+            player.teleport(Location(world, .5, 64.0, 3.5))
+            player.gameMode = GameMode.SURVIVAL
+            val originals = listOf(Material.AIR, Material.CAVE_AIR, Material.VOID_AIR)
+            originals.forEachIndexed { index, material -> world.getBlockAt(index, 64, 0).type = material }
+            world.getBlockAt(3, 64, 0).type = Material.DIRT
+            val tasks = QueuedBuilderPlanningTasks()
+            val harness = ReplaceHarness(paper.createSimplePlugin("AsyncAirReplace"), world, tasks = tasks)
+            harness.select(0, 64, 0, 3, 64, 0)
+            val plan = tasks.finish(harness.controller.plan(player, Material.AIR, Material.STONE))
+            plan.changes.map(BuilderBlockChange::beforeBlockData) shouldBe originals.map { it.createBlockData().asString }
+            plan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:stone" to 3)
+            plan.rewards shouldBe emptyList()
+            originals.forEachIndexed { index, material -> world.getBlockAt(index, 64, 0).type shouldBe material }
+        }
+    }
+
+    test("replacement aggregates detached items on a worker and returns to main before plan creation") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("replace-async")
+            val player = paper.addPlayer("AsyncReplace")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.OAK_PLANKS
+            world.getBlockAt(1, 64, 0).type = Material.OAK_PLANKS
+            val tasks = QueuedBuilderPlanningTasks()
+            val harness = ReplaceHarness(paper.createSimplePlugin("AsyncReplace"), world, tasks = tasks)
+            harness.select(0, 64, 0, 1, 64, 0)
+            val pending = harness.controller.plan(player, Material.OAK_PLANKS, Material.SPRUCE_PLANKS)
+
+            pending.isDone shouldBe false
+            tasks.tick()
+            pending.isDone shouldBe false
+            harness.createdPlans shouldBe 0
+            val plan = tasks.finish(pending)
+
+            tasks.workerRuns shouldBe 1
+            plan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:spruce_planks" to 2)
+            plan.rewards.map { it.materialKey to it.amount } shouldBe listOf("minecraft:oak_planks" to 2)
+            world.getBlockAt(0, 64, 0).type shouldBe Material.OAK_PLANKS
+        }
+    }
+
     test("replace preserves compatible block state and plans the exact survival exchange without mutation") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderReplaceTest")
@@ -41,7 +86,7 @@ class BuilderReplaceControllerTest : FunSpec({
             harness.safety.isSafeExisting(actual) shouldBe true
             BuilderPlacementCost.itemOrNull(actual.blockData)?.type shouldBe Material.OAK_STAIRS
 
-            val survival = harness.controller.plan(player, Material.OAK_STAIRS, Material.SPRUCE_STAIRS)
+            val survival = harness.controller.plan(player, Material.OAK_STAIRS, Material.SPRUCE_STAIRS).awaitBuilderPlanning()
 
             survival.kind shouldBe BuilderPlanKind.REPLACE
             survival.changes.map { it.position.x } shouldContainExactly listOf(0)
@@ -56,7 +101,7 @@ class BuilderReplaceControllerTest : FunSpec({
                 listOf("minecraft:oak_stairs" to 1)
 
             player.gameMode = GameMode.CREATIVE
-            val creative = harness.controller.plan(player, Material.OAK_STAIRS, Material.SPRUCE_STAIRS)
+            val creative = harness.controller.plan(player, Material.OAK_STAIRS, Material.SPRUCE_STAIRS).awaitBuilderPlanning()
             creative.costs shouldBe emptyList()
             creative.rewards shouldBe emptyList()
             world.getBlockAt(0, 64, 0).blockData.asString shouldBe oak.asString
@@ -74,7 +119,7 @@ class BuilderReplaceControllerTest : FunSpec({
             harness.select(0, 64, 0, 0, 64, 0)
 
             shouldThrow<ReplaceFailure> {
-                harness.controller.plan(player, Material.CHEST, Material.STONE)
+                harness.controller.plan(player, Material.CHEST, Material.STONE).awaitBuilderPlanning()
             }.path shouldBe "errors.nothing-to-change"
             harness.createdPlans shouldBe 0
             harness.mutableChecks shouldBe 0
@@ -92,7 +137,7 @@ class BuilderReplaceControllerTest : FunSpec({
             harness.select(0, 64, 0, 0, 64, 0)
 
             shouldThrow<ReplaceFailure> {
-                harness.controller.plan(player, Material.OAK_DOOR, Material.STONE)
+                harness.controller.plan(player, Material.OAK_DOOR, Material.STONE).awaitBuilderPlanning()
             }.path shouldBe "errors.nothing-to-change"
             harness.createdPlans shouldBe 0
             harness.mutableChecks shouldBe 0
@@ -110,7 +155,7 @@ class BuilderReplaceControllerTest : FunSpec({
             harness.select(0, 64, 0, 0, 64, 0)
 
             shouldThrow<ReplaceFailure> {
-                harness.controller.plan(player, Material.STONE, Material.OAK_DOOR)
+                harness.controller.plan(player, Material.STONE, Material.OAK_DOOR).awaitBuilderPlanning()
             }.path shouldBe "errors.material"
             harness.createdPlans shouldBe 0
             harness.mutableChecks shouldBe 0
@@ -129,7 +174,7 @@ class BuilderReplaceControllerTest : FunSpec({
             harness.select(0, 64, 0, 1, 64, 0)
 
             shouldThrow<ReplaceFailure> {
-                harness.controller.plan(player, Material.STONE, Material.DEEPSLATE)
+                harness.controller.plan(player, Material.STONE, Material.DEEPSLATE).awaitBuilderPlanning()
             }.path shouldBe "errors.selection-too-large"
             harness.createdPlans shouldBe 0
             world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
@@ -142,6 +187,7 @@ private class ReplaceHarness(
     plugin: Plugin,
     private val world: World,
     maximumChanges: Int = 64,
+    private val tasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
 ) {
     private var selection: BuilderSelection? = null
     var mutableChecks = 0
@@ -152,7 +198,7 @@ private class ReplaceHarness(
     val controller = BuilderReplaceController(
         safety = safety,
         maximumChanges = maximumChanges,
-        host = object : BuilderPlanningHost {
+        host = object : BuilderPlanningHost, BuilderPlanningTasks by tasks {
             override fun ensurePermission(player: Player, feature: BuilderFeature) {
                 feature shouldBe BuilderFeature.REPLACE
             }
@@ -166,6 +212,7 @@ private class ReplaceHarness(
             override fun placementData(material: Material): BlockData = material.createBlockData()
 
             override fun ensureMutable(player: Player, block: Block, placing: Material?) {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 mutableChecks++
             }
 
@@ -177,6 +224,7 @@ private class ReplaceHarness(
                 rewards: List<BuilderItemAmount>,
                 skippedUnsafeBlocks: Int,
             ): BuilderPlan {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 createdPlans++
                 return BuilderPlan(
                     id = UUID.randomUUID(),
@@ -196,6 +244,9 @@ private class ReplaceHarness(
     )
 
     fun select(x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int) {
+        for (x in (minOf(x1, x2) shr 4)..(maxOf(x1, x2) shr 4)) {
+            for (z in (minOf(z1, z2) shr 4)..(maxOf(z1, z2) shr 4)) world.loadChunk(x, z)
+        }
         selection = BuilderSelection(
             BuilderBlockPos(world.uid, x1, y1, z1),
             BuilderBlockPos(world.uid, x2, y2, z2),

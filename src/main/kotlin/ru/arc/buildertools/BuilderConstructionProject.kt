@@ -6,6 +6,7 @@ import ru.arc.persistence.DurableRecordJournal
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 private val BUILDER_LOOT_TABLE_KEY = Regex("[a-z0-9_.-]+:[a-z0-9_./-]+")
 
@@ -83,6 +84,14 @@ internal data class BuilderConstructionProjectRecord(
 ) {
     val terminal: Boolean get() = state.terminal
 
+    // Gson also constructs this record without its Kotlin constructor. A nullable
+    // transient cache is safe for both deserialization and immutable state copies.
+    @Transient
+    private var stepsByPosition: Map<BuilderBlockPos, BuilderConstructionStep>? = null
+
+    internal fun stepAt(position: BuilderBlockPos): BuilderConstructionStep? =
+        checkNotNull(stepsByPosition) { "Construction must be validated before native application" }[position]
+
     fun validated(maxChanges: Int = BuilderPlan.ABSOLUTE_MAX_CHANGES): BuilderConstructionProjectRecord = apply {
         require(schemaVersion == CURRENT_SCHEMA_VERSION) { "Unsupported builder construction project schema" }
         require(projectId == plan.id && playerId == plan.playerId) {
@@ -114,6 +123,7 @@ internal data class BuilderConstructionProjectRecord(
             require(anchor.worldId == steps.first().change.position.worldId) { "Construction anchor crosses the project world" }
         }
         steps.forEach(BuilderConstructionStep::validated)
+        if (stepsByPosition == null) stepsByPosition = steps.associateBy { it.change.position }
         bookCost.validated()
         require(bookCost.amount == 1) { "Builder construction project consumes exactly one book" }
         require(sameExchange(plan.costs, listOf(bookCost) + steps.mapNotNull(BuilderConstructionStep::requiredMaterial))) {
@@ -544,7 +554,7 @@ internal class BuilderConstructionProjectStore(
     private val maxChanges: Int,
     gson: Gson = GsonBuilder().disableHtmlEscaping().create(),
 ) {
-    private val journal = DurableRecordJournal(
+    private val journal by lazy { DurableRecordJournal(
         root = dataRoot,
         relativeDirectory = Path.of("data", "builder-construction-projects"),
         maxRecordBytes = 64L * 1024L * 1024L,
@@ -555,7 +565,7 @@ internal class BuilderConstructionProjectStore(
             gson.fromJson(String(bytes, StandardCharsets.UTF_8), BuilderConstructionProjectRecord::class.java)
         },
         validate = { record -> record.validated(maxChanges) },
-    )
+    ) }
 
     @Synchronized
     fun commit(record: BuilderConstructionProjectRecord): BuilderConstructionProjectRecord {
@@ -795,6 +805,60 @@ internal object BuilderConstructionProjectController {
                 prepareStep(current, nowMillis, port)
             }
         }
+    }
+
+    /** Same durable transition and configured batch limits, with one native step per shared pump turn. */
+    internal fun tickAsync(
+        record: BuilderConstructionProjectRecord,
+        nowMillis: Long,
+        port: BuilderConstructionProjectPort,
+        maxBlocksPerCycle: Int,
+        tasks: BuilderPlanningTasks,
+        isCurrent: () -> Boolean,
+    ): CompletableFuture<BuilderConstructionProjectRecord?> {
+        require(maxBlocksPerCycle >= 1)
+        if (record.instantBuildRequestedBy != null && record.state == BuilderConstructionProjectState.WORLD_PREPARED) {
+            return BuilderInstantConstruction.applyBatchAsync(record, nowMillis, port, tasks, isCurrent)
+        }
+        val worldBatch = maxBlocksPerCycle > 1 && (record.state == BuilderConstructionProjectState.WORLD_PREPARED ||
+            record.state == BuilderConstructionProjectState.ACTIVE && record.steps.getOrNull(record.cursor)?.let { it.requiredMaterial == null && it.output == null } == true)
+        if (!worldBatch) {
+            var result: BuilderConstructionProjectRecord? = null
+            return tasks.capture(isCurrent) {
+                result = tickValidated(record, nowMillis, port, 1)
+                true
+            }.thenApply { result }
+        }
+        val start = record.cursor
+        var cursor = start
+        var physical = 0
+        var processed = 0
+        var unavailable = false
+        var invalid = false
+        var fallback: BuilderConstructionProjectRecord? = null
+        var usedFallback = false
+        return tasks.capture(isCurrent) {
+            val step = record.steps.getOrNull(cursor)
+            if (step == null || physical >= maxBlocksPerCycle || processed >= maxBlocksPerCycle || step.requiredMaterial != null || step.output != null) {
+                if (cursor == start) { fallback = applyWorld(record, nowMillis, port); usedFallback = true }
+                true
+            } else {
+                processed++
+                when (val result = applyWorldOnlyStep(record, step, port)) {
+                    is WorldOnlyStepResult.Applied -> { physical += result.physicalBlocks; cursor++ }
+                    WorldOnlyStepResult.TemporarilyUnavailable -> unavailable = true
+                    WorldOnlyStepResult.Invalid -> invalid = true
+                }
+                unavailable || invalid || cursor >= record.steps.size || physical >= maxBlocksPerCycle || processed >= maxBlocksPerCycle
+            }
+        }.thenCompose { tasks.compute {
+            when {
+                usedFallback -> fallback
+                cursor > start -> record.advancedNoExchangeBatch(cursor, nowMillis)
+                invalid -> record.recoveryRequired(nowMillis)
+                else -> null
+            }
+        } }
     }
 
     private fun activate(

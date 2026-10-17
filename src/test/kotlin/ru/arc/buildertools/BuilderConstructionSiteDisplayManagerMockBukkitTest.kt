@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -17,6 +18,8 @@ import org.bukkit.entity.Interaction
 import org.bukkit.entity.TextDisplay
 import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataContainer
+import org.bukkit.persistence.PersistentDataType
 import ru.arc.paper.display.PacketDisplay
 import ru.arc.paper.display.PacketBlockDisplay
 import ru.arc.paper.display.PacketTextDisplay
@@ -30,16 +33,69 @@ import java.util.UUID
 import java.util.function.Consumer
 
 class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
+    test("startup migration removes loaded chunk orphans across shared-budget ticks") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val tasks = QueuedBuilderPlanningTasks()
+            val plugin = paper.createSimplePlugin("SiteMigration")
+            var removed = 0
+            val tag = mockk<PersistentDataContainer> {
+                every { has(any(), PersistentDataType.STRING) } returns true
+            }
+            val entities = Array<Entity>(300) {
+                mockk(relaxed = true) {
+                    every { isValid } returns true
+                    every { persistentDataContainer } returns tag
+                    every { remove() } answers { tasks.assertMain(); removed++ }
+                }
+            }
+            val world = mockk<World>(relaxed = true)
+            val chunk = mockk<Chunk> {
+                every { this@mockk.world } returns world
+                every { x } returns 0
+                every { z } returns 0
+                every { this@mockk.entities } answers { tasks.assertMain(); entities }
+            }
+            every { world.isChunkLoaded(0, 0) } returns true
+            every { world.loadedChunks } answers { tasks.assertMain(); arrayOf(chunk) }
+            mockkStatic(Bukkit::class)
+            try {
+                every { Bukkit.getWorlds() } returns listOf(world)
+                BuilderConstructionSiteDisplayManager(
+                    plugin = plugin,
+                    settings = siteDisplaySettings(),
+                    messages = mockk(relaxed = true),
+                    projectLookup = { null },
+                    onInspect = { _, _ -> },
+                    displays = mockk(relaxed = true),
+                    space = unblockedPlaqueSpace(),
+                    planningTasks = tasks,
+                ).use {
+                    removed shouldBe 0
+                    tasks.tick()
+                    removed shouldBe 126
+                    tasks.captureSteps shouldBe 128
+                    repeat(3) { tasks.tick() }
+                    removed shouldBe 300
+                    io.mockk.verify(exactly = 0) { world.entities }
+                }
+            } finally {
+                unmockkStatic(Bukkit::class)
+            }
+        }
+    }
+
     test("packet site visuals never spawn native displays or load chunks and restore only the loaded hitbox") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val worldId = UUID.randomUUID()
                 val original = pausedProject(worldId)
                 val steps = CountingSiteSteps(original.steps)
-                val project = original.copy(steps = steps).validated()
+                var project = original.copy(steps = steps).validated()
+                val tasks = QueuedBuilderPlanningTasks()
                 val config = BuilderToolsConfig(
                     ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),
                 ).validated()
@@ -49,10 +105,12 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                 val packetVisuals = mutableListOf<PacketDisplay>()
                 val displays = mockk<PaperPacketDisplays>(relaxed = true)
                 every { displays.spawnBlock(any(), any()) } answers {
+                    tasks.assertMain()
                     mockk<PacketBlockDisplay>(relaxed = true) { every { isValid } returns true }
                         .also { packetVisuals += it }
                 }
                 every { displays.spawnText(any(), any()) } answers {
+                    tasks.assertMain()
                     mockk<PacketTextDisplay>(relaxed = true) { every { isValid } returns true }
                         .also { packetVisuals += it }
                 }
@@ -65,7 +123,7 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
 
                 mockkStatic(Bukkit::class)
                 try {
-                    every { Bukkit.getWorld(worldId) } returns world
+                    every { Bukkit.getWorld(worldId) } answers { tasks.assertMain(); world }
                     BuilderConstructionSiteDisplayManager(
                         plugin = plugin,
                         settings = siteDisplaySettings(),
@@ -74,8 +132,15 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         onInspect = { _, _ -> },
                         displays = displays,
                         space = unblockedPlaqueSpace(),
+                        planningTasks = tasks,
                     ).use { manager ->
+                        steps.reads = 0
                         manager.upsert(project)
+                        steps.reads shouldBe 0
+                        packetVisuals.size shouldBe 0
+                        tasks.runComputations()
+                        tasks.workerRuns shouldBe 1
+                        tasks.tick()
                         spawned.size shouldBe 0
                         packetVisuals.size shouldBe 14
                         packetVisuals.filterIsInstance<PacketTextDisplay>().forEach { display ->
@@ -102,12 +167,33 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         manager.upsert(project.copy(updatedAtMillis = project.updatedAtMillis + 2))
                         spawned.size shouldBe 2
                         steps.reads shouldBe 0
-                        manager.upsert(project.copy(siteAnchor = BuilderBlockPos(worldId, 5, 64, 5)))
+                        project = project.copy(siteAnchor = BuilderBlockPos(worldId, 5, 64, 5))
+                        manager.upsert(project)
+                        project = project.copy(siteAnchor = BuilderBlockPos(worldId, 6, 64, 6))
+                        manager.upsert(project)
+                        spawned.size shouldBe 2
+                        tasks.runComputations()
+                        tasks.tick()
                         spawned.size shouldBe 3
                         packetVisuals.size shouldBe 14
+                        spawned.last().location.x shouldBe 6.5
                         io.mockk.verify(exactly = 1) { spawned[1].remove() }
                         io.mockk.verify(exactly = 0) { world.getChunkAt(any<Int>(), any<Int>()) }
 
+                        project = project.copy(siteAnchor = BuilderBlockPos(worldId, 7, 64, 7))
+                        manager.upsert(project)
+                        manager.remove(project.projectId)
+                        tasks.runComputations()
+                        tasks.tick()
+                        spawned.size shouldBe 3
+                        packetVisuals.size shouldBe 14
+                        project = project.copy(siteAnchor = BuilderBlockPos(worldId, 8, 64, 8))
+                        manager.upsert(project)
+                        manager.close()
+                        tasks.runComputations()
+                        tasks.tick()
+                        spawned.size shouldBe 3
+                        packetVisuals.size shouldBe 14
                     }
                 } finally {
                     unmockkStatic(Bukkit::class)

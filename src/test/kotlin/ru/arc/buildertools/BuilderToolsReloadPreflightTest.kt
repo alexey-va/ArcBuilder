@@ -327,4 +327,50 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         }
         ConfigManager.clear()
     }
+
+    test("publication rollback restores exact operator bytes without mutating the prepared generation") {
+        val root = configRoot()
+        val builderPath = root.resolve("modules/builder-tools.yml")
+        val autoBuildPath = root.resolve("modules/auto-build.yml")
+        Config(root, "modules/builder-tools.yml").apply {
+            removeKey("runtime.progress-every-batches")
+            setString("operator-owned-note", "before publication")
+            saveStrict()
+        }
+        Config(root, "modules/auto-build.yml").apply {
+            removeKey("build-book.player-copy.max-offset")
+            saveStrict()
+        }
+        val builderBytes = Files.readAllBytes(builderPath)
+        val autoBuildBytes = Files.readAllBytes(autoBuildPath)
+        val prepared = BuilderToolsReloadPreflight.prepare(root)
+        val previousMessages = prepared.settings.messages().render("reload.success", "ru")
+
+        val rollback = BuilderToolsConfigPublication.publish(root)
+        Config(root, "modules/builder-tools.yml").integer("runtime.progress-every-batches") shouldBe 10
+        rollback()
+
+        Files.readAllBytes(builderPath).contentEquals(builderBytes) shouldBe true
+        Files.readAllBytes(autoBuildPath).contentEquals(autoBuildBytes) shouldBe true
+        prepared.settings.progressEveryBatches shouldBe 10
+        prepared.settings.messages().render("reload.success", "ru") shouldBe previousMessages
+    }
+
+
+    test("publication rejects edits made while asynchronous preparation was in flight") {
+        val root = configRoot()
+        val prepared = BuilderToolsReloadPreflight.prepare(root)
+        val path = root.resolve("modules/builder-tools.yml")
+        Config(root, "modules/builder-tools.yml").apply {
+            setString("operator-owned-note", "newer edit")
+            saveStrict()
+        }
+        val editedBytes = Files.readAllBytes(path)
+
+        val failure = shouldThrowAny { BuilderToolsConfigPublication.publish(prepared) }
+
+        failure.message.orEmpty() shouldContain "changed during preparation"
+        Files.readAllBytes(path).contentEquals(editedBytes) shouldBe true
+    }
+
 })

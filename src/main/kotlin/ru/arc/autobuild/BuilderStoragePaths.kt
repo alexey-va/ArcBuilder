@@ -1,24 +1,19 @@
 package ru.arc.autobuild
 
-import ru.arc.ARC
-import ru.arc.config.ConfigManager
+import ru.arc.buildertools.BuilderToolsConfiguration
 import java.nio.file.Files
 import java.nio.file.Path
 
 internal object BuilderStoragePaths {
+    /** Storage-worker operation: validates the real path and creates the selected root if needed. */
     fun schematicsRoot(configuredRoot: String? = null): Path {
-        val dataRoot = ARC.instance.dataPath
-        val runtimePath = ConfigManager.moduleYamlPath(dataRoot, "builder-tools-runtime.yml")
-        val runtime = if (Files.isRegularFile(runtimePath)) {
-            ConfigManager.ofModule(dataRoot, "builder-tools-runtime.yml")
-        } else {
-            null
-        }
-        val base = ConfigManager.ofModule(dataRoot, "builder-tools.yml")
-        val configured = configuredRoot?.trim()?.takeIf(String::isNotEmpty)
-            ?: runtime?.stringOrNull("storage.schematics-root")?.trim()?.takeIf(String::isNotEmpty)
-            ?: base.stringOrNull("storage.schematics-root")?.trim()?.takeIf(String::isNotEmpty)
-        val candidate = resolveCandidate(dataRoot, configured)
+        val prepared = BuilderToolsConfiguration.current()
+        return schematicsRoot(prepared.dataRoot, configuredRoot ?: prepared.settings.schematicsRoot)
+    }
+
+    /** Captured generation inputs keep accepted storage work independent of plugin shutdown. */
+    fun schematicsRoot(dataRoot: Path, configuredRoot: String?): Path {
+        val candidate = resolveCandidate(dataRoot, configuredRoot?.trim()?.takeIf(String::isNotEmpty))
         requireExistingAncestorInsidePlugins(dataRoot, candidate)
         Files.createDirectories(candidate)
         return requireRealPathInsidePlugins(dataRoot, candidate)

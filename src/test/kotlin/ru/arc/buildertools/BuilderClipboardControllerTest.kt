@@ -21,6 +21,41 @@ import java.time.Duration
 import java.util.UUID
 
 class BuilderClipboardControllerTest : FunSpec({
+    test("clipboard validation runs on a worker and clear fences a delayed copy publication") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("clipboard-async")
+            val player = paper.addPlayer("AsyncCopy")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            val tasks = QueuedBuilderPlanningTasks()
+            val harness = ClipboardHarness(paper.createSimplePlugin("AsyncCopy"), tasks = tasks)
+            harness.select(player, world, 0, 64, 0, 0, 64, 0)
+            harness.controller.use { controller ->
+                val pending = controller.copy(player)
+                pending.isDone shouldBe false
+                tasks.tick()
+                controller.current(player.uniqueId) shouldBe null
+                controller.clear(player.uniqueId)
+                tasks.runComputations()
+                tasks.tick()
+
+                shouldThrow<java.util.concurrent.CancellationException> { pending.awaitBuilderPlanning() }
+                tasks.workerRuns shouldBe 1
+                controller.current(player.uniqueId) shouldBe null
+
+                val clipboard = tasks.finish(controller.copy(player))
+                clipboard.blocks.single().blockData shouldBe Material.STONE.createBlockData().asString
+                player.teleport(Location(world, 10.5, 64.0, 12.5))
+                val paste = controller.planPaste(player)
+                harness.mutableBlocks shouldBe 0
+                val plan = tasks.finish(paste)
+                plan.changes.single().position shouldBe BuilderBlockPos(world.uid, 10, 64, 10)
+                plan.costs.single().amount shouldBe 1
+                tasks.workerRuns shouldBe 4
+            }
+        }
+    }
+
     test("copy owns a bounded persistent-leaf snapshot and expires it exactly") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderClipboardCopyTest")
@@ -34,7 +69,7 @@ class BuilderClipboardControllerTest : FunSpec({
             harness.select(player, world, 0, 64, 0, 1, 64, 0)
 
             harness.controller.use { controller ->
-                val copied = controller.copy(player)
+                val copied = controller.copy(player).awaitBuilderPlanning()
 
                 copied.blocks.size shouldBe 2
                 copied.blocks.map { it.dx } shouldBe listOf(0, 1)
@@ -65,7 +100,7 @@ class BuilderClipboardControllerTest : FunSpec({
             harness.select(player, world, 0, 64, 0, 2, 64, 0)
 
             harness.controller.use { controller ->
-                val copied = controller.copy(player)
+                val copied = controller.copy(player).awaitBuilderPlanning()
 
                 copied.blocks.map { Bukkit.createBlockData(it.blockData).material } shouldContainExactly
                     listOf(Material.STONE)
@@ -89,18 +124,18 @@ class BuilderClipboardControllerTest : FunSpec({
             harness.select(player, world, 0, 64, 0, 1, 64, 0)
 
             harness.controller.use { controller ->
-                controller.copy(player)
+                controller.copy(player).awaitBuilderPlanning()
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
 
                 player.gameMode = GameMode.SURVIVAL
-                val survival = controller.planPaste(player)
+                val survival = controller.planPaste(player).awaitBuilderPlanning()
                 survival.kind shouldBe BuilderPlanKind.PASTE
                 survival.changes.size shouldBe 2
                 survival.changes.single { it.position.x == 11 }.afterBlockData shouldBe slab.asString
                 survival.costs.sumOf { it.amount } shouldBe 3
 
                 player.gameMode = GameMode.CREATIVE
-                val creative = controller.planPaste(player)
+                val creative = controller.planPaste(player).awaitBuilderPlanning()
                 creative.changes.size shouldBe 2
                 creative.costs shouldBe emptyList()
                 harness.pastePermissions shouldBe 2
@@ -131,12 +166,12 @@ class BuilderClipboardControllerTest : FunSpec({
             harness.select(player, world, 0, 64, 0, 0, 65, 0)
 
             harness.controller.use { controller ->
-                val clipboard = controller.copy(player)
+                val clipboard = controller.copy(player).awaitBuilderPlanning()
                 clipboard.blocks.size shouldBe 2
                 clipboard.skippedUnsafeBlocks shouldBe 0
 
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
-                val plan = controller.planPaste(player)
+                val plan = controller.planPaste(player).awaitBuilderPlanning()
                 plan.changes.size shouldBe 2
                 BuilderItemCodec.decode(plan.costs.single()).let { (item, amount) ->
                     item.type shouldBe Material.OAK_DOOR
@@ -158,11 +193,11 @@ class BuilderClipboardControllerTest : FunSpec({
             harness.select(player, world, 0, 64, 0, 0, 64, 0)
 
             harness.controller.use { controller ->
-                controller.copy(player)
+                controller.copy(player).awaitBuilderPlanning()
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
                 world.getBlockAt(10, 64, 10).type = Material.DEEPSLATE
 
-                val plan = controller.planPaste(player)
+                val plan = controller.planPaste(player).awaitBuilderPlanning()
                 plan.changes.single().beforeBlockData shouldBe Material.DEEPSLATE.createBlockData().asString
                 plan.changes.single().afterBlockData shouldBe Material.STONE.createBlockData().asString
                 BuilderItemCodec.decode(plan.rewards.single()).let { (item, amount) ->
@@ -188,12 +223,12 @@ class BuilderClipboardControllerTest : FunSpec({
             harness.select(player, world, 0, 64, 0, 1, 64, 0)
 
             harness.controller.use { controller ->
-                controller.copy(player)
+                controller.copy(player).awaitBuilderPlanning()
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
                 world.getBlockAt(10, 64, 10).type = Material.DEEPSLATE
                 world.getBlockAt(11, 64, 10).type = Material.CHEST
 
-                val plan = controller.planPaste(player)
+                val plan = controller.planPaste(player).awaitBuilderPlanning()
                 plan.changes.size shouldBe 1
                 plan.changes.single().position.x shouldBe 10
                 plan.skippedUnsafeBlocks shouldBe 1
@@ -214,10 +249,10 @@ class BuilderClipboardControllerTest : FunSpec({
             harness.select(player, world, 0, 64, 0, 0, 64, 0)
 
             harness.controller.use { controller ->
-                val original = controller.copy(player)
+                val original = controller.copy(player).awaitBuilderPlanning()
                 harness.select(player, world, 0, 64, 0, 1, 64, 0)
 
-                shouldThrow<ClipboardFailure> { controller.copy(player) }.path shouldBe "errors.selection-too-large"
+                shouldThrow<ClipboardFailure> { controller.copy(player).awaitBuilderPlanning() }.path shouldBe "errors.selection-too-large"
                 controller.current(player.uniqueId) shouldBe original
 
                 controller.clear(player.uniqueId)
@@ -231,6 +266,7 @@ private class ClipboardHarness(
     plugin: Plugin,
     maximumBlocks: Int = 64,
     nowMillis: () -> Long = { 1_800_000_000_000L },
+    private val tasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
 ) {
     private val selections = BuilderSelectionController(
         previewRadius = 32.0,
@@ -252,7 +288,7 @@ private class ClipboardHarness(
         clipboardTtl = Duration.ofMinutes(1),
         nowMillis = nowMillis,
         replacementRefund = { block -> BuilderPlacementCost.itemOrNull(block.blockData) },
-        host = object : BuilderClipboardHost {
+        host = object : BuilderClipboardHost, BuilderPlanningTasks by tasks {
             override fun ensureCopyPermission(player: Player) {
                 copyPermissions++
             }
@@ -270,6 +306,7 @@ private class ClipboardHarness(
                 Bukkit.getWorld(worldId) ?: throw ClipboardFailure("errors.world-not-allowed")
 
             override fun ensureInRangeAndLoaded(player: Player, block: Block) {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 readableBlocks++
             }
 
@@ -278,6 +315,7 @@ private class ClipboardHarness(
             }
 
             override fun ensureMutable(player: Player, block: Block) {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 mutableBlocks++
             }
 
@@ -293,6 +331,7 @@ private class ClipboardHarness(
                 rewards: List<BuilderItemAmount>,
                 skippedUnsafeBlocks: Int,
             ): BuilderPlan {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 val now = nowMillis()
                 return BuilderPlan(
                     id = UUID.randomUUID(),
@@ -312,6 +351,9 @@ private class ClipboardHarness(
     )
 
     fun select(player: Player, world: World, x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int) {
+        for (x in (minOf(x1, x2) shr 4)..(maxOf(x1, x2) shr 4)) {
+            for (z in (minOf(z1, z2) shr 4)..(maxOf(z1, z2) shr 4)) world.loadChunk(x, z)
+        }
         selections.set(player.uniqueId, BuilderBlockPos(world.uid, x1, y1, z1), first = true)
         selections.set(player.uniqueId, BuilderBlockPos(world.uid, x2, y2, z2), first = false)
     }

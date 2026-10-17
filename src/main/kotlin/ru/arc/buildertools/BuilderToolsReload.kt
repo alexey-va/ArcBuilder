@@ -11,12 +11,19 @@ import ru.arc.autobuild.BuilderStoragePaths
 import ru.arc.autobuild.SystemBuildBookCatalog
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
+import ru.arc.core.LifecycleTaskScope
+import ru.arc.core.whenCompleteSync
 import ru.arc.persistence.AtomicFileStore
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 import java.util.Comparator
+import java.security.MessageDigest
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.concurrent.CompletionStage
+import java.util.concurrent.Executor
 
 internal enum class BuilderToolsReloadBlocker {
     STARTING_OR_RECOVERING,
@@ -32,85 +39,190 @@ internal fun builderConstructionReloadBlocked(writesInFlight: Int, completionsIn
     return writesInFlight > 0 || completionsInFlight > 0
 }
 
-internal sealed interface BuilderToolsReloadResult {
-    data class Applied(val config: BuilderToolsConfig) : BuilderToolsReloadResult
-    data class Busy(val blocker: BuilderToolsReloadBlocker) : BuilderToolsReloadResult
-    data class Rejected(val failure: Throwable, val rollbackFailure: Throwable? = null) : BuilderToolsReloadResult
+internal sealed interface BuilderToolsReloadResult<out C> {
+    data class Applied<C>(val config: C) : BuilderToolsReloadResult<C>
+    data class Busy(val blocker: BuilderToolsReloadBlocker) : BuilderToolsReloadResult<Nothing>
+    data class Rejected(val failure: Throwable, val rollbackFailure: Throwable? = null) : BuilderToolsReloadResult<Nothing>
+    data object Cancelled : BuilderToolsReloadResult<Nothing>
 }
 
 /**
- * Transaction boundary for replacing one runtime generation.
- *
- * Candidate loading and validation happens while the previous generation is
- * still intact. If activation or publication fails after the old generation
- * closes, the exact previous configuration is used to create a replacement.
+ * Main-thread transaction owner for one runtime generation. Only candidate preparation,
+ * publication and publication rollback run on [executor]; all native lifecycle work is
+ * resumed through [tasks]. There is at most one transaction in flight. Accepted storage
+ * work drains before another generation can touch the same journals; close never waits.
  */
-internal class BuilderToolsReloadService<R : AutoCloseable>(
-    initialConfig: BuilderToolsConfig,
+internal class BuilderToolsReloadService<C, R : AutoCloseable>(
+    initialConfig: C,
     initialRuntime: R?,
-    private val loadCandidate: () -> BuilderToolsConfig,
-    private val createRuntime: (BuilderToolsConfig) -> R?,
+    private val loadCandidate: () -> C,
+    private val createRuntime: (C) -> R?,
     private val reloadBlocker: (R) -> BuilderToolsReloadBlocker?,
-    private val publishConfig: (BuilderToolsConfig) -> Unit,
+    private val publishConfig: (C) -> (() -> Unit),
+    private val executor: Executor,
+    private val tasks: LifecycleTaskScope,
+    private val validateCandidate: (C) -> Unit = {},
+    private val awaitClosed: (R) -> CompletionStage<Unit> = { CompletableFuture.completedFuture(Unit) },
+    private val activationFailureDrain: (Throwable) -> CompletionStage<Unit> = { CompletableFuture.completedFuture(Unit) },
+    private val runtimeChanged: (R?) -> Unit = {},
 ) : AutoCloseable {
-    var config: BuilderToolsConfig = initialConfig
+    var config: C = initialConfig
         private set
 
     var runtime: R? = initialRuntime
         private set
 
-    @Synchronized
-    fun reload(): BuilderToolsReloadResult {
-        runtime?.let(reloadBlocker)?.let { return BuilderToolsReloadResult.Busy(it) }
-        val candidate = try {
-            loadCandidate()
-        } catch (failure: Throwable) {
-            return BuilderToolsReloadResult.Rejected(failure)
-        }
+    @Volatile
+    var inProgress: Boolean = false
+        private set
+    private var completion: CompletableFuture<BuilderToolsReloadResult<C>>? = null
+    private var closed = false
 
-        val previousConfig = config
-        val previousRuntime = runtime
-        var replacement: R? = null
-        try {
-            previousRuntime?.close()
-            runtime = null
-            replacement = createRuntime(candidate)
-            publishConfig(candidate)
-            config = candidate
-            runtime = replacement
-            return BuilderToolsReloadResult.Applied(candidate)
-        } catch (failure: Throwable) {
-            runtime = null
-            runCatching { replacement?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
-            val rollback = runCatching { createRuntime(previousConfig) }
-            config = previousConfig
-            runtime = rollback.getOrNull()
-            val publicationRollbackFailure =
-                (failure as? BuilderToolsConfigPublicationException)?.rollbackFailure
-            val runtimeRollbackFailure = rollback.exceptionOrNull()
-            if (runtimeRollbackFailure != null && publicationRollbackFailure != null) {
-                runtimeRollbackFailure.addSuppressed(publicationRollbackFailure)
-            }
-            return BuilderToolsReloadResult.Rejected(
-                failure,
-                runtimeRollbackFailure ?: publicationRollbackFailure,
-            )
+    fun reload(): CompletableFuture<BuilderToolsReloadResult<C>> {
+        if (closed) return CompletableFuture.completedFuture(BuilderToolsReloadResult.Cancelled)
+        if (inProgress) return CompletableFuture.completedFuture(
+            BuilderToolsReloadResult.Busy(BuilderToolsReloadBlocker.STARTING_OR_RECOVERING),
+        )
+        runtime?.let(reloadBlocker)?.let {
+            return CompletableFuture.completedFuture(BuilderToolsReloadResult.Busy(it))
         }
+        val result = CompletableFuture<BuilderToolsReloadResult<C>>()
+        completion = result
+        inProgress = true
+        val token = tasks.restart()
+        prepare(token, loadCandidate) { candidate, failure ->
+            if (failure != null) {
+                finish(BuilderToolsReloadResult.Rejected(failure))
+                return@prepare
+            }
+            val validated = checkNotNull(candidate)
+            try {
+                validateCandidate(validated)
+            } catch (invalid: Throwable) {
+                finish(BuilderToolsReloadResult.Rejected(invalid))
+                return@prepare
+            }
+            // Gameplay may have started during disk preparation. Recheck before any close.
+            runtime?.let(reloadBlocker)?.let {
+                finish(BuilderToolsReloadResult.Busy(it))
+                return@prepare
+            }
+            val previous = runtime
+            setRuntime(null)
+            try {
+                previous?.close()
+            } catch (closeFailure: Throwable) {
+                finish(BuilderToolsReloadResult.Rejected(closeFailure, closeFailure))
+                return@prepare
+            }
+            val drained = previous?.let(awaitClosed) ?: CompletableFuture.completedFuture(Unit)
+            drained.whenCompleteSync(tasks, token) { _, drainFailure ->
+                if (drainFailure != null) {
+                    val cause = unwrap(drainFailure)
+                    finish(BuilderToolsReloadResult.Rejected(cause, cause))
+                } else {
+                    publish(token, validated)
+                }
+            }
+        }
+        return result
+    }
+
+    private fun publish(token: LifecycleTaskScope.Token, candidate: C) {
+        prepare(token, { publishConfig(candidate) }) { rollback, failure ->
+            if (failure != null) {
+                restore(token, failure, null)
+                return@prepare
+            }
+            try {
+                val replacement = createRuntime(candidate)
+                config = candidate
+                setRuntime(replacement)
+                finish(BuilderToolsReloadResult.Applied(candidate))
+            } catch (activationFailure: Throwable) {
+                activationFailureDrain(activationFailure).whenCompleteSync(tasks, token) { _, drainFailure ->
+                    if (drainFailure != null) {
+                        val cause = unwrap(drainFailure)
+                        activationFailure.addSuppressed(cause)
+                        finish(BuilderToolsReloadResult.Rejected(activationFailure, cause))
+                    } else {
+                        restore(token, activationFailure, rollback)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun restore(token: LifecycleTaskScope.Token, failure: Throwable, rollback: (() -> Unit)?) {
+        prepare(token, { rollback?.invoke() }) { _, rollbackFailure ->
+            var restoreFailure = rollbackFailure
+                ?: (failure as? BuilderToolsConfigPublicationException)?.rollbackFailure
+            // Never construct a runtime against a failed/unknown publication rollback.
+            if (restoreFailure == null) {
+                try {
+                    setRuntime(createRuntime(config))
+                } catch (runtimeFailure: Throwable) {
+                    restoreFailure = runtimeFailure
+                }
+            }
+            finish(BuilderToolsReloadResult.Rejected(failure, restoreFailure))
+        }
+    }
+
+    private fun <T> prepare(
+        token: LifecycleTaskScope.Token,
+        action: () -> T,
+        completed: (T?, Throwable?) -> Unit,
+    ) {
+        val work = try {
+            CompletableFuture.supplyAsync({
+                if (!tasks.isCurrent(token)) throw java.util.concurrent.CancellationException()
+                action()
+            }, executor)
+        } catch (failure: Throwable) {
+            completed(null, failure)
+            return
+        }
+        work.whenCompleteSync(tasks, token) { value, failure -> completed(value, failure?.let(::unwrap)) }
+    }
+
+    private fun finish(result: BuilderToolsReloadResult<C>) {
+        val pending = completion
+        completion = null
+        inProgress = false
+        pending?.complete(result)
+    }
+
+    private fun setRuntime(value: R?) {
+        runtime = value
+        runtimeChanged(value)
     }
 
     override fun close() {
-        runtime?.close()
-        runtime = null
+        if (closed) return
+        closed = true
+        tasks.close()
+        val previous = runtime
+        setRuntime(null)
+        finish(BuilderToolsReloadResult.Cancelled)
+        previous?.close()
     }
+
+    private fun unwrap(failure: Throwable): Throwable =
+        if (failure is CompletionException && failure.cause != null) checkNotNull(failure.cause) else failure
 }
 
 /** Strict, side-effect-free validation of the files consumed by a new runtime. */
 internal object BuilderToolsReloadPreflight {
-    fun load(dataRoot: Path): BuilderToolsConfig {
+    fun load(dataRoot: Path): BuilderToolsConfig = prepare(dataRoot).settings.validated()
+
+    fun prepare(dataRoot: Path): BuilderToolsPreparedConfiguration {
         val builderPath = ConfigManager.moduleYamlPath(dataRoot, "builder-tools.yml")
         val runtimePath = ConfigManager.moduleYamlPath(dataRoot, "builder-tools-runtime.yml")
         val autoBuildPath = ConfigManager.moduleYamlPath(dataRoot, "auto-build.yml")
         val systemBooksPath = dataRoot.resolve("modules/system-build-books.yml")
+        val sourceHashes = listOf(builderPath, runtimePath, autoBuildPath, systemBooksPath)
+            .associateWith(::builderConfigSourceHash)
 
         requireYamlMapping(builderPath, "builder-tools.yml").also { validateTypes(it, BUILDER_TYPES, "builder-tools.yml") }
         if (Files.exists(runtimePath)) {
@@ -123,13 +235,13 @@ internal object BuilderToolsReloadPreflight {
         requireYamlMapping(systemBooksPath, "system-build-books.yml")
 
         val candidate = loadMergedCandidate(dataRoot, builderPath, runtimePath, autoBuildPath)
-        if (!candidate.enabled) return candidate
-
-        SystemBuildBookCatalog.load(
+        val schematicsRoot = BuilderStoragePaths.resolveCandidate(dataRoot, candidate.settings.schematicsRoot)
+        val catalog = if (candidate.settings.enabled) SystemBuildBookCatalog.load(
             systemBooksPath,
-            BuilderStoragePaths.resolveCandidate(dataRoot, candidate.schematicsRoot),
-        )
-        return candidate
+            schematicsRoot,
+        ) else null
+        requireBuilderConfigSourcesUnchanged(sourceHashes)
+        return candidate.copy(systemBooks = catalog, schematicsRoot = schematicsRoot, sourceHashes = sourceHashes)
     }
 
     /** Validates the merge-forward view without mutating the live operator files. */
@@ -138,7 +250,7 @@ internal object BuilderToolsReloadPreflight {
         builderPath: Path,
         runtimePath: Path,
         autoBuildPath: Path,
-    ): BuilderToolsConfig {
+    ): BuilderToolsPreparedConfiguration {
         val stagingRoot = Files.createTempDirectory(dataRoot, ".builder-reload-")
         return try {
             val modules = Files.createDirectories(stagingRoot.resolve(ConfigManager.MODULE_YAML_DIR))
@@ -149,11 +261,19 @@ internal object BuilderToolsReloadPreflight {
             }
             BuilderToolsConfig.mergeBundledDefaults(stagingRoot)
             BuildBookSettings.mergeBundledDefaults(stagingRoot)
-            BuildBookSettings.validate(
-                Config(stagingRoot, ConfigManager.moduleYamlRelative(stagingRoot, "auto-build.yml")),
-                mergeForward = false,
+            val builder = Config(stagingRoot, "modules/builder-tools.yml")
+            val autoBuild = Config(stagingRoot, "modules/auto-build.yml")
+            val runtimeOverride = if (Files.isRegularFile(runtimePath)) {
+                Config(stagingRoot, "modules/builder-tools-runtime.yml")
+            } else null
+            BuildBookSettings.validate(autoBuild, mergeForward = false)
+            BuilderToolsPreparedConfiguration(
+                dataRoot = dataRoot,
+                settings = BuilderToolsConfig(builder, runtimeOverride).validated(validateNativeMaterials = false),
+                builder = builder,
+                autoBuild = autoBuild,
+                systemBooks = null,
             )
-            BuilderToolsConfig.loadFresh(stagingRoot).validated()
         } finally {
             Files.walk(stagingRoot).use { paths ->
                 paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
@@ -381,10 +501,17 @@ internal class BuilderToolsConfigPublicationException(
 
 /**
  * Merge-forwards both live YAML files with best-effort cross-file rollback. Each individual
- * replacement is atomic; if either merge/reload fails, the exact previous bytes are restored.
+ * replacement is atomic; if either merge fails, the exact previous bytes are restored.
+ * Config trees are not reloaded in place: the module installs its prepared generation on main.
  */
 internal object BuilderToolsConfigPublication {
-    fun publish(dataRoot: Path) {
+    fun publish(prepared: BuilderToolsPreparedConfiguration): () -> Unit {
+        requireBuilderConfigSourcesUnchanged(prepared.sourceHashes)
+        return publish(prepared.dataRoot)
+    }
+
+    /** Worker only. The returned rollback restores exact pre-publication bytes and permissions. */
+    fun publish(dataRoot: Path): () -> Unit {
         val paths = listOf(
             ConfigManager.moduleYamlPath(dataRoot, "builder-tools.yml"),
             ConfigManager.moduleYamlPath(dataRoot, "auto-build.yml"),
@@ -393,27 +520,22 @@ internal object BuilderToolsConfigPublication {
         try {
             BuilderToolsConfig.mergeBundledDefaults(dataRoot)
             BuildBookSettings.mergeBundledDefaults(dataRoot)
-            ConfigManager.reloadAll()
         } catch (failure: Throwable) {
-            var rollbackFailure: Throwable? = null
-            snapshots.forEach { (path, snapshot) ->
-                runCatching { restore(path, snapshot) }
-                    .exceptionOrNull()
-                    ?.let { restoreFailure ->
-                        val current = rollbackFailure
-                        if (current == null) rollbackFailure = restoreFailure
-                        else current.addSuppressed(restoreFailure)
-                    }
-            }
-            runCatching { ConfigManager.reloadAll() }
-                .exceptionOrNull()
-                ?.let { reloadFailure ->
-                    val current = rollbackFailure
-                    if (current == null) rollbackFailure = reloadFailure
-                    else current.addSuppressed(reloadFailure)
-                }
+            val rollbackFailure = runCatching { restoreAll(snapshots) }.exceptionOrNull()
             throw BuilderToolsConfigPublicationException(failure, rollbackFailure)
         }
+        return { restoreAll(snapshots) }
+    }
+
+    private fun restoreAll(snapshots: Map<Path, FileSnapshot>) {
+        var firstFailure: Throwable? = null
+        snapshots.forEach { (path, snapshot) ->
+            runCatching { restore(path, snapshot) }.exceptionOrNull()?.let { failure ->
+                val previous = firstFailure
+                if (previous == null) firstFailure = failure else previous.addSuppressed(failure)
+            }
+        }
+        firstFailure?.let { throw it }
     }
 
     private fun snapshot(path: Path): FileSnapshot {
@@ -449,4 +571,28 @@ internal object BuilderToolsConfigPublication {
     )
 
     private const val MAX_CONFIG_SNAPSHOT_BYTES = 4L * 1024L * 1024L
+}
+
+
+/** Worker-only content fence: delayed activation must publish the files it actually validated. */
+private fun requireBuilderConfigSourcesUnchanged(expected: Map<Path, String?>) {
+    expected.forEach { (path, hash) ->
+        require(builderConfigSourceHash(path) == hash) {
+            "Builder-tools configuration changed during preparation: ${path.fileName}; retry reload"
+        }
+    }
+}
+
+private fun builderConfigSourceHash(path: Path): String? {
+    if (!Files.isRegularFile(path)) return null
+    val digest = MessageDigest.getInstance("SHA-256")
+    Files.newInputStream(path).use { input ->
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return java.util.HexFormat.of().formatHex(digest.digest())
 }

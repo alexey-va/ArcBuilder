@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import ru.arc.awaitArcBuilderBootstrap
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.PacketEventsAPI
 import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
@@ -65,6 +66,7 @@ import ru.arc.config.ConfigManager
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.api.ArcBlockProtectionService
+import ru.arc.paper.playerstate.PaperPlayerStateService
 import ru.arc.paper.testing.loadPlugin
 import ru.arc.util.BlockUtils.rotateBlockData
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
@@ -78,6 +80,149 @@ import java.util.UUID
  * External MySQL contracts deliberately stay in the GitHub-CI integration suite.
  */
 class ArcBuilderMockBukkitJourneyTest : FunSpec({
+    test("later startup drift cannot restore a recovery hold for an already acknowledged player") {
+        strictMockBukkit(open = { ArcBuilderJourney.open(blocksPerTick = 1) }) { journey ->
+            val worlds = listOf(journey.world, journey.paper.addSimpleWorld("recovery-second"))
+            worlds.forEach { world -> world.loadChunk(0, 0); world.loadChunk(1, 0) }
+            val players = worlds.mapIndexed { index, world ->
+                journey.builder("Recovery${index}", GameMode.SURVIVAL).also { player ->
+                    player.teleport(Location(world, 0.5, 64.0, 3.5))
+                    player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+                    player.performCommand("builder wand") shouldBe true
+                    player.inventory.addItem(ItemStack(Material.STONE, 30))
+                    journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 19, 64, 0)
+                    journey.command(player, "builder fill stone") shouldBe true
+                }
+            }
+            val before = players.associate { it.uniqueId to it.inventory.contents.map { item -> item?.clone() } }
+            val records = journey.seedInterruptedPlans(players, appliedChanges = 1)
+            records.size shouldBe 2
+            val first = records.first()
+            val later = records.last()
+            val firstPlayer = players.single { it.uniqueId == first.playerId }
+            val laterPlayer = players.single { it.uniqueId == later.playerId }
+            val laterWorld = worlds.single { it.uid == later.plan.changes.first().position.worldId }
+            val pausedWorld = mockk<World>()
+            every { pausedWorld.isChunkLoaded(any<Int>(), any<Int>()) } returns false
+            every { pausedWorld.getChunkAtAsync(any<Int>(), any<Int>(), false) } returns java.util.concurrent.CompletableFuture()
+            mockkStatic(Bukkit::class)
+            try {
+                every { Bukkit.getWorld(laterWorld.uid) } returns pausedWorld
+                journey.restartForRecovery(awaitReady = false)
+                journey.await("first exact acknowledgement while later chunk is unavailable") {
+                    !journey.playerLeaseActive(firstPlayer.uniqueId) && firstPlayer.inventory.contents.toList() == before[firstPlayer.uniqueId]
+                }
+                PlayerCommandPreprocessEvent(firstPlayer, "/spawn").also(journey.paper::callEvent).isCancelled shouldBe false
+                val drift = later.plan.changes.last().position
+                laterWorld.getBlockAt(drift.x, drift.y, drift.z).type = Material.DIAMOND_BLOCK
+                every { Bukkit.getWorld(laterWorld.uid) } returns laterWorld
+                journey.await("later world drift retained for review") { journey.health().state == RuntimeHealthState.DOWN }
+                journey.health().recoveryBacklog shouldBe 1
+                journey.playerLeaseActive(firstPlayer.uniqueId) shouldBe false
+                journey.playerLeaseActive(laterPlayer.uniqueId) shouldBe true
+                firstPlayer.inventory.contents.toList() shouldBe before[firstPlayer.uniqueId]
+                journey.amount(laterPlayer, Material.STONE) shouldBe 10
+                journey.stopForRecovery().map { it.operationId } shouldBe listOf(later.operationId)
+            } finally {
+                unmockkStatic(Bukkit::class)
+            }
+        }
+    }
+
+    test("startup isolates every interrupted player and block before sliced recovery restores inventories") {
+        strictMockBukkit(open = { ArcBuilderJourney.open(blocksPerTick = 1) }) { journey ->
+            journey.world.loadChunk(0, 2)
+            val players = listOf("RecoverFirst", "RecoverLater").mapIndexed { index, name ->
+                val player = journey.builder(name, GameMode.SURVIVAL)
+                val z = index * 20
+                player.teleport(Location(journey.world, 0.5, 64.0, z + 3.5))
+                player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+                player.performCommand("builder wand") shouldBe true
+                player.inventory.addItem(ItemStack(Material.STONE, 300))
+                journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, z, 15, 64, z + 15)
+                journey.command(player, "builder fill stone") shouldBe true
+                player
+            }
+            val before = players.map { it.inventory.contents.map { item -> item?.clone() } }
+            fun placed(index: Int) = (0..15).sumOf { x -> (0..15).count { z ->
+                journey.world.getBlockAt(x, 64, index * 20 + z).type == Material.STONE
+            } }
+            val interrupted = journey.seedInterruptedPlans(players, appliedChanges = 150)
+            interrupted.size shouldBe 2
+            interrupted.all { it.phase == BuilderJournalPhase.APPLYING } shouldBe true
+            players.forEach { journey.amount(it, Material.STONE) shouldBe 44 }
+            val priorCounts = players.indices.map(::placed)
+            journey.restartForRecovery(awaitReady = false)
+            // This runs before the journal read callback and its first capture.
+            players.forEach { player ->
+                PlayerCommandPreprocessEvent(player, "/spawn").also(journey.paper::callEvent).isCancelled shouldBe true
+            }
+            val visitor = journey.paper.addPlayer("RecoveryVisitor")
+            BlockBreakEvent(journey.world.getBlockAt(15, 64, 35), visitor).also(journey.paper::callEvent).isCancelled shouldBe true
+            journey.await("partial sliced world recovery") { players.indices.any { placed(it) in 1 until priorCounts[it] } }
+            players.forEach { player ->
+                PlayerCommandPreprocessEvent(player, "/spawn").also(journey.paper::callEvent).isCancelled shouldBe true
+                journey.amount(player, Material.STONE) shouldBe 44
+            }
+            BlockBreakEvent(journey.world.getBlockAt(15, 64, 35), visitor).also(journey.paper::callEvent).isCancelled shouldBe true
+            journey.await("exact recovery acknowledgements") {
+                journey.health().state == RuntimeHealthState.UP && journey.activeLeases() == 0 &&
+                    players.indices.all { index -> placed(index) == 0 && players[index].inventory.contents.toList() == before[index] }
+            }
+            journey.stopForRecovery() shouldBe emptyList()
+        }
+    }
+
+    test("disconnect after APPLYING durability but before native capture cannot resurrect a cancelled operation") {
+        strictMockBukkit(open = { ArcBuilderJourney.open(blocksPerTick = 1) }) { journey ->
+            val player = journey.builder("CancelPreApply", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            player.inventory.addItem(ItemStack(Material.STONE, 300))
+            journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 19, 64, 14)
+            val before = player.inventory.contents.map { it?.clone() }
+            journey.command(player, "builder fill stone") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.await("APPLYING journal before capture") {
+                journey.operation(player)?.let { it.record.phase == BuilderJournalPhase.APPLYING && !it.inventoryMutated && it.appliedChanges == 0 } == true
+            }
+            journey.paper.callEvent(PlayerQuitEvent(player, Component.empty()))
+            journey.await("cancelled operation acknowledgement") { journey.activeLeases() == 0 }
+            journey.paper.performTicks(10)
+            journey.health().state shouldBe RuntimeHealthState.UP
+            (0..19).all { x -> (0..14).all { z -> journey.world.getBlockAt(x, 64, z).type == Material.AIR } } shouldBe true
+            player.inventory.contents.toList() shouldBe before
+            journey.stopForRecovery() shouldBe emptyList()
+        }
+    }
+
+    test("shutdown preserves a partial operation journal and restart restores exact world and inventory") {
+        strictMockBukkit(open = { ArcBuilderJourney.open(blocksPerTick = 1) }) { journey ->
+            val player = journey.builder("DrainBuilder", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            player.inventory.addItem(ItemStack(Material.STONE, 10))
+            journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 4, 64, 0)
+            val before = player.inventory.contents.map { it?.clone() }
+            player.performCommand("builder fill stone") shouldBe true
+            journey.await("asynchronous fill plan") { journey.renderer.plans[player.uniqueId]?.changes?.size == 5 }
+            player.performCommand("builder confirm") shouldBe true
+            journey.await("first durable mutation slice") { journey.countLine(journey.world, Material.STONE) == 1 }
+            val records = journey.stopForRecovery()
+            records.single().phase shouldBe BuilderJournalPhase.APPLYING
+            records.single().plan.changes.size shouldBe 5
+            journey.countLine(journey.world, Material.STONE) shouldBe 1
+            journey.amount(player, Material.STONE) shouldBe 5
+            journey.restartForRecovery()
+            journey.awaitSettled(player) {
+                journey.countLine(journey.world, Material.AIR) == 5 && player.inventory.contents.toList() == before
+            }
+            journey.amount(player, Material.STONE) shouldBe 10
+        }
+    }
+
     test("feature protection vetoes book planning and a fill confirmed after protection changed") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("ProtectedBuilder", GameMode.CREATIVE)
@@ -89,7 +234,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
-            player.performCommand("builder fill stone") shouldBe true
+            journey.command(player, "builder fill stone") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
             protected = true
             player.performCommand("builder confirm") shouldBe true
@@ -114,7 +259,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 4, 64, 0)
-            player.performCommand("builder deconstruct") shouldBe true
+            journey.command(player, "builder deconstruct") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 5
             player.performCommand("builder confirm") shouldBe true
             journey.await("first deconstruction batch") { journey.countLine(journey.world, Material.AIR) == 2 }
@@ -305,7 +450,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 // Isolate the command rejection from selection feedback.
             }
 
-            player.performCommand("builder fill ancient_debris") shouldBe true
+            journey.command(player, "builder fill ancient_debris") shouldBe true
 
             val rejection = PlainTextComponentSerializer.plainText().serialize(
                 checkNotNull(player.nextComponentMessage()),
@@ -609,7 +754,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                         org.bukkit.event.inventory.InventoryType.SlotType.CONTAINER, slot, type,
                         org.bukkit.event.inventory.InventoryAction.PICKUP_ALL))
                 click(10, org.bukkit.event.inventory.ClickType.RIGHT)
-                journey.paper.performTicks(2)
+                journey.await("asynchronous construction menu resource index") {
+                    player.openInventory.topInventory.getItem(22)?.type == Material.NETHER_STAR
+                }
                 player.openInventory.topInventory.getItem(22)?.type shouldBe Material.NETHER_STAR
                 click(22, org.bukkit.event.inventory.ClickType.LEFT)
                 journey.awaitStableConstruction("admin completion through the real menu callback") {
@@ -720,12 +867,12 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.paper.performTicks(30)
             journey.renderer.selectionRenders shouldBeGreaterThan selectionRenders
 
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
             player.inventory.addItem(ItemStack(Material.STONE), ItemStack(Material.OAK_PLANKS))
             player.teleport(Location(world, 10.5, 64.0, 13.5, 0f, 0f))
             val heartTarget = world.getBlockAt(12, 64, 10).also { it.type = Material.BEDROCK }
 
-            player.performCommand("builder paste") shouldBe true
+            journey.command(player, "builder paste") shouldBe true
             world.getBlockAt(10, 64, 10).type shouldBe Material.AIR
             world.getBlockAt(11, 64, 10).type shouldBe Material.AIR
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
@@ -745,7 +892,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(2, 64, 0).type shouldBe Material.STRUCTURE_VOID
             heartTarget.type shouldBe Material.BEDROCK
 
-            player.performCommand("builder undo") shouldBe true
+            journey.command(player, "builder undo") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             world.getBlockAt(10, 64, 10).type shouldBe Material.STONE
             world.getBlockAt(11, 64, 10).type shouldBe Material.OAK_PLANKS
@@ -775,10 +922,10 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             val wand = player.inventory.itemInMainHand
             journey.select(player, world, wand, 0, 64, 0, 3, 64, 0)
 
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
 
             player.teleport(Location(world, 10.5, 64.0, 10.5, 0f, 0f))
-            player.performCommand("builder paste right") shouldBe true
+            journey.command(player, "builder paste right") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             world.getBlockAt(13, 64, 10).type shouldBe Material.AIR
             world.getBlockAt(13, 64, 11).type shouldBe Material.AIR
@@ -804,18 +951,18 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.performCommand("builder wand") shouldBe true
             val wand = player.inventory.itemInMainHand
             journey.select(player, world, wand, 0, 64, 0, 0, 64, 0)
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
 
             world.getBlockAt(2, 64, 0).type = Material.BEDROCK
             journey.select(player, world, wand, 2, 64, 0, 2, 64, 0)
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
 
             journey.activeLeases() shouldBe 0
             PlayerCommandPreprocessEvent(player, "/builder status").also(journey.paper::callEvent).isCancelled shouldBe false
             BlockBreakEvent(world.getBlockAt(4, 64, 0), player).also(journey.paper::callEvent).isCancelled shouldBe false
 
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            player.performCommand("builder paste") shouldBe true
+            journey.command(player, "builder paste") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
@@ -832,13 +979,13 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
 
             world.getBlockAt(10, 64, 0).type = Material.DEEPSLATE
             world.getBlockAt(11, 64, 0).type = Material.CHEST
             player.inventory.addItem(ItemStack(Material.STONE))
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            player.performCommand("builder paste") shouldBe true
+            journey.command(player, "builder paste") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
@@ -846,7 +993,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
 
             player.inventory.addItem(ItemStack(Material.STONE), ItemStack(Material.OAK_PLANKS))
             player.teleport(Location(world, 14.5, 64.0, 3.5, 0f, 0f))
-            player.performCommand("builder paste") shouldBe true
+            journey.command(player, "builder paste") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) {
@@ -870,11 +1017,11 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 65, 0)
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
             player.inventory.addItem(ItemStack(Material.OAK_DOOR))
 
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            player.performCommand("builder paste") shouldBe true
+            journey.command(player, "builder paste") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) {
@@ -896,9 +1043,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            player.performCommand("builder paste") shouldBe true
+            journey.command(player, "builder paste") shouldBe true
 
             player.gameMode = GameMode.SURVIVAL
             player.performCommand("builder confirm") shouldBe true
@@ -908,7 +1055,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             BlockBreakEvent(world.getBlockAt(4, 64, 0), player).also(journey.paper::callEvent).isCancelled shouldBe false
 
             player.gameMode = GameMode.CREATIVE
-            player.performCommand("builder paste") shouldBe true
+            journey.command(player, "builder paste") shouldBe true
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
         }
@@ -928,7 +1075,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(4, 64, 0).type = Material.AIR
             player.inventory.addItem(ItemStack(Material.STONE, 5))
 
-            player.performCommand("builder fill stone") shouldBe true
+            journey.command(player, "builder fill stone") shouldBe true
             journey.countLine(world, Material.STONE) shouldBe 0
             player.performCommand("builder confirm") shouldBe true
             journey.await("first mutation batch") { journey.countLine(world, Material.STONE) > 0 }
@@ -1036,7 +1183,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.selectionPanelAction(player, BuilderPanelAction.PREVIOUS_PAGE)
             checkNotNull(journey.selectionPanel(player)).actions shouldBe firstPage
             player.inventory.addItem(ItemStack(Material.STONE, 2))
-            player.performCommand("builder fill stone") shouldBe true
+            journey.command(player, "builder fill stone") shouldBe true
             checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.CONFIRM) shouldBe true
 
             player.inventory.setItemInMainHand(ItemStack(Material.STICK))
@@ -1049,7 +1196,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.select(player, journey.world, wand, 0, 64, 0, 1, 64, 0)
             journey.renderer.plans[player.uniqueId] shouldBe null
             checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.CONFIRM) shouldBe false
-            player.performCommand("builder fill stone") shouldBe true
+            journey.command(player, "builder fill stone") shouldBe true
             journey.selectionPanelAction(player, BuilderPanelAction.CONFIRM)
             journey.awaitSettled(player) {
                 (0..1).all { journey.world.getBlockAt(it, 64, 0).type == Material.STONE }
@@ -1082,11 +1229,11 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.world.getBlockAt(0, 64, 0).type = Material.DIRT
             fill.performCommand("builder wand") shouldBe true
             journey.select(fill, journey.world, fill.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
-            fill.performCommand("builder replace dirt stone") shouldBe true
+            journey.command(fill, "builder replace dirt stone") shouldBe true
             journey.renderer.plans[fill.uniqueId] shouldBe null
             journey.world.getBlockAt(0, 64, 0).type = Material.AIR
             fill.inventory.addItem(ItemStack(Material.STONE))
-            fill.performCommand("builder fill stone") shouldBe true
+            journey.command(fill, "builder fill stone") shouldBe true
             val fillPlan = checkNotNull(journey.renderer.plans[fill.uniqueId])
             fillPlan.kind shouldBe BuilderPlanKind.FILL
             fillPlan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:stone" to 1)
@@ -1101,11 +1248,11 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.world.getBlockAt(1, 64, 0).type = Material.AIR
             replace.performCommand("builder wand") shouldBe true
             journey.select(replace, journey.world, replace.inventory.itemInMainHand, 1, 64, 0, 1, 64, 0)
-            replace.performCommand("builder fill deepslate") shouldBe true
+            journey.command(replace, "builder fill deepslate") shouldBe true
             journey.renderer.plans[replace.uniqueId] shouldBe null
             journey.world.getBlockAt(1, 64, 0).type = Material.STONE
             replace.inventory.addItem(ItemStack(Material.DEEPSLATE))
-            replace.performCommand("builder replace stone deepslate") shouldBe true
+            journey.command(replace, "builder replace stone deepslate") shouldBe true
             val replacePlan = checkNotNull(journey.renderer.plans[replace.uniqueId])
             replacePlan.kind shouldBe BuilderPlanKind.REPLACE
             replacePlan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:deepslate" to 1)
@@ -1123,9 +1270,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.world.getBlockAt(2, 64, 0).setBlockData(fence, false)
             disconnect.performCommand("builder wand") shouldBe true
             journey.select(disconnect, journey.world, disconnect.inventory.itemInMainHand, 2, 64, 0, 2, 64, 0)
-            disconnect.performCommand("builder replace oak_fence stone") shouldBe true
+            journey.command(disconnect, "builder replace oak_fence stone") shouldBe true
             journey.renderer.plans[disconnect.uniqueId] shouldBe null
-            disconnect.performCommand("builder disconnect") shouldBe true
+            journey.command(disconnect, "builder disconnect") shouldBe true
             val disconnectPlan = checkNotNull(journey.renderer.plans[disconnect.uniqueId])
             disconnectPlan.kind shouldBe BuilderPlanKind.FENCE_DISCONNECT
             disconnectPlan.costs shouldBe emptyList()
@@ -1151,7 +1298,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
             player.inventory.addItem(ItemStack(Material.SPRUCE_STAIRS))
 
-            player.performCommand("builder replace oak_stairs spruce_stairs") shouldBe true
+            journey.command(player, "builder replace oak_stairs spruce_stairs") shouldBe true
 
             val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
             plan.kind shouldBe BuilderPlanKind.REPLACE
@@ -1169,7 +1316,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.amount(player, Material.SPRUCE_STAIRS) shouldBe 0
             journey.amount(player, Material.OAK_STAIRS) shouldBe 1
 
-            player.performCommand("builder undo") shouldBe true
+            journey.command(player, "builder undo") shouldBe true
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.OAK_STAIRS }
             world.getBlockAt(0, 64, 0).blockData.asString shouldBe oak.asString
@@ -1201,7 +1348,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.performCommand("builder wand") shouldBe true
             journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 4, 64, 0)
             player.inventory.addItem(ItemStack(Material.STONE, 5))
-            player.performCommand("builder fill stone") shouldBe true
+            journey.command(player, "builder fill stone") shouldBe true
             ticks shouldBe emptyList()
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { ticks.size == 5 }
@@ -1234,14 +1381,14 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                     listOf("алмазныйБлок", "камень", "diamond_block", "stone")
                 event.suggestions.range shouldBe suggestions.range
             }
-            player.performCommand("builder replace КАМЕНЬ АлмазныйБлок") shouldBe true
+            journey.command(player, "builder replace КАМЕНЬ АлмазныйБлок") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).kind shouldBe BuilderPlanKind.REPLACE
             world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.DIAMOND_BLOCK }
             journey.amount(player, Material.DIAMOND_BLOCK) shouldBe 0
             journey.amount(player, Material.STONE) shouldBe 1
-            player.performCommand("builder undo") shouldBe true
+            journey.command(player, "builder undo") shouldBe true
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE }
             journey.amount(player, Material.DIAMOND_BLOCK) shouldBe 1
@@ -1263,8 +1410,12 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.paper.server.getCommandTabComplete(player, "builder replace воз").contains("воздух") shouldBe true
             journey.paper.server.getCommandTabComplete(player, "builder replace a").contains("air") shouldBe true
             journey.paper.server.getCommandTabComplete(player, "builder replace stone air") shouldBe emptyList()
-            player.performCommand("builder replace воздух камень")
-            val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
+            journey.command(player, "builder replace воздух камень")
+            val plan = checkNotNull(journey.renderer.plans[player.uniqueId]) {
+                generateSequence { player.nextComponentMessage() }.joinToString(" | ") {
+                    PlainTextComponentSerializer.plainText().serialize(it)
+                }
+            }
             plan.changes.size shouldBe 3
             plan.costs.map { it.materialKey to it.amount } shouldBe listOf("minecraft:stone" to 3)
             plan.rewards shouldBe emptyList()
@@ -1275,7 +1426,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.awaitSettled(player) { (0..2).all { world.getBlockAt(it, 64, 0).type == Material.STONE } }
             journey.amount(player, Material.STONE) shouldBe 0
             world.getBlockAt(3, 64, 0).type shouldBe Material.DIRT
-            player.performCommand("builder undo")
+            journey.command(player, "builder undo")
             player.performCommand("builder confirm")
             journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.AIR }
             originals.forEachIndexed { x, material -> world.getBlockAt(x, 64, 0).type shouldBe material }
@@ -1293,7 +1444,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
-            player.performCommand("builder replace stone deepslate nope") shouldBe true
+            journey.command(player, "builder replace stone deepslate nope") shouldBe true
             journey.renderer.plans[player.uniqueId] shouldBe null
             world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
             player.inventory.addItem(ItemStack(Material.DEEPSLATE))
@@ -1302,13 +1453,13 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 "builder replace stone deepslate c",
             ) shouldBe listOf("confirm")
 
-            player.performCommand("builder replace stone deepslate confirm") shouldBe true
+            journey.command(player, "builder replace stone deepslate confirm") shouldBe true
 
             journey.renderer.plans[player.uniqueId] shouldBe null
             journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.DEEPSLATE }
             journey.amount(player, Material.DEEPSLATE) shouldBe 0
             journey.amount(player, Material.STONE) shouldBe 1
-            player.performCommand("builder undo") shouldBe true
+            journey.command(player, "builder undo") shouldBe true
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE }
             journey.amount(player, Material.DEEPSLATE) shouldBe 1
@@ -1335,7 +1486,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.performCommand("builder wand") shouldBe true
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 2, 64, 0)
 
-            player.performCommand("builder disconnect") shouldBe true
+            journey.command(player, "builder disconnect") shouldBe true
 
             val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
             plan.kind.name shouldBe "FENCE_DISCONNECT"
@@ -1354,7 +1505,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             }
             world.getBlockAt(2, 64, 0).type shouldBe Material.STONE
 
-            player.performCommand("builder undo") shouldBe true
+            journey.command(player, "builder undo") shouldBe true
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) {
                 (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces == setOf(BlockFace.NORTH, BlockFace.EAST) &&
@@ -1379,14 +1530,14 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
             journey.paper.server.getCommandTabComplete(player, "builder disconnect c") shouldBe listOf("confirm")
 
-            player.performCommand("builder disconnect confirm") shouldBe true
+            journey.command(player, "builder disconnect confirm") shouldBe true
 
             journey.renderer.plans[player.uniqueId] shouldBe null
             journey.awaitSettled(player) {
                 (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces.isEmpty()
             }
 
-            player.performCommand("builder undo") shouldBe true
+            journey.command(player, "builder undo") shouldBe true
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) {
                 (world.getBlockAt(0, 64, 0).blockData as MultipleFacing).faces ==
@@ -1404,9 +1555,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             owner.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             owner.performCommand("builder wand") shouldBe true
             journey.select(owner, world, owner.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
-            owner.performCommand("builder copy") shouldBe true
+            journey.command(owner, "builder copy") shouldBe true
             owner.teleport(Location(world, 5.5, 64.0, 3.5, 0f, 0f))
-            owner.performCommand("builder paste") shouldBe true
+            journey.command(owner, "builder paste") shouldBe true
 
             journey.renderer.selections.containsKey(owner.uniqueId) shouldBe true
             journey.renderer.plans.containsKey(owner.uniqueId) shouldBe true
@@ -1418,7 +1569,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 PlayerQuitEvent(owner, Component.empty(), PlayerQuitEvent.QuitReason.DISCONNECTED),
             )
             journey.renderer.selections.containsKey(owner.uniqueId) shouldBe false
-            owner.performCommand("builder paste") shouldBe true
+            journey.command(owner, "builder paste") shouldBe true
             journey.renderer.plans.containsKey(owner.uniqueId) shouldBe false
         }
     }
@@ -1468,12 +1619,12 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
             player.performCommand("builder wand") shouldBe true
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
-            player.performCommand("builder copy") shouldBe true
+            journey.command(player, "builder copy") shouldBe true
 
             listOf(10.5, 14.5, 18.5).forEach { x ->
                 player.teleport(Location(world, x, 64.0, 3.5, 0f, 0f))
                 if (x == 14.5) world.getBlockAt(14, 64, 0).type = Material.DEEPSLATE
-                player.performCommand("builder paste") shouldBe true
+                journey.command(player, "builder paste") shouldBe true
                 player.performCommand("builder confirm") shouldBe true
                 journey.awaitSettled(player) {
                     world.getBlockAt(x.toInt(), 64, 0).type == Material.STONE &&
@@ -1611,10 +1762,83 @@ private class ArcBuilderJourney private constructor(
     val plugin: ArcBuilderPlugin,
     val world: World,
     val renderer: RecordingBuilderDisplayRenderer,
-    private val runtime: BuilderToolsRuntime,
+    private var runtime: BuilderToolsRuntime,
     private val buildings: MutableMap<String, Building>,
 ) : AutoCloseable {
     fun addBuilding(building: Building) { buildings[building.fileName] = building }
+
+    /** Drive only deferred planning, preserving the separate confirm/mutation assertions. */
+    fun command(player: Player, command: String): Boolean {
+        val accepted = player.performCommand(command)
+        awaitPlanning()
+        return accepted
+    }
+
+    private fun awaitPlanning() {
+        val requests = BuilderToolsRuntime::class.java.getDeclaredField("bookRequests")
+            .apply { isAccessible = true }.get(runtime) as BuilderBookRequests
+        if (requests.size > 0) await("deferred builder planning") { requests.size == 0 }
+    }
+
+    fun stopForRecovery(): List<BuilderJournalRecord> {
+        runtime.close()
+        runtime.closeCompletion.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        return java.util.concurrent.CompletableFuture.supplyAsync {
+            BuilderJournalStore(plugin.dataPath, 10_000).loadAll().map { it.value }
+        }.get(5, java.util.concurrent.TimeUnit.SECONDS)
+    }
+
+    /**
+     * A deterministic restart fixture: real planner output and native preimages,
+     * followed by durable APPLYING records before a fixed partial afterimage.
+     * The separate shutdown journey exercises interruption of a live mutation.
+     */
+    fun seedInterruptedPlans(players: List<Player>, appliedChanges: Int): List<BuilderJournalRecord> {
+        val now = System.currentTimeMillis()
+        val stateService = PaperPlayerStateService()
+        val records = players.map { player ->
+            val plan = checkNotNull(renderer.plans[player.uniqueId])
+            require(appliedChanges in 1 until plan.changes.size)
+            BuilderJournalRecord(
+                operationId = plan.id,
+                playerId = player.uniqueId,
+                playerName = player.name,
+                phase = BuilderJournalPhase.APPLYING,
+                plan = plan,
+                inventoryBefore = stateService.captureEnvelope(player, now),
+                createdAtMillis = plan.createdAtMillis,
+                updatedAtMillis = now,
+            )
+        }
+        stopForRecovery() shouldBe emptyList()
+        val root = plugin.dataPath
+        val durable = java.util.concurrent.CompletableFuture.supplyAsync {
+            val journal = BuilderJournalStore(root, 10_000)
+            records.forEach(journal::commit)
+            journal.loadAll().map { it.value }
+        }.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        records.forEach { record ->
+            val player = players.single { it.uniqueId == record.playerId }
+            BuilderInventory.removeCosts(player.inventory, record.plan.costs) shouldBe true
+            record.plan.changes.take(appliedChanges).forEach { change ->
+                val world = checkNotNull(Bukkit.getWorld(change.position.worldId))
+                world.getBlockAt(change.position.x, change.position.y, change.position.z)
+                    .setBlockData(Bukkit.createBlockData(change.afterBlockData), false)
+            }
+        }
+        return durable
+    }
+
+    fun restartForRecovery(awaitReady: Boolean = true) {
+        runtime = BuilderToolsRuntime(
+            plugin, BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated(),
+            displayRenderer = renderer, physicsUpdater = RecordingBuilderPhysicsUpdater(),
+            draftStorage = InMemoryBuilderDraftStorage(), systemBuildBookResolver = { null },
+            schematicLoader = { id, _ -> java.util.concurrent.CompletableFuture.completedFuture(buildings[id] ?: schematicTestBuilding(id)) },
+        )
+        checkNotNull(plugin.getCommand("builder")).setExecutor(runtime)
+        if (awaitReady) await("sliced startup journal recovery") { runtime.runtimeHealthContribution().state == RuntimeHealthState.UP }
+    }
 
     fun builder(name: String, mode: GameMode) = paper.addPlayer(name).also { player ->
         player.gameMode = mode
@@ -1687,6 +1911,12 @@ private class ArcBuilderJourney private constructor(
 
     fun activeLeases(): Int = runtime.runtimeHealthContribution().activeLeases
 
+    fun playerLeaseActive(playerId: UUID): Boolean = runtime.isPlayerLeaseActive(playerId)
+
+    fun operation(player: Player): BuilderActiveOperation? =
+        (BuilderToolsRuntime::class.java.getDeclaredField("operationLocks").apply { isAccessible = true }.get(runtime)
+            as BuilderOperationLocks).operation(player.uniqueId)
+
     fun health() = runtime.runtimeHealthContribution()
 
     fun constructionPort(): BuilderConstructionProjectPort = BuilderToolsRuntime::class.java
@@ -1699,7 +1929,12 @@ private class ArcBuilderJourney private constructor(
 
     fun selectionPanel(player: Player) = runtime.selectionPanelView(player)
 
-    fun selectionPanelAction(player: Player, action: BuilderPanelAction) = runtime.onSelectionPanelAction(player, action)
+    fun selectionPanelAction(player: Player, action: BuilderPanelAction) {
+        runtime.onSelectionPanelAction(player, action)
+        if (action in setOf(BuilderPanelAction.COPY, BuilderPanelAction.PASTE, BuilderPanelAction.UNDO, BuilderPanelAction.DRAFT)) {
+            awaitPlanning()
+        }
+    }
 
     fun planBuildBookBlock(
         player: Player,
@@ -1789,6 +2024,7 @@ private class ArcBuilderJourney private constructor(
             }
             try {
                 val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+                awaitArcBuilderBootstrap(paper, plugin)
                 installArcVisualPacketBudgetFixture(plugin)
                 val config = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml").apply {
                     setBoolean("enabled", true)
@@ -1822,7 +2058,8 @@ private class ArcBuilderJourney private constructor(
                     tabCompleter = runtime
                 }
                 val world = paper.addSimpleWorld("survival")
-                world.loadChunk(0, 0)
+                // Every journey target is already loaded; planners must never load chunks implicitly.
+                for (chunkX in -1..1) for (chunkZ in -1..1) world.loadChunk(chunkX, chunkZ)
                 val journey = ArcBuilderJourney(paper, plugin, world, renderer, runtime, buildings)
                 journey.await("ArcBuilder runtime readiness") {
                     runtime.runtimeHealthContribution().state == RuntimeHealthState.UP

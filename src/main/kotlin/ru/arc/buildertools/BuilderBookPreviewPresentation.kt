@@ -24,7 +24,6 @@ import ru.arc.autobuild.BuildBookPreviewBridge
 import ru.arc.autobuild.BuildBookPreviewMove
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.ConstructionSiteSnapshot
-import ru.arc.config.ConfigManager
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.menu.MenuContract
 import ru.arc.menu.MenuElementId
@@ -606,7 +605,7 @@ internal class BuilderBookPreviewPresentation(
     private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun loadMenuConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
-        ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),
+        BuilderToolsConfiguration.builder(plugin.dataPath),
         "paper-menus.preview.layouts",
         "paper-menus.preview.templates",
         mapOf(

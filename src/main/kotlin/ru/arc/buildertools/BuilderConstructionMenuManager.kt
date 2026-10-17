@@ -9,10 +9,13 @@ import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
+import org.bukkit.event.inventory.InventoryCloseEvent
+import org.bukkit.event.inventory.InventoryOpenEvent
+import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.bukkit.event.player.PlayerQuitEvent
+import org.bukkit.inventory.Inventory
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.autobuild.BuildBookItems
-import ru.arc.config.ConfigManager
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.menu.MenuContract
@@ -26,8 +29,38 @@ import ru.arc.paper.menu.PaperMenuItemsAdderResolver
 import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.text.LocalizedMiniMessage
+import ru.arc.util.Logging.warn
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CancellationException
+import java.util.concurrent.CompletionException
+
+/** Pure immutable suffix index: one full scan per step list, then at most one lookup per exact item prototype. */
+internal class BuilderConstructionMaterialIndex private constructor(private val entries: List<Entry>) {
+    private data class Entry(val prototype: BuilderItemAmount, val positions: IntArray, val totals: IntArray)
+
+    fun remaining(cursor: Int): List<BuilderItemAmount> = entries.mapNotNull { entry ->
+        val found = entry.positions.binarySearch(cursor)
+        val first = if (found >= 0) found else -found - 1
+        if (first == entry.positions.size) return@mapNotNull null
+        val used = if (first == 0) 0 else entry.totals[first - 1]
+        entry.positions[first] to entry.prototype.copy(amount = entry.totals.last() - used).validated()
+    }.sortedWith(compareBy<Pair<Int, BuilderItemAmount>> { it.second.materialKey }.thenBy { it.first }).map { it.second }
+
+    companion object {
+        fun build(steps: List<BuilderConstructionStep>): BuilderConstructionMaterialIndex {
+            data class Accumulator(val prototype: BuilderItemAmount, val positions: MutableList<Int>, val totals: MutableList<Int>)
+            val items = linkedMapOf<Pair<String, String>, Accumulator>()
+            steps.forEachIndexed { index, step ->
+                val amount = step.requiredMaterial ?: return@forEachIndexed
+                val entry = items.getOrPut(amount.itemBase64 to amount.materialKey) { Accumulator(amount, mutableListOf(), mutableListOf()) }
+                entry.positions += index
+                entry.totals += Math.addExact(entry.totals.lastOrNull() ?: 0, amount.amount)
+            }
+            return BuilderConstructionMaterialIndex(items.values.map { Entry(it.prototype, it.positions.toIntArray(), it.totals.toIntArray()) })
+        }
+    }
+}
 
 internal data class BuilderConstructionMenuSettings(
     val rows: Int,
@@ -78,7 +111,11 @@ internal class BuilderConstructionMenuManager(
     private val canCancel: (BuilderConstructionProjectRecord) -> Boolean = { false },
     private val canBuildInstantly: (Player) -> Boolean,
     private val requestInstant: (Player, UUID) -> Boolean,
+    private val planningTasks: BuilderPlanningTasks,
 ) : Listener, AutoCloseable {
+    private data class ResourceModel(val source: BuilderConstructionProjectRecord, val index: BuilderConstructionMaterialIndex)
+    private class ResourceCalculation(val source: BuilderConstructionProjectRecord, var ready: ResourceModel?)
+    private data class PendingOpen(val projectId: UUID, val apply: () -> Unit)
     private val configuration = loadConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), configuration)
     private val items = PaperMenuItemFactory(
@@ -89,6 +126,8 @@ internal class BuilderConstructionMenuManager(
     )
     private val viewers = mutableMapOf<UUID, UUID>()
     private val cancelConfirmations = mutableMapOf<UUID, UUID>()
+    private val resourceIndexes = mutableMapOf<UUID, ResourceCalculation>()
+    private val pendingOpens = mutableMapOf<UUID, PendingOpen>()
     private var closed = false
 
     init {
@@ -102,8 +141,23 @@ internal class BuilderConstructionMenuManager(
         if (closed || project.terminal) return
         val current = projectLookup(project.projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal) ?: return
         cancelConfirmations.remove(player.uniqueId)
-        menus.open(player, MENU_ID) { content(player, current.projectId) }
-        viewers[player.uniqueId] = current.projectId
+        val playerId = player.uniqueId
+        val inventory: Inventory? = player.openInventory.topInventory
+        val worldId = player.world.uid
+        lateinit var request: PendingOpen
+        request = PendingOpen(current.projectId) {
+            if (!closed && player.isOnline && player.world.uid == worldId && pendingOpens[playerId] === request &&
+                player.openInventory.topInventory === inventory &&
+                projectLookup(current.projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)?.steps === current.steps
+            ) {
+                pendingOpens.remove(playerId)
+                menus.open(player, MENU_ID) { content(player, current.projectId) }
+                viewers[playerId] = current.projectId
+            } else pendingOpens.remove(playerId, request)
+        }
+        pendingOpens[playerId] = request
+        val resources = resources(current)
+        if (resources.ready?.source?.steps === current.steps) request.apply()
     }
 
     fun refreshProject(projectId: UUID) {
@@ -112,14 +166,32 @@ internal class BuilderConstructionMenuManager(
 
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
+        pendingOpens.remove(event.player.uniqueId)
         viewers.remove(event.player.uniqueId)
         cancelConfirmations.remove(event.player.uniqueId)
     }
 
+    @EventHandler
+    fun onInventoryOpen(event: InventoryOpenEvent) {
+        pendingOpens.remove(event.player.uniqueId)
+    }
+
+    @EventHandler
+    fun onInventoryClose(event: InventoryCloseEvent) {
+        pendingOpens.remove(event.player.uniqueId)
+    }
+
+    @EventHandler
+    fun onWorldChange(event: PlayerChangedWorldEvent) {
+        pendingOpens.remove(event.player.uniqueId)
+    }
+
     private fun content(player: Player, projectId: UUID): PaperMenuContent {
-        val project = requireNotNull(projectLookup(projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)) {
+        val current = requireNotNull(projectLookup(projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)) {
             "Construction project '$projectId' is no longer available"
         }
+        val ready = checkNotNull(resourceIndexes[projectId]?.ready)
+        val project = current.takeIf { it.steps === ready.source.steps } ?: ready.source
         val values = values(player, project)
         val layout = configuration.catalog.require(MENU_ID)
         return PaperMenuContent(
@@ -261,7 +333,11 @@ internal class BuilderConstructionMenuManager(
     }
 
     private fun refreshViewers() {
-        if (!closed) viewers.keys.toList().forEach(::refreshViewer)
+        if (closed) return
+        viewers.keys.toList().forEach(::refreshViewer)
+        // Projects are retained only while visible or opening, so completed projects cannot accumulate full indexes.
+        val visible = viewers.values.toSet() + pendingOpens.values.map(PendingOpen::projectId)
+        resourceIndexes.keys.retainAll(visible)
     }
 
     private fun refreshViewer(viewerId: UUID) {
@@ -280,9 +356,45 @@ internal class BuilderConstructionMenuManager(
         if (project == null) {
             session.close()
             viewers.remove(viewerId)
+            resourceIndexes.remove(projectId)
             return
         }
+        if (resources(project).ready?.source?.steps !== project.steps) return
         session.requestRefresh()
+    }
+
+    private fun resources(project: BuilderConstructionProjectRecord): ResourceCalculation {
+        val previous = resourceIndexes[project.projectId]
+        if (previous?.source?.steps === project.steps) return previous
+        val calculation = ResourceCalculation(project, previous?.ready)
+        resourceIndexes[project.projectId] = calculation
+        planningTasks.compute { BuilderConstructionMaterialIndex.build(project.steps) }.thenCompose { index ->
+            planningTasks.onMain {
+                if (!closed && resourceIndexes[project.projectId] === calculation) {
+                    val current = projectLookup(project.projectId)
+                    if (current != null && !current.terminal && current.steps === project.steps) {
+                        calculation.ready = ResourceModel(current, index)
+                        pendingOpens.values.filter { it.projectId == project.projectId }.toList().forEach { it.apply() }
+                        refreshProject(project.projectId)
+                    } else {
+                        resourceIndexes.remove(project.projectId, calculation)
+                        pendingOpens.entries.removeIf { it.value.projectId == project.projectId }
+                    }
+                }
+            }
+        }.whenComplete { _, failure ->
+            if (failure != null) planningTasks.onMain {
+                if (!closed && resourceIndexes[project.projectId] === calculation) {
+                    resourceIndexes.remove(project.projectId)
+                    pendingOpens.entries.removeIf { it.value.projectId == project.projectId }
+                    val cause = if (failure is CompletionException) failure.cause ?: failure else failure
+                    if (cause !is CancellationException) {
+                        warn("Builder construction resource index failed for {}: {}", project.projectId, cause.message)
+                    }
+                }
+            }
+        }
+        return calculation
     }
 
     private fun resourceLore(
@@ -291,9 +403,7 @@ internal class BuilderConstructionMenuManager(
         values: Map<String, Component>,
     ): List<Component> {
         val lines = messages.renderLines("construction.site.menu.resources.lore", locale(player), values).toMutableList()
-        val remaining = aggregateConstructionAmounts(
-            project.steps.drop(project.cursor).mapNotNull(BuilderConstructionStep::requiredMaterial),
-        )
+        val remaining = checkNotNull(resourceIndexes[project.projectId]?.ready).index.remaining(project.cursor)
         if (remaining.isEmpty()) {
             lines += messages.render("construction.site.menu.resources.none", locale(player))
         } else {
@@ -359,16 +469,10 @@ internal class BuilderConstructionMenuManager(
             ?: messages.render("construction.site.unknown-name", locale)
     }
 
-    private fun aggregateConstructionAmounts(items: List<BuilderItemAmount>): List<BuilderItemAmount> = items
-        .groupBy { it.itemBase64 to it.materialKey }
-        .values
-        .map { grouped -> grouped.first().copy(amount = grouped.sumOf(BuilderItemAmount::amount)).validated() }
-        .sortedBy(BuilderItemAmount::materialKey)
-
     private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun loadConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
-        ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),
+        BuilderToolsConfiguration.builder(plugin.dataPath),
         "construction.site.menu.layouts",
         "construction.site.menu.templates",
         mapOf(MENU_ID to CONTRACT),
@@ -382,6 +486,8 @@ internal class BuilderConstructionMenuManager(
         menus.close()
         viewers.clear()
         cancelConfirmations.clear()
+        pendingOpens.clear()
+        resourceIndexes.clear()
     }
 
     private companion object {

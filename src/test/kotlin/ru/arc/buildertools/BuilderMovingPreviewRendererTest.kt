@@ -91,6 +91,28 @@ class BuilderMovingPreviewRendererTest : FunSpec({
         }
     }
 
+    test("a 100000-change plan is not scanned during the native request and a world change fences its result") {
+        withMovingPreview { fixture ->
+            var reads = 0
+            val worldId = fixture.world.uid
+            val changes = object : AbstractList<BuilderBlockChange>() {
+                override val size = 100_000
+                override fun get(index: Int): BuilderBlockChange {
+                    reads++
+                    return BuilderBlockChange(BuilderBlockPos(worldId, index, 64, 0), "minecraft:air", "minecraft:stone")
+                }
+            }
+            fixture.renderer.plan(fixture.player, BuilderPlan(
+                UUID.randomUUID(), fixture.player.uniqueId, BuilderPlanKind.BUILD_BOOK,
+                changes, emptyList(), emptyList(), createdAtMillis = 0, expiresAtMillis = Long.MAX_VALUE,
+            ))
+            reads shouldBe 1
+            fixture.player.teleport(Location(fixture.otherWorld, 16.49, 64.0, 0.0))
+            fixture.drain()
+            fixture.active shouldBe emptyMap()
+        }
+    }
+
     test("replacing a plan while its window is queued publishes only the replacement") {
         withMovingPreview { fixture ->
             fixture.open(book = false)
@@ -123,8 +145,8 @@ private class MovingPreviewFixture(
     val active: Map<Int, BuilderPacketDisplay>,
 ) {
     fun drain() {
-        scheduler.executeImmediate()
-        scheduler.executeImmediate()
+        // Geometry and nearest-window calculations each cross worker and main dispatch boundaries.
+        repeat(4) { scheduler.executeImmediate() }
     }
 
     fun visibleBlocks() = active.values.filter {

@@ -9,9 +9,10 @@ import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.Damageable
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 /** Generic protection and transaction boundary consumed by deconstruction planning. */
-internal interface BuilderDeconstructionHost {
+internal interface BuilderDeconstructionHost : BuilderPlanningTasks {
     fun ensurePermission(player: Player)
     fun canDeconstructWithoutTool(player: Player): Boolean
     fun requiredSelection(player: Player): BuilderSelection
@@ -25,6 +26,16 @@ internal interface BuilderDeconstructionHost {
         toolDamage: Int,
         skippedUnsafeBlocks: Int,
     ): BuilderPlan
+    fun createPlanAsync(
+        player: Player,
+        changes: List<BuilderBlockChange>,
+        rewards: List<BuilderItemAmount>,
+        toolFingerprint: String?,
+        toolDamage: Int,
+        skippedUnsafeBlocks: Int,
+    ): CompletableFuture<BuilderPlan> = onMain {
+        createPlan(player, changes, rewards, toolFingerprint, toolDamage, skippedUnsafeBlocks)
+    }
     fun fail(path: String): Nothing
 }
 
@@ -51,27 +62,41 @@ internal class BuilderDeconstructionController(
         }
     }
 
-    fun plan(player: Player): BuilderPlan {
+    fun plan(player: Player, isCurrent: () -> Boolean = { true }): CompletableFuture<BuilderPlan> {
         host.ensurePermission(player)
         val selection = host.requiredSelection(player)
         val world = host.world(selection.worldId)
-        val usesInventory = BuilderGameModePolicy.usesInventory(player.gameMode)
+        val gameMode = player.gameMode
+        val usesInventory = BuilderGameModePolicy.usesInventory(gameMode)
+        val current = { isCurrent() && player.isOnline && player.world.uid == selection.worldId &&
+            player.gameMode == gameMode && host.requiredSelection(player) == selection }
         val canBypassTool = usesInventory && host.canDeconstructWithoutTool(player)
         val tools = if (usesInventory) pooledTools(player) else emptyList()
         val usesTools = tools.any(PooledTool::available)
         if (usesInventory && !usesTools && !canBypassTool) host.fail("errors.tool")
         val changes = mutableListOf<BuilderBlockChange>()
-        val refunds = mutableListOf<ItemStack>()
+        val refunds = mutableListOf<BuilderItemAmount>()
+        val prototypes = BuilderItemCodec.PrototypeCache()
+        val positions = selection.positionsTopDown().iterator()
+        var pendingDrops = emptyList<ItemStack>().iterator()
         val air = Material.AIR.createBlockData().asString
         var skippedUnsafe = 0
         var toolBypassUsed = usesInventory && !usesTools
 
-        selection.positionsTopDown().forEach { position ->
+        return host.capture(current) {
+            if (pendingDrops.hasNext()) {
+                val drop = pendingDrops.next()
+                if (!drop.type.isAir && drop.amount > 0) refunds += prototypes.capture(drop)
+                return@capture false
+            }
+            if (!positions.hasNext()) return@capture true
+            val position = positions.next()
+            if (!world.isChunkLoaded(position.x shr 4, position.z shr 4)) host.fail("errors.chunk-unloaded")
             val block = world.getBlockAt(position.x, position.y, position.z)
-            if (block.type.isAir || safety.isReplaceable(block)) return@forEach
+            if (block.type.isAir || safety.isReplaceable(block)) return@capture false
             if (!safety.isSafeExisting(block)) {
                 skippedUnsafe += 1
-                return@forEach
+                return@capture false
             }
             val pooledTool = tools.firstOrNull { tool -> tool.available && isPreferredTool(block, tool.item) }
             if (usesInventory && pooledTool == null && !canBypassTool) host.fail("errors.tool")
@@ -79,23 +104,40 @@ internal class BuilderDeconstructionController(
             if (usesInventory) {
                 val dropTool = pooledTool?.use()?.let(BuilderDeconstructionDrops::withoutSilkTouch)
                 if (dropTool == null) toolBypassUsed = true
-                refunds += blockDrops(block, dropTool, player)
+                pendingDrops = blockDrops(block, dropTool, player).iterator()
             }
             changes += BuilderBlockChange(position, block.blockData.asString, air)
             if (changes.size > maximumChanges) host.fail("errors.selection-too-large")
+            false
+        }.thenCompose {
+            if (changes.isEmpty()) host.fail("errors.nothing-to-change")
+            // Storage contains at most 36 tools; native item encoding stays in its own capture steps.
+            val remainingTools = tools.iterator()
+            val toolUses = mutableListOf<BuilderPooledToolUse>()
+            host.capture(current) {
+                if (!remainingTools.hasNext()) return@capture true
+                remainingTools.next().plannedUse()?.let(toolUses::add)
+                false
+            }.thenCompose {
+                host.compute {
+                    val rewards = BuilderItemCodec.aggregateAmounts(refunds)
+                    val toolDamage = toolUses.sumOf(BuilderPooledToolUse::damage)
+                    val fingerprint = toolUses.takeIf { it.isNotEmpty() }?.let { uses ->
+                        BuilderPooledToolCodec.encode(BuilderPooledToolPlan(uses, toolBypassUsed))
+                    }
+                    Triple(rewards, fingerprint, toolDamage)
+                }
+            }
+        }.thenCompose { (rewards, fingerprint, toolDamage) ->
+            host.onMain {
+                requireCurrentBuilderPlanning(current)
+                // The inventory has 36 slots; with no costs, a non-fitting reward stops this simulation immediately.
+                if (!BuilderInventory.canApply(player, emptyList(), rewards, fingerprint, toolDamage)) {
+                    host.fail("errors.inventory")
+                }
+                host.createPlanAsync(player, changes, rewards, fingerprint, toolDamage, skippedUnsafe)
+            }.thenCompose { it }
         }
-
-        if (changes.isEmpty()) host.fail("errors.nothing-to-change")
-        val rewards = BuilderItemCodec.aggregate(refunds)
-        val toolUses = tools.mapNotNull(PooledTool::plannedUse)
-        val toolDamage = toolUses.sumOf(BuilderPooledToolUse::damage)
-        val fingerprint = toolUses.takeIf { it.isNotEmpty() }?.let { uses ->
-            BuilderPooledToolCodec.encode(BuilderPooledToolPlan(uses, toolBypassUsed))
-        }
-        if (!BuilderInventory.canApply(player, emptyList(), rewards, fingerprint, toolDamage)) {
-            host.fail("errors.inventory")
-        }
-        return host.createPlan(player, changes, rewards, fingerprint, toolDamage, skippedUnsafe)
     }
 
     private fun pooledTools(player: Player): List<PooledTool> {

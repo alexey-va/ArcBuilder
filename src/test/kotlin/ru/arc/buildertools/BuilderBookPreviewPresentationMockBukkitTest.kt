@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
@@ -38,6 +39,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -124,6 +126,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -175,6 +178,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -230,6 +234,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val moduleConfig = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")
@@ -237,6 +242,9 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 moduleConfig.setInt(
                     "paper-menus.preview.layouts.book-preview-placement.elements.left.slot",
                     18,
+                )
+                BuilderToolsConfiguration.install(
+                    BuilderToolsConfiguration.current(plugin.dataPath).copy(builder = moduleConfig, settings = config),
                 )
                 val world = paper.addSimpleWorld("book-preview-menu")
                 val player = paper.addPlayer("PreviewOwner").also {
@@ -339,6 +347,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
@@ -430,6 +439,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             try {
                 val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()

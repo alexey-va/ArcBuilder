@@ -21,6 +21,7 @@ import ru.arc.buildertools.BuilderClipboard
 import ru.arc.buildertools.BuilderClipboardBlock
 import ru.arc.buildertools.BuilderInventory
 import ru.arc.buildertools.BuilderItemCodec
+import ru.arc.buildertools.BuilderToolsConfiguration
 import java.util.UUID
 
 class BuildBookTest : TestBase() {
@@ -329,21 +330,31 @@ class BuildBookTest : TestBase() {
             blockCount = source.blocks.size,
             writeSchematic = { output -> output.write("stable-schematic".toByteArray()) },
         )
+        val configuration = BuilderToolsConfiguration.current()
+        val storageSettings = PlayerBuildBookStorageSettings(
+            configuration.dataRoot,
+            configuration.settings.schematicsRoot,
+            BuildBookSettings.maxBooksPerPlayer,
+        )
 
-        val first = PlayerBuildBookStore.persist(prepared)
+        val first = PlayerBuildBookStore.persist(prepared, storageSettings)
         val repeated = PlayerBuildBookStore.persist(
             prepared.copy(writeSchematic = { output -> output.write("same-content-new-metadata".toByteArray()) }),
+            storageSettings,
         )
 
         assertEquals(first, repeated)
         assertTrue(first.buildingId.contains(prepared.contentSha256))
-        assertEquals(first.schematicSha256, java.util.concurrent.CompletableFuture.supplyAsync { PlayerBuildBookStore.schematicSha256(first.buildingId) }.join())
+        val inspection = java.util.concurrent.CompletableFuture.supplyAsync {
+            PlayerBuildBookStore.inspectSchematic(first.buildingId, storageSettings)
+        }.join()
+        assertEquals(PlayerBuildBookDigestInspection.Ready(first.schematicSha256), inspection)
 
         val collision = prepared.copy(
             contentSha256 = "f".repeat(64),
             writeSchematic = { output -> output.write("different-schematic".toByteArray()) },
         )
-        assertThrows(IllegalArgumentException::class.java) { PlayerBuildBookStore.persist(collision) }
+        assertThrows(IllegalArgumentException::class.java) { PlayerBuildBookStore.persist(collision, storageSettings) }
     }
 
     private fun clipboard(now: Long, blockData: String) = BuilderClipboard(

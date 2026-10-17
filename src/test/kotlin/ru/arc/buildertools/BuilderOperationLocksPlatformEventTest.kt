@@ -12,9 +12,12 @@ import org.bukkit.block.Container
 import org.bukkit.block.DoubleChest
 import org.bukkit.entity.Entity
 import org.bukkit.entity.Item
+import org.bukkit.entity.ArmorStand
+import org.bukkit.entity.Player
 import org.bukkit.event.Cancellable
 import org.bukkit.event.Event
 import org.bukkit.event.block.BlockBurnEvent
+import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockExplodeEvent
 import org.bukkit.event.block.BlockFadeEvent
 import org.bukkit.event.block.BlockFormEvent
@@ -38,9 +41,17 @@ import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.inventory.InventoryPickupItemEvent
 import org.bukkit.event.inventory.InventoryType
 import org.bukkit.event.player.PlayerDropItemEvent
+import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.event.player.PlayerInteractEntityEvent
+import org.bukkit.event.player.PlayerInteractAtEntityEvent
+import org.bukkit.event.player.PlayerArmorStandManipulateEvent
+import org.bukkit.event.player.PlayerItemConsumeEvent
+import org.bukkit.event.player.PlayerItemDamageEvent
+import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.inventory.ItemStack
+import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.plugin.Plugin
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.UUID
@@ -51,6 +62,77 @@ import java.util.UUID
  * runtime, and compares a locked target with an unrelated player/block.
  */
 class BuilderOperationLocksPlatformEventTest : FunSpec({
+    test("recovery fences item use consumption durability and each entity equipment mutation event") {
+        MockBukkitTestRuntime.open().use { paper ->
+            strictPlatformScenario {
+                val fixture = LockEventFixture.create(paper, "RecoveryItemEvents")
+                fixture.locks.use { locks ->
+                    val stand = mockk<ArmorStand>(relaxed = true)
+                    fun checkEvents(player: Player, cancelled: Boolean) {
+                        val events = listOf<Event>(
+                            PlayerInteractEvent(player, Action.RIGHT_CLICK_BLOCK, ItemStack(Material.BREAD), fixture.free, BlockFace.UP, EquipmentSlot.HAND),
+                            PlayerInteractEntityEvent(player, stand, EquipmentSlot.HAND),
+                            PlayerInteractAtEntityEvent(player, stand, org.bukkit.util.Vector(), EquipmentSlot.HAND),
+                            PlayerArmorStandManipulateEvent(player, stand, ItemStack(Material.DIAMOND_CHESTPLATE), ItemStack(Material.AIR), EquipmentSlot.CHEST, EquipmentSlot.HAND),
+                            PlayerItemConsumeEvent(player, ItemStack(Material.BREAD), EquipmentSlot.HAND),
+                            PlayerItemDamageEvent(player, ItemStack(Material.DIAMOND_PICKAXE), 1),
+                        )
+                        events.forEach { event ->
+                            paper.callEvent(event)
+                            (event as Cancellable).isCancelled shouldBe cancelled
+                        }
+                    }
+                    locks.beginRecoveryBarrier()
+                    checkEvents(fixture.owner, true)
+                    checkEvents(fixture.outsider, true)
+                    locks.lockRecovery(fixture.owner.uniqueId)
+                    locks.endRecoveryBarrier()
+                    checkEvents(fixture.owner, true)
+                    checkEvents(fixture.outsider, false)
+                    locks.unlockRecovery(fixture.owner.uniqueId)
+                    checkEvents(fixture.owner, false)
+                }
+            }
+        }
+    }
+
+    test("startup recovery barrier protects unknown players world blocks and hopper inventories until exact leases are installed") {
+        MockBukkitTestRuntime.open().use { paper ->
+            strictPlatformScenario {
+                val fixture = LockEventFixture.create(paper, "RecoveryBarrier")
+                fixture.locks.use { locks ->
+                    val inventory = Bukkit.createInventory(null, 9)
+                    val view = checkNotNull(fixture.outsider.openInventory(inventory))
+                    locks.isPlayerLocked(fixture.outsider.uniqueId) shouldBe false
+                    locks.isRecoveryLocked(fixture.outsider.uniqueId) shouldBe false
+                    locks.beginRecoveryBarrier()
+                    locks.isPlayerLocked(fixture.outsider.uniqueId) shouldBe true
+                    locks.isRecoveryLocked(fixture.outsider.uniqueId) shouldBe true
+                    locks.isPlayerLeaseHeld(fixture.outsider.uniqueId) shouldBe false
+                    paper.callEvent(InventoryClickEvent(view, InventoryType.SlotType.CONTAINER, 0, ClickType.LEFT, InventoryAction.PICKUP_ALL)).isCancelled shouldBe true
+                    paper.callEvent(InventoryOpenEvent(view)).isCancelled shouldBe true
+                    paper.callEvent(InventoryMoveItemEvent(inventory, ItemStack(Material.STONE), inventory, true)).isCancelled shouldBe true
+                    paper.callEvent(PlayerDropItemEvent(fixture.outsider, mockk(relaxed = true))).isCancelled shouldBe true
+                    paper.callEvent(PlayerCommandPreprocessEvent(fixture.outsider, "/builder status")).isCancelled shouldBe true
+                    paper.callEvent(EntityDamageEvent(fixture.outsider, EntityDamageEvent.DamageCause.FALL, 1.0)).isCancelled shouldBe true
+                    paper.callEvent(BlockPhysicsEvent(fixture.free, Material.STONE.createBlockData())).isCancelled shouldBe true
+                    paper.callEvent(BlockFromToEvent(fixture.free, fixture.outsiderBlock)).isCancelled shouldBe true
+
+                    fixture.lockPlayer()
+                    fixture.lockBlock()
+                    locks.isPlayerLeaseHeld(fixture.owner.uniqueId) shouldBe true
+                    locks.endRecoveryBarrier()
+                    locks.isRecoveryLocked(fixture.owner.uniqueId) shouldBe true
+                    locks.isPlayerLocked(fixture.outsider.uniqueId) shouldBe false
+                    paper.callEvent(InventoryClickEvent(view, InventoryType.SlotType.CONTAINER, 0, ClickType.LEFT, InventoryAction.PICKUP_ALL)).isCancelled shouldBe false
+                    paper.callEvent(InventoryMoveItemEvent(inventory, ItemStack(Material.STONE), inventory, true)).isCancelled shouldBe false
+                    paper.callEvent(BlockPhysicsEvent(fixture.free, Material.STONE.createBlockData())).isCancelled shouldBe false
+                    paper.callEvent(BlockPhysicsEvent(fixture.locked, Material.STONE.createBlockData())).isCancelled shouldBe true
+                }
+            }
+        }
+    }
+
     test("locked player inventory and movement-related events are cancelled while an outsider is unaffected") {
         MockBukkitTestRuntime.open().use { paper ->
             strictPlatformScenario {

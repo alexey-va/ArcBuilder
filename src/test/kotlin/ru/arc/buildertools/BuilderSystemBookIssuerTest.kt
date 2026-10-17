@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import ru.arc.awaitArcBuilderBootstrap
 import com.mojang.brigadier.LiteralMessage
 import com.mojang.brigadier.context.StringRange
 import com.mojang.brigadier.suggestion.Suggestion
@@ -465,6 +466,7 @@ private fun withPlayerIssuer(test: (PlayerIssuerFixture) -> Unit) {
     try {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             val player = paper.addPlayer("BookIssuer")
             player.addAttachment(plugin, BuilderSystemBookIssuer.PERMISSION, true)

@@ -1,0 +1,99 @@
+package ru.arc.buildertools
+
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
+import org.bukkit.Material
+import org.bukkit.event.block.BlockBreakEvent
+import org.bukkit.event.block.BlockPhysicsEvent
+import org.bukkit.event.entity.EntityDamageEvent
+import org.bukkit.event.inventory.InventoryMoveItemEvent
+import org.bukkit.event.player.PlayerCommandPreprocessEvent
+import org.bukkit.inventory.ItemStack
+import ru.arc.ARC
+import ru.arc.awaitArcBuilderBootstrap
+import ru.arc.config.ConfigManager
+import ru.arc.observability.RuntimeHealthState
+import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.testing.loadPlugin
+import ru.ruscrafting.builder.paper.ArcBuilderPlugin
+import java.util.concurrent.TimeUnit
+
+class ArcBuilderBootstrapMockBukkitTest : FunSpec({
+    test("native protection starts before configuration completion and hands off without retaining a global lock") {
+        failOnUnsupportedMockBukkitOperation {
+            ConfigManager.clear()
+            MockBukkitTestRuntime.open().use { paper ->
+                val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+                plugin.bootstrapComplete shouldBe false
+                val player = paper.addPlayer("BootstrapGuard")
+                val block = paper.addSimpleWorld("bootstrap-guard").getBlockAt(0, 64, 0)
+                val inventory = paper.server.createInventory(null, 9)
+                paper.callEvent(BlockBreakEvent(block, player)).isCancelled shouldBe true
+                paper.callEvent(BlockPhysicsEvent(block, Material.STONE.createBlockData())).isCancelled shouldBe true
+                paper.callEvent(InventoryMoveItemEvent(inventory, ItemStack(Material.STONE), inventory, true)).isCancelled shouldBe true
+                paper.callEvent(PlayerCommandPreprocessEvent(player, "/spawn")).isCancelled shouldBe true
+                paper.callEvent(EntityDamageEvent(player, EntityDamageEvent.DamageCause.FALL, 1.0)).isCancelled shouldBe true
+
+                awaitArcBuilderBootstrap(paper, plugin)
+                awaitBootstrapRecovery(paper)
+                paper.callEvent(BlockBreakEvent(block, player)).isCancelled shouldBe false
+                paper.callEvent(BlockPhysicsEvent(block, Material.STONE.createBlockData())).isCancelled shouldBe false
+                paper.callEvent(InventoryMoveItemEvent(inventory, ItemStack(Material.STONE), inventory, true)).isCancelled shouldBe false
+                paper.callEvent(PlayerCommandPreprocessEvent(player, "/spawn")).isCancelled shouldBe false
+                paper.callEvent(EntityDamageEvent(player, EntityDamageEvent.DamageCause.FALL, 1.0)).isCancelled shouldBe false
+            }
+        }
+    }
+
+    test("bootstrap returns before preparation and an early command receives the localized loading message") {
+        failOnUnsupportedMockBukkitOperation {
+            ConfigManager.clear()
+            MockBukkitTestRuntime.open().use { paper ->
+                val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+                plugin.bootstrapComplete shouldBe false
+                BuilderToolsModule.runtimeHealthContribution().state shouldBe RuntimeHealthState.STARTING
+                val console = paper.server.consoleSender
+                val command = checkNotNull(plugin.getCommand("builder"))
+
+                BuilderToolsModule.onCommand(console, command, "builder", arrayOf("status")) shouldBe true
+                awaitArcBuilderBootstrap(paper, plugin)
+                awaitBootstrapRecovery(paper)
+
+                val message = checkNotNull(console.nextComponentMessage())
+                PlainTextComponentSerializer.plainText().serialize(message) shouldContain "восстановление"
+                BuilderToolsModule.runtimeHealthContribution().state shouldBe RuntimeHealthState.UP
+            }
+        }
+    }
+
+    test("disable before preparation completion cannot reinstall ARC or the configuration generation") {
+        failOnUnsupportedMockBukkitOperation {
+            ConfigManager.clear()
+            MockBukkitTestRuntime.open().use { paper ->
+                val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+                paper.server.pluginManager.disablePlugin(plugin)
+                plugin.configurationExecutor.awaitTermination(10, TimeUnit.SECONDS) shouldBe true
+                paper.performTicks(3)
+
+                plugin.isEnabled shouldBe false
+                plugin.bootstrapComplete shouldBe false
+                ARC.plugin shouldBe null
+                shouldThrow<IllegalStateException> { BuilderToolsConfiguration.current() }
+                val block = paper.addSimpleWorld("disabled-bootstrap").getBlockAt(0, 64, 0)
+                paper.callEvent(BlockPhysicsEvent(block, Material.STONE.createBlockData())).isCancelled shouldBe false
+            }
+        }
+    }
+})
+
+private fun awaitBootstrapRecovery(paper: MockBukkitTestRuntime) {
+    val deadline = System.nanoTime() + 10_000_000_000L
+    while (BuilderToolsModule.runtimeHealthContribution().state == RuntimeHealthState.STARTING && System.nanoTime() < deadline) {
+        paper.performTicks(1)
+        Thread.yield()
+    }
+    BuilderToolsModule.runtimeHealthContribution().state shouldBe RuntimeHealthState.UP
+}

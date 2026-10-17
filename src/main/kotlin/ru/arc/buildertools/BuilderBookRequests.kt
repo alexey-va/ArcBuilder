@@ -17,7 +17,7 @@ internal class BuilderBookRequests(private val scope: LifecycleTaskScope) : Auto
     fun <T> run(
         player: Player,
         source: BuilderLocatedBook?,
-        request: () -> CompletableFuture<T>,
+        request: (isCurrent: () -> Boolean) -> CompletableFuture<T>,
         failed: (Throwable?) -> Unit,
         latestOnly: Boolean = true,
         ready: (T) -> Unit,
@@ -33,11 +33,18 @@ internal class BuilderBookRequests(private val scope: LifecycleTaskScope) : Auto
         val mode = player.gameMode
         val heldSlot = player.inventory.heldItemSlot
         val expected = source?.item?.clone()
-        if (latestOnly) pending[id] = linkedMapOf()
+        if (latestOnly) pending[id]?.entries?.removeIf { !it.value.independent }
         pending.getOrPut(id) { linkedMapOf() }[token] = Ticket(!latestOnly, failed)
-        val future = try { request() } catch (failure: Throwable) { CompletableFuture.failedFuture(failure) }
+        val lifecycle = scope.token()
+        // This predicate is server-thread only: capture steps use the same exact
+        // context fence as the final continuation, through the entire pipeline.
+        fun current(): Boolean = !closed && scope.isCurrent(lifecycle) && pending[id]?.containsKey(token) == true &&
+            player.isOnline && (source != null || Bukkit.getPlayer(id) === player) &&
+            (source == null || player.world.uid == world && player.gameMode == mode &&
+                player.inventory.heldItemSlot == heldSlot && player.inventory.getItem(source.slot) == expected)
+        val future = try { request(::current) } catch (failure: Throwable) { CompletableFuture.failedFuture(failure) }
         future.whenComplete { value, failure ->
-            scope.runSync continuation@{
+            scope.runSync(lifecycle) continuation@{
                 if (closed || pending[id]?.remove(token) == null) return@continuation
                 if (pending[id]?.isEmpty() == true) pending.remove(id)
                 if (!player.isOnline || source == null && Bukkit.getPlayer(id) !== player || source != null && (

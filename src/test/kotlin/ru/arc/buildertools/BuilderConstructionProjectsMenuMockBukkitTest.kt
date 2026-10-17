@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
@@ -24,6 +25,7 @@ class BuilderConstructionProjectsMenuMockBukkitTest : FunSpec({
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             val world = paper.addSimpleWorld("projects-menu")
             val owner = paper.addPlayer("ProjectOwner").also {

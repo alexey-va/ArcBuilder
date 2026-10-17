@@ -5,11 +5,13 @@ import com.sk89q.worldedit.extent.clipboard.BlockArrayClipboard
 import com.sk89q.worldedit.extent.clipboard.io.BuiltInClipboardFormat
 import com.sk89q.worldedit.math.BlockVector3
 import com.sk89q.worldedit.regions.CuboidRegion
+import com.sk89q.worldedit.world.block.BlockState
 import org.bukkit.Bukkit
-import ru.arc.ARC
 import ru.arc.buildertools.BuilderClipboard
 import ru.arc.buildertools.BuilderClipboardBlock
 import ru.arc.buildertools.BuilderPlan
+import ru.arc.buildertools.BuilderPlanningTasks
+import ru.arc.buildertools.requireCurrentBuilderPlanning
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileAlreadyExistsException
@@ -20,6 +22,7 @@ import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 
 class PlayerBuildBookLimitException : IllegalStateException("Player build-book limit reached")
 
@@ -44,6 +47,13 @@ internal data class PreparedPlayerBuildBookTemplate(
     val writeSchematic: (OutputStream) -> Unit,
 )
 
+/** Captured by the runtime before any storage work is accepted. */
+internal data class PlayerBuildBookStorageSettings(
+    val dataRoot: Path,
+    val configuredRoot: String?,
+    val maxBooksPerPlayer: Int,
+)
+
 internal object PlayerBuildBookAddress {
     private val SHA256 = Regex("[0-9a-f]{64}")
     private val ANCHOR = Regex("o(-?\\d{1,4})_(-?\\d{1,4})_(-?\\d{1,4})")
@@ -62,15 +72,34 @@ internal object PlayerBuildBookAddress {
 
 object PlayerBuildBookStore {
     /**
-     * Paper-primary-thread preparation. All Bukkit block-data conversion is
-     * completed here so [persist] performs filesystem work only.
+     * Native conversion shares the runtime's per-tick capture budget. Validation,
+     * hashing and WorldEdit clipboard assembly use detached values on a worker.
      */
-    internal fun prepare(
+    internal fun prepareAsync(
         creatorId: UUID,
         source: BuilderClipboard,
+        tasks: BuilderPlanningTasks,
+        isCurrent: () -> Boolean,
+    ): CompletableFuture<PreparedPlayerBuildBookTemplate> = tasks.compute { source.validated(10_000) }
+        .thenCompose { checked ->
+            tasks.onMain {
+                requireCurrentBuilderPlanning(isCurrent)
+                val states = ArrayList<BlockState>(checked.blocks.size)
+                tasks.capture(isCurrent) {
+                    val block = checked.blocks[states.size]
+                    states += BukkitAdapter.adapt(Bukkit.createBlockData(block.blockData))
+                    states.size == checked.blocks.size
+                }.thenCompose {
+                    tasks.compute { prepareCaptured(creatorId, checked, states) }
+                }
+            }.thenCompose { it }
+        }
+
+    private fun prepareCaptured(
+        creatorId: UUID,
+        checked: BuilderClipboard,
+        states: List<BlockState>,
     ): PreparedPlayerBuildBookTemplate {
-        check(Bukkit.isPrimaryThread()) { "Player build-book preparation must run on the Paper primary thread" }
-        val checked = source.validated(10_000)
         val region = CuboidRegion(
             BlockVector3.ZERO,
             BlockVector3.at(checked.sizeX - 1, checked.sizeY - 1, checked.sizeZ - 1),
@@ -78,14 +107,14 @@ object PlayerBuildBookStore {
         val clipboard = BlockArrayClipboard(region).also {
             it.origin = BlockVector3.at(checked.originDx, checked.originDy, checked.originDz)
         }
-        checked.blocks.forEach { block ->
-            val data = Bukkit.createBlockData(block.blockData)
-            clipboard.setBlock(BlockVector3.at(block.dx, block.dy, block.dz), BukkitAdapter.adapt(data))
+        checked.blocks.forEachIndexed { index, block ->
+            clipboard.setBlock(BlockVector3.at(block.dx, block.dy, block.dz), states[index])
         }
+        val contentSha256 = contentSha256(checked)
         return PreparedPlayerBuildBookTemplate(
             creatorId = creatorId,
-            fileName = fileName(creatorId, checked),
-            contentSha256 = contentSha256(checked),
+            fileName = fileName(creatorId, checked, contentSha256),
+            contentSha256 = contentSha256,
             blockCount = checked.blocks.size,
             writeSchematic = { output ->
                 BuiltInClipboardFormat.SPONGE_V3_SCHEMATIC.getWriter(output).use { writer -> writer.write(clipboard) }
@@ -94,17 +123,20 @@ object PlayerBuildBookStore {
     }
 
     /** Filesystem-only persistence; safe for the owned storage executor. */
-    internal fun persist(prepared: PreparedPlayerBuildBookTemplate): PlayerBuildBookTemplate {
+    internal fun persist(
+        prepared: PreparedPlayerBuildBookTemplate,
+        settings: PlayerBuildBookStorageSettings,
+    ): PlayerBuildBookTemplate {
         require(prepared.contentSha256.matches(Regex("[0-9a-f]{64}"))) {
             "Player build-book content digest is invalid"
         }
         require(PlayerBuildBookAddress.matches(prepared.creatorId, prepared.fileName, prepared.contentSha256)) {
             "Player build-book filename does not match its content address"
         }
-        val root = resolvedSchematicsRoot()
+        val root = BuilderStoragePaths.schematicsRoot(settings.dataRoot, settings.configuredRoot)
         val target = root.resolve(prepared.fileName)
         require(target.parent == root) { "Player build-book target escaped the schematic root" }
-        if (!isRegularFile(target)) enforceLimit(root, prepared.creatorId)
+        if (!isRegularFile(target)) enforceLimit(root, prepared.creatorId, settings.maxBooksPerPlayer)
         val schematicSha256 = writeAtomic(target, prepared.writeSchematic)
         return PlayerBuildBookTemplate(
             buildingId = prepared.fileName,
@@ -116,24 +148,30 @@ object PlayerBuildBookStore {
 
     internal fun fileName(creatorId: UUID, clipboard: BuilderClipboard): String {
         val checked = clipboard.validated(BuilderPlan.ABSOLUTE_MAX_CHANGES)
+        return fileName(creatorId, checked, contentSha256(checked))
+    }
+
+    private fun fileName(creatorId: UUID, checked: BuilderClipboard, contentSha256: String): String {
         val origin = "o${checked.originDx}_${checked.originDy}_${checked.originDz}"
-        return "player-${creatorId.toString().replace("-", "")}-$origin-${contentSha256(checked)}.schem"
+        return "player-${creatorId.toString().replace("-", "")}-$origin-$contentSha256.schem"
     }
 
     internal fun contentSha256(clipboard: BuilderClipboard): String {
         val digest = MessageDigest.getInstance("SHA-256")
         digest.update("${clipboard.sizeX}:${clipboard.sizeY}:${clipboard.sizeZ}\n".toByteArray(StandardCharsets.UTF_8))
-        clipboard.blocks.sortedWith(compareBy<ru.arc.buildertools.BuilderClipboardBlock> { it.dy }.thenBy { it.dx }.thenBy { it.dz })
+        clipboard.blocks.sortedWith(compareBy<BuilderClipboardBlock> { it.dy }.thenBy { it.dx }.thenBy { it.dz })
             .forEach { block ->
                 digest.update("${block.dx}:${block.dy}:${block.dz}:${block.blockData}\n".toByteArray(StandardCharsets.UTF_8))
             }
         return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
-    internal fun inspectSchematic(buildingId: String): PlayerBuildBookDigestInspection = try {
-        check(!Bukkit.isPrimaryThread()) { "Player schematic file inspection must run on a storage worker" }
+    internal fun inspectSchematic(
+        buildingId: String,
+        settings: PlayerBuildBookStorageSettings,
+    ): PlayerBuildBookDigestInspection = try {
         require(buildingId.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,159}")))
-        val root = resolvedSchematicsRoot()
+        val root = BuilderStoragePaths.schematicsRoot(settings.dataRoot, settings.configuredRoot)
         val target = root.resolve(buildingId)
         require(target.parent == root) { "Player build-book inspection escaped the schematic root" }
         if (inspectRegularFile(target)) {
@@ -145,21 +183,14 @@ object PlayerBuildBookStore {
         PlayerBuildBookDigestInspection.Failed(failure)
     }
 
-    fun schematicSha256(buildingId: String): String? =
-        (inspectSchematic(buildingId) as? PlayerBuildBookDigestInspection.Ready)?.sha256
-
-    private fun resolvedSchematicsRoot(): Path {
-        return BuilderStoragePaths.schematicsRoot()
-    }
-
-    private fun enforceLimit(root: Path, creatorId: UUID) {
+    private fun enforceLimit(root: Path, creatorId: UUID, maxBooksPerPlayer: Int) {
         val prefix = "player-${creatorId.toString().replace("-", "")}-"
         val count = Files.list(root).use { files ->
             files.filter { path ->
                 isRegularFile(path) && path.fileName.toString().startsWith(prefix) && path.fileName.toString().endsWith(".schem")
             }.count()
         }
-        if (count >= BuildBookSettings.maxBooksPerPlayer) throw PlayerBuildBookLimitException()
+        if (count >= maxBooksPerPlayer) throw PlayerBuildBookLimitException()
     }
 
     private fun writeAtomic(target: Path, writeSchematic: (OutputStream) -> Unit): String {

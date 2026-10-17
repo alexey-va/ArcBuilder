@@ -9,9 +9,9 @@ import org.bukkit.NamespacedKey
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.ItemMeta
 import org.bukkit.persistence.PersistentDataType
-import ru.arc.ARC
 import ru.arc.buildertools.BuilderCurrencyPresentation
 import ru.arc.buildertools.BuilderMoney
+import ru.arc.buildertools.BuilderToolsConfiguration
 import ru.arc.config.Config
 import ru.arc.config.ConfigManager
 import ru.arc.util.TextUtil.strip
@@ -205,7 +205,7 @@ data class BuildBookData(
 
 object BuildBookSettings {
     private const val CONFIG_FILE = "auto-build.yml"
-    private val config: Config get() = ConfigManager.ofModule(ARC.instance.dataPath, CONFIG_FILE)
+    private val config: Config get() = BuilderToolsConfiguration.autoBuild()
 
     val maxOffset: Int get() = config.integer("build-book.player-copy.max-offset", 16)
     val maxBooksPerPlayer: Int get() = config.integer("build-book.player-copy.max-per-player", 24)
@@ -229,7 +229,7 @@ object BuildBookSettings {
         else -> activeCustomModelData
     }
 
-    fun validate() = validate(config, mergeForward = true)
+    fun validate() = validate(config, mergeForward = false)
 
     internal fun mergeBundledDefaults(dataRoot: java.nio.file.Path): Boolean =
         Config(dataRoot, ConfigManager.moduleYamlRelative(dataRoot, CONFIG_FILE))
@@ -489,7 +489,7 @@ object BuildBookItems {
         }
 
     fun refreshAppearance(item: ItemStack, data: BuildBookData, modelId: Int = BuildBookSettings.customModelData(data)) {
-        val config = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
+        val config = BuilderToolsConfiguration.autoBuild()
         item.editMeta { meta -> applyAppearance(meta, data, modelId, config) }
     }
 
@@ -497,7 +497,7 @@ object BuildBookItems {
         meta: ItemMeta,
         data: BuildBookData,
         modelId: Int = BuildBookSettings.customModelData(data),
-        config: Config = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml"),
+        config: Config = BuilderToolsConfiguration.autoBuild(),
     ) {
         strip(
             config.component("build-book.display-name", "<#d48763><bold><name>") {

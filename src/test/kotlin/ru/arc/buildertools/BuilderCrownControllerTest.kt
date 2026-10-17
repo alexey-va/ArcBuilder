@@ -26,6 +26,31 @@ import java.nio.file.Files
 import java.util.UUID
 
 class BuilderCrownControllerTest : FunSpec({
+    test("selection crown computes geometry off thread then captures it over several ticks") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("crown-async")
+            val player = paper.addPlayer("AsyncCrown")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            val tasks = QueuedBuilderPlanningTasks()
+            val harness = CrownHarness(paper.createSimplePlugin("AsyncCrown"), tasks = tasks)
+            harness.controller.use { controller ->
+                val selection = harness.select(player.uniqueId, world.uid, 0, 64, 0, 8, 64, 8)
+                val pending = controller.prepareSelection(player, selection, BuilderCrownSelectionOptions(thickness = 2))
+                tasks.captureSteps shouldBe 0
+                pending.isDone shouldBe false
+                tasks.runComputations()
+                tasks.workerRuns shouldBe 1
+                tasks.tick()
+                pending.isDone shouldBe false
+                tasks.captureSteps shouldBe 128
+                val plan = tasks.finish(pending)
+                (plan.changes.size > 128) shouldBe true
+                plan.costs.single().amount shouldBe plan.changes.size
+                world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
+            }
+        }
+    }
+
     test("bundled crown guidance states survival cost and creative exemption") {
         val config = Config(Files.createTempDirectory("arc-builder-crown-guidance-"), "modules/builder-tools.yml")
         val russian = (
@@ -183,11 +208,11 @@ class BuilderCrownControllerTest : FunSpec({
                 val selection = harness.select(player.uniqueId, world.uid, 0, 64, 0, 2, 64, 0)
 
                 player.gameMode = GameMode.SURVIVAL
-                controller.prepareSelection(
+                harness.preparedPlans += controller.prepareSelection(
                     player,
                     selection,
                     BuilderCrownSelectionOptions(thickness = 1, density = BuilderCrownDensity.DENSE),
-                )
+                ).awaitBuilderPlanning()
                 val survival = harness.preparedPlans.single()
                 survival.kind shouldBe BuilderPlanKind.CROWN
                 survival.changes.none { it.position == BuilderBlockPos(world.uid, 1, 64, 0) } shouldBe true
@@ -197,11 +222,11 @@ class BuilderCrownControllerTest : FunSpec({
 
                 harness.preparedPlans.clear()
                 player.gameMode = GameMode.CREATIVE
-                controller.prepareSelection(
+                harness.preparedPlans += controller.prepareSelection(
                     player,
                     selection,
                     BuilderCrownSelectionOptions(thickness = 1, density = BuilderCrownDensity.DENSE),
-                )
+                ).awaitBuilderPlanning()
                 harness.preparedPlans.single().costs shouldBe emptyList()
             }
         }
@@ -233,7 +258,16 @@ class BuilderCrownControllerTest : FunSpec({
     }
 })
 
-private class CrownHarness(plugin: Plugin, maximumScanVolume: Long = 1_000_000L) {
+private class CrownHarness(
+    plugin: Plugin,
+    maximumScanVolume: Long = 1_000_000L,
+    private val tasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
+) {
+    init {
+        org.bukkit.Bukkit.getWorlds().forEach { world ->
+            for (x in -2..2) for (z in -2..2) world.loadChunk(x, z)
+        }
+    }
     val preparedPlans = mutableListOf<BuilderPlan>()
     val failures = mutableListOf<String>()
     var confirmedPlans = 0
@@ -253,14 +287,16 @@ private class CrownHarness(plugin: Plugin, maximumScanVolume: Long = 1_000_000L)
         selections = selections,
         maximumChanges = BuilderPlan.ABSOLUTE_MAX_CHANGES,
         maximumScanVolume = maximumScanVolume,
-        host = object : BuilderCrownHost {
+        host = object : BuilderCrownHost, BuilderPlanningTasks by tasks {
             override fun operationLocked(playerId: UUID): Boolean = false
 
             override fun ensureAvailable(player: org.bukkit.entity.Player) = Unit
 
             override fun ensurePermission(player: org.bukkit.entity.Player) = Unit
 
-            override fun ensureMutable(player: org.bukkit.entity.Player, block: org.bukkit.block.Block) = Unit
+            override fun ensureMutable(player: org.bukkit.entity.Player, block: org.bukkit.block.Block) {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
+            }
 
             override fun placementData(material: Material) = material.createBlockData().also { data ->
                 if (data is Leaves) data.isPersistent = true
@@ -282,6 +318,7 @@ private class CrownHarness(plugin: Plugin, maximumScanVolume: Long = 1_000_000L)
                 changes: List<BuilderBlockChange>,
                 costs: List<BuilderItemAmount>,
             ): BuilderPlan {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 val now = System.currentTimeMillis()
                 return BuilderPlan(
                     id = UUID.randomUUID(),
@@ -293,6 +330,13 @@ private class CrownHarness(plugin: Plugin, maximumScanVolume: Long = 1_000_000L)
                     createdAtMillis = now,
                     expiresAtMillis = now + 30_000L,
                 ).validated()
+            }
+
+            override fun startPlanning(
+                player: org.bukkit.entity.Player,
+                request: (() -> Boolean) -> java.util.concurrent.CompletableFuture<BuilderPlan>,
+            ) {
+                preparePlan(player, request { true }.awaitBuilderPlanning())
             }
 
             override fun preparePlan(player: org.bukkit.entity.Player, plan: BuilderPlan) {

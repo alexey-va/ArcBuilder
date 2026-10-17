@@ -114,9 +114,11 @@ their radius, noise, and palette settings.
 All ordinary world changes use `BuilderPlan` and `BuilderBlockChange` from
 `BuilderToolsDomain.kt`:
 
-1. A feature controller scans the selection on the Paper primary thread. It
-   checks feature permission and protection, then records exact canonical
-   `beforeBlockData` and `afterBlockData`. Planning does not change the world.
+1. A feature controller captures the selection on the Paper primary thread in
+   slices. It checks loaded chunks, feature permission and protection, then
+   records exact canonical `beforeBlockData` and `afterBlockData`. Detached
+   geometry, ordering, validation and material aggregation run asynchronously.
+   Planning does not change the world.
 2. `BuilderToolsRuntime.preparePlan` installs a timed preview. The player still
    owns all materials and the world remains untouched.
 3. `/builder confirm` revalidates the plan, game mode, inventory snapshot,
@@ -136,6 +138,23 @@ All ordinary world changes use `BuilderPlan` and `BuilderBlockChange` from
 inventory exchange, block-safety policy, placement-cost rules, and optional
 CoreProtect bridge. `BuilderPlayerRecoveryCoordinator` owns delayed player-state
 recovery after disconnects or uncertain acknowledgement.
+
+`BuilderPlanningWork` owns one `BuilderPlanningPump` for the runtime. All native
+planning and revalidation requests share a round-robin budget of at most 128
+steps and approximately 2 ms per tick. The time limit is checked between native
+calls; a single Bukkit call cannot be interrupted. A step captures one block or
+one exact item prototype. Repeated item prototypes reuse the captured serialized
+metadata rather than serializing it once per block. Confirmation, undo and
+startup rollback use the same sliced boundary. Request identity and current
+player, world, book, slot and selection state are checked before applying a
+deferred result.
+
+No server-thread path waits for storage completion. Closing a runtime cancels
+native continuations and drains accepted writes on its storage executor. Reload
+waits for that drain asynchronously before opening the replacement journal.
+Shutdown during an unfinished mutation retains its durable preimage and an
+explicit recovery hold; startup reconciles it in slices before refunding or
+acknowledging the operation.
 
 ## Committed neighbour physics
 
@@ -347,6 +366,14 @@ The book subsystem is larger and should be entered through
 - `BuildingManager` and `ConstructionSite` own interactive book previews and
   transforms.
 
+The book SQL lifecycle captures the typed shared service and owner on Paper,
+then acquires its lease and constructs the registry on the storage executor.
+Existing coordinators bind on Paper after creation; migrations remain
+asynchronous and readiness remains false until they finish. The same FIFO owns
+final registry/lease close. Its failure propagates to runtime drain, preventing a
+replacement from silently overtaking an unsuccessful close. Pool settings and
+financial behavior are unchanged.
+
 Confirmed build books do not use the ordinary all-at-once mutation path.
 `BuilderConstructionProject.kt` owns a durable, restart-safe project that
 advances one exact step at a time. A validated door, bed, or other true
@@ -420,6 +447,15 @@ readiness and failures retain their existing feedback. Draft file writes and
 their create-only publication/reconciliation remain domain-owned storage-worker
 operations; loaded content verification is delegated to the shared service.
 
+Player draft creation acquires a preparation lease before deferring work. Native
+block-data conversion uses the shared capture pump; clipboard assembly, content
+hashing and schematic encoding run on workers. The storage adapter captures its
+generation's data root, schematic root and unchanged per-player book limit, so
+accepted writes do not consult cleared global settings during shutdown. Quit,
+cancel, changed clipboard, source slot, permissions or game mode invalidate
+preparation before journal publication. An accepted durable write retains its
+existing recovery contract.
+
 `BuilderBookInteractionPolicy` is the canonical state machine for book clicks.
 A player may own one block preview or one prepared build plan, never both.
 Opening a new block preview discards an existing book plan first; air clicks
@@ -482,17 +518,23 @@ runtime copy. `auto-build.yml` and `system-build-books.yml` are also reload
 inputs: the former is validated and the latter is path/hash checked when the
 candidate is enabled (`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:103-130`).
 
-Startup and an accepted reload both merge missing bundled defaults into the
-base builder and auto-build files, preserving operator values and unknown keys
-through arc-core's `mergeMissingFromBundled`. Reload first snapshots the exact
-bytes and POSIX permissions of both files. Each normal merge-forward is a
-single-file replacement through arc-core `Config.saveStrict`; exact rollback
-restores use `AtomicFileStore`. The two files are not one cross-file
-transaction, so if publication or config-cache reload fails, each snapshot is
-restored and the cache is reloaded as a best-effort rollback. Any rollback
-failure is propagated to the fail-closed path. Reload first validates the
-unmodified candidate; merge-forward is published only after the new runtime has
-been constructed (`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:325-389`).
+Startup and an accepted reload read YAML, prepare the full catalogue, validate
+paths and merge missing bundled defaults on the owned configuration executor.
+Preparation uses an isolated staging directory and preserves operator values
+and unknown keys through arc-core's `mergeMissingFromBundled`. Native material
+registry checks and runtime installation remain on the server thread.
+`BuilderToolsConfiguration` publishes the prepared in-memory configuration as
+one generation. Books and menus read that generation directly; their getters
+do not reopen files or enter `ConfigManager`'s filesystem-backed lookup.
+
+Before publication, input fingerprints must still match the validated candidate.
+Publication snapshots the exact bytes and POSIX permissions of both writable
+files. Each merge-forward is a single-file replacement through arc-core
+`Config.saveStrict`; exact rollback restores use `AtomicFileStore`. The two
+files are not one cross-file transaction. Publication or activation failure
+therefore drains the candidate, restores exact snapshots on the worker, and
+recreates the previous prepared runtime. Rollback failure takes the fail-closed
+path.
 Malformed YAML, wrong scalar types, missing required files, invalid
 limits/locales, and enabled catalogue/auto-build failures reject the candidate.
 Disabled mode still validates shared schema, limits, timers and locales; only
@@ -509,9 +551,10 @@ locale trees at `src/main/resources/modules/builder-tools.yml:225-234,840-849`.
 
 An accepted reload is a runtime-generation replacement, not an in-place field
 edit. The active-state barrier is checked first. A safe candidate is then
-strictly parsed and validated while the old generation is intact; only then is
-the old runtime closed and a new runtime constructed and published
-(`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:43-93`). Consequently
+strictly parsed and validated asynchronously while the old generation is
+intact. The server thread rechecks the barrier, closes the old runtime and
+asynchronously waits for accepted storage work to drain. Only after worker
+publication succeeds does it install the new configuration and runtime. Consequently
 all settings consumed by `BuilderToolsRuntime` are applied together, but the
 following states must be drained first:
 
@@ -557,6 +600,14 @@ must pass the enabled candidate checks and construct all runtime owners; on any
 failure it remains disabled. `/builder reload` itself remains available while
 disabled because module routing handles it before the runtime
 (`src/main/kotlin/ru/arc/buildertools/BuilderToolsModule.kt:64-74,104-159`).
+
+An operator disabling the feature with unresolved durable journals must resolve
+those records before later re-enabling it. Disabled configuration retains its
+existing behavior and does not start recovery or hold a global gameplay barrier.
+The supported enabled startup path installs native protection before asynchronous
+configuration loading and hands it to runtime recovery without a gap. It isolates
+interrupted players and positions before sliced restoration, then releases each
+lease only after exact durable acknowledgement.
 
 Changing `plugin.yml`, permissions, command declarations, soft dependencies, or
 the Paper entry point requires a server restart; those are bootstrap metadata,
@@ -691,6 +742,14 @@ immutable identity and legal state transitions without rescanning every block;
 the store fully validates proposals before committing them. The site display
 consumes those checked records and reuses its layout while the plan, steps,
 anchor and orientation remain unchanged.
+
+Construction region acquisition and release use budgeted leases. Provisional
+positions remain protected until acquisition succeeds or cleanup completes;
+lease identity prevents an old release from unlocking a newer acquisition of
+the same project. Resource menus build an immutable suffix index on a worker
+for each exact step-list source, rather than scanning all remaining steps on
+every refresh. Site layout and large preview coordinate/bounds preparation also
+run asynchronously; source tokens reject results superseded while calculating.
 
 ## Nonblocking construction activation and site visuals
 

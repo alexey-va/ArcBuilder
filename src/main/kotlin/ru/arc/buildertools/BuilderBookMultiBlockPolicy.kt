@@ -12,8 +12,61 @@ internal data class BuilderBookPlannedCell(
     val placement: BuilderBookPlacementResult,
 )
 
+/** Native block state is reduced to immutable pair identity on the server thread. */
+internal data class BuilderBookCapturedCell(
+    val position: BuilderBlockPos,
+    val companion: BuilderBlockPos?,
+    val pairKey: String?,
+    val primary: Boolean,
+    val skippedUnsafe: Boolean,
+    val placement: BuilderBookCapturedChange?,
+)
+
 /** Prevents one half of a bed, door, or other bisected block from entering a book plan alone. */
 internal object BuilderBookMultiBlockPolicy {
+    fun capture(cell: BuilderBookPlannedCell, placement: BuilderBookCapturedChange?): BuilderBookCapturedCell =
+        BuilderBookCapturedCell(
+            position = cell.position,
+            companion = companionPosition(cell.position, cell.after),
+            pairKey = when (val data = cell.after) {
+                is Bed -> "bed:${data.material}:${data.facing}"
+                is Bisected -> if (isVerticalPair(data)) "vertical:${data.material}" else null
+                else -> null
+            },
+            primary = isPrimary(cell.after),
+            skippedUnsafe = cell.placement == BuilderBookPlacementResult.SkippedUnsafe,
+            placement = placement,
+        )
+
+    /** Worker-only counterpart of the native policy; equality includes both bed direction and material. */
+    fun rejectedCaptured(cells: List<BuilderBookCapturedCell>): Set<BuilderBlockPos> {
+        val byPosition = cells.associateBy(BuilderBookCapturedCell::position)
+        return buildSet {
+            cells.forEach { cell ->
+                val companion = cell.companion ?: return@forEach
+                val partner = byPosition[companion]
+                if (partner == null || !matchingCaptured(cell, partner) || cell.skippedUnsafe || partner.skippedUnsafe ||
+                    (cell.placement != null) != (partner.placement != null)) {
+                    add(cell.position)
+                    add(companion)
+                }
+            }
+        }
+    }
+
+    fun primaryFirstCaptured(cells: List<BuilderBookCapturedCell>): List<BuilderBookCapturedCell> {
+        val indexed = cells.withIndex().associateBy { it.value.position }
+        return cells.withIndex().sortedWith(
+            compareBy<IndexedValue<BuilderBookCapturedCell>> { cell ->
+                val partner = cell.value.companion?.let(indexed::get)?.takeIf { matchingCaptured(cell.value, it.value) }
+                minOf(cell.index, partner?.index ?: cell.index)
+            }.thenBy { if (it.value.primary) 0 else 1 }.thenBy { it.index },
+        ).map { it.value }
+    }
+
+    private fun matchingCaptured(first: BuilderBookCapturedCell, second: BuilderBookCapturedCell): Boolean =
+        first.pairKey != null && first.pairKey == second.pairKey && first.primary != second.primary
+
     /** Keeps the item-owning half first and its companion immediately after it. */
     fun primaryFirst(cells: List<BuilderBookPlannedCell>): List<BuilderBookPlannedCell> {
         val indexed = cells.withIndex().associateBy { it.value.position }

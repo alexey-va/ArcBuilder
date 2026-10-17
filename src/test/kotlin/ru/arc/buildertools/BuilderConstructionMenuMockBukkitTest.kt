@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContain
@@ -25,6 +26,59 @@ import java.util.UUID
 import java.util.Locale
 
 class BuilderConstructionMenuMockBukkitTest : FunSpec({
+    test("a delayed resource index cannot open a replaced source and a fresh request retains the exact menu") {
+        withMenuFixture { fixture ->
+            val owner = fixture.paper.addPlayer("DelayedMenu").also { it.setLocale(Locale.forLanguageTag("ru-RU")) }
+            var project = fixture.project(owner.uniqueId)
+            val tasks = QueuedBuilderPlanningTasks()
+            fixture.openManager({ project }, { _, _ -> true }, { _, _, _ -> true }, planningTasks = tasks).use { menu ->
+                menu.open(owner, project)
+                owner.openInventory.type shouldBe InventoryType.CRAFTING
+                project = project.copy(steps = project.steps.map { it.copy() })
+                tasks.runComputations()
+                tasks.tick()
+                owner.openInventory.type shouldBe InventoryType.CRAFTING
+
+                menu.open(owner, project)
+                tasks.runComputations()
+                tasks.tick()
+                owner.openInventory.topInventory.size shouldBe 27
+                owner.openInventory.topInventory.getItem(14)!!.itemMeta.lore().orEmpty()
+                    .joinToString(" | ", transform = ::plain) shouldContain "×12"
+                tasks.workerRuns shouldBe 2
+                project = project.paused(project.updatedAtMillis + 1)
+                menu.refreshProject(project.projectId)
+                fixture.paper.performTicks(1)
+                owner.openInventory.topInventory.getItem(16)?.type shouldBe Material.LIME_DYE
+                tasks.workerRuns shouldBe 2
+            }
+        }
+    }
+
+    test("delayed menu opening respects another inventory and manager closure") {
+        withMenuFixture { fixture ->
+            val owner = fixture.paper.addPlayer("ChangedMenu")
+            val project = fixture.project(owner.uniqueId)
+            val tasks = QueuedBuilderPlanningTasks()
+            fixture.openManager({ project }, { _, _ -> true }, { _, _, _ -> true }, planningTasks = tasks).use { menu ->
+                menu.open(owner, project)
+                val other = fixture.paper.server.createInventory(null, 9)
+                owner.openInventory(other)
+                owner.closeInventory()
+                tasks.runComputations()
+                tasks.tick()
+                owner.openInventory.type shouldBe InventoryType.CRAFTING
+            }
+            owner.closeInventory()
+            val closed = fixture.openManager({ project }, { _, _ -> true }, { _, _, _ -> true }, planningTasks = tasks)
+            closed.open(owner, project)
+            closed.close()
+            tasks.runComputations()
+            tasks.tick()
+            owner.openInventory.type shouldBe InventoryType.CRAFTING
+        }
+    }
+
     test("owner confirms cancellation twice and visitor cannot cancel") {
         withMenuFixture { fixture ->
             val owner = fixture.paper.addPlayer("CancelOwner")
@@ -264,6 +318,7 @@ private class ConstructionMenuFixture(
         requestInstant: (org.bukkit.entity.Player, UUID) -> Boolean = { _, _ -> false },
         requestCancelled: (org.bukkit.entity.Player, UUID) -> Boolean = { _, _ -> false },
         canCancel: (BuilderConstructionProjectRecord) -> Boolean = { false },
+        planningTasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
     ): BuilderConstructionMenuManager = BuilderConstructionMenuManager(
         plugin = plugin,
         settings = config.constructionMenuSettings(),
@@ -276,6 +331,7 @@ private class ConstructionMenuFixture(
         requestInstant = requestInstant,
         requestCancelled = requestCancelled,
         canCancel = canCancel,
+        planningTasks = planningTasks,
     )
 
     fun click(player: org.bukkit.entity.Player, rawSlot: Int): InventoryClickEvent = paper.callEvent(
@@ -303,6 +359,7 @@ private inline fun withMenuFixture(block: (ConstructionMenuFixture) -> Unit) {
     ConfigManager.clear()
     MockBukkitTestRuntime.open().use { paper ->
         val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+        awaitArcBuilderBootstrap(paper, plugin)
         BuilderToolsModule.shutdown()
         try {
             ConstructionMenuFixture(paper, plugin).use(block)

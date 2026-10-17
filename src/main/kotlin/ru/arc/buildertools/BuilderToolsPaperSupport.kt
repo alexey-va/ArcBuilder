@@ -46,6 +46,33 @@ import java.util.Base64
 internal object BuilderItemCodec {
     private val native = NativePaperItemStackBinaryCodec
 
+    /** Server-thread, request-local cache; keys retain all native item metadata. */
+    class PrototypeCache(private val encode: (ItemStack) -> String = ::encodePrototype) {
+        private val prototypes = HashMap<ItemStack, BuilderItemAmount>()
+
+        fun capture(item: ItemStack): BuilderItemAmount {
+            require(!item.type.isAir && item.amount > 0) { "Cannot capture an empty builder item" }
+            val amount = item.amount
+            val prototype = item.clone().also { it.amount = 1 }
+            val encoded = prototypes.getOrPut(prototype) {
+                BuilderItemAmount(encode(prototype), prototype.type.key.toString(), 1).validated()
+            }
+            return encoded.copy(amount = amount)
+        }
+    }
+
+    /** Pure aggregation of captured native prototypes; safe on the planning worker. */
+    fun aggregateAmounts(items: Iterable<BuilderItemAmount>): List<BuilderItemAmount> {
+        val counts = linkedMapOf<Pair<String, String>, BuilderItemAmount>()
+        items.forEach { item ->
+            item.validated()
+            val key = item.itemBase64 to item.materialKey
+            val previous = counts[key]
+            counts[key] = if (previous == null) item else previous.copy(amount = Math.addExact(previous.amount, item.amount))
+        }
+        return counts.values.map(BuilderItemAmount::validated)
+    }
+
     fun encodePrototype(item: ItemStack): String {
         require(!item.type.isAir && item.amount > 0) { "Cannot encode an empty builder-tools item" }
         val prototype = item.clone().also { it.amount = 1 }
@@ -138,14 +165,14 @@ internal class BuilderJournalStore(
     private val maxChanges: Int,
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create(),
 ) {
-    private val journal = DurableRecordJournal(
+    private val journal by lazy { DurableRecordJournal(
         root = dataRoot,
         relativeDirectory = Path.of("data", "builder-tools-journal"),
         maxRecordBytes = 32L * 1024L * 1024L,
         encode = { record: BuilderJournalRecord -> gson.toJson(record).toByteArray(StandardCharsets.UTF_8) },
         decode = { bytes -> gson.fromJson(String(bytes, StandardCharsets.UTF_8), BuilderJournalRecord::class.java) },
         validate = { record -> record.validated(maxChanges) },
-    )
+    ) }
 
     fun commit(record: BuilderJournalRecord): BuilderJournalRecord =
         journal.commit(record.operationId.toString(), record.validated(maxChanges))

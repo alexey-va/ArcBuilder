@@ -36,7 +36,9 @@ internal class BuilderConstructionPlayerLeases(
         val requested = Lease(playerId, containerBlocks)
         val existing = leaseByProject[projectId]
         if (existing != null) return existing == requested
-        if (playerId in projectByPlayer || operationLocks.isPlayerLocked(playerId)) return false
+        // Startup's global event barrier is not an inventory owner. Recovery
+        // must install exact receipt leases before that barrier can be lifted.
+        if (playerId in projectByPlayer || operationLocks.isPlayerLeaseHeld(playerId)) return false
         if (containerBlocks.isNotEmpty() && !operationLocks.tryResourceLock(projectId, containerBlocks)) {
             return false
         }

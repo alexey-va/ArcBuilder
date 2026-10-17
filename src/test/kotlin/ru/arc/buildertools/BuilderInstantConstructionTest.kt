@@ -38,6 +38,54 @@ class BuilderInstantConstructionTest : FunSpec({
         }
         return port
     }
+    test("async instant capture yields and interrupted world prefix replays from the exact durable intent") {
+        val root = Files.createTempDirectory("builder-instant-sliced-")
+        val store = BuilderConstructionProjectStore(root, 10000)
+        val prepared = store.commit(project(300))
+        val active = store.transition(prepared, prepared.activated(1001))
+        val intent = store.transition(active, checkNotNull(BuilderInstantConstruction.prepare(active, admin, 1002)))
+        val blocks = mutableMapOf<BuilderBlockPos, String>()
+        val port = worldPort(blocks)
+        val tasks = QueuedBuilderPlanningTasks()
+        var current = true
+        val pending = BuilderInstantConstruction.applyBatchAsync(intent, 1003, port, tasks) { current }
+        repeat(12) { tasks.tick(25) }
+        blocks.size shouldBe 0
+        pending.isDone shouldBe false
+        tasks.tick(25)
+        blocks.size shouldBe 25
+        current = false
+        tasks.tick(25)
+        pending.isCompletedExceptionally shouldBe true
+        val restored = checkNotNull(BuilderConstructionProjectStore(root, 10000).loadOrNull(intent.projectId))
+        restored shouldBe intent
+        restored.cursor shouldBe 0
+        restored.plan.costs shouldBe listOf(book, stone.copy(amount = 300))
+        val retryTasks = QueuedBuilderPlanningTasks()
+        val resumed = retryTasks.finish(BuilderInstantConstruction.applyBatchAsync(restored, 1004, port, retryTasks) { true })
+        store.transition(restored, checkNotNull(resumed)).state shouldBe BuilderConstructionProjectState.COMPLETED
+        blocks.size shouldBe 300
+        verify(exactly = 300) { port.apply(any(), any()) }
+        verify(exactly = 0) { port.prepareInput(any(), any(), any()); port.prepareOutput(any(), any(), any()) }
+    }
+
+    test("async ordinary world batch preserves the configured limit and exact state transition") {
+        val original = project(30)
+        val noExchange = original.copy(
+            steps = original.steps.map { it.copy(requiredMaterial = null) },
+            plan = original.plan.copy(costs = listOf(book)),
+        ).validated().activated(1001)
+        val expected = BuilderConstructionProjectController.tick(noExchange, 1002, worldPort(), 10)
+        val blocks = mutableMapOf<BuilderBlockPos, String>()
+        val tasks = QueuedBuilderPlanningTasks()
+        val pending = BuilderConstructionProjectController.tickAsync(noExchange, 1002, worldPort(blocks), 10, tasks) { true }
+        tasks.tick(3)
+        blocks.size shouldBe 3
+        pending.isDone shouldBe false
+        tasks.finish(pending) shouldBe expected
+        blocks.size shouldBe 10
+    }
+
     test("waiting project completes all remaining blocks in one batch with no resource calls") {
         val active = project().activated(1001).waitingForMaterials(1002)
         val intent = checkNotNull(BuilderInstantConstruction.prepare(active, admin, 1003))

@@ -2,6 +2,17 @@ package ru.arc.buildertools
 
 import ru.arc.core.LifecycleTaskScope
 
+/** Detached point and index arrays can be prepared by a worker before the server-thread window is installed. */
+internal class BuilderPreviewPointSnapshot private constructor(
+    val points: List<BuilderPreviewPoint>,
+    val indices: List<Int>,
+) {
+    companion object {
+        fun copyOf(points: List<BuilderPreviewPoint>): BuilderPreviewPointSnapshot =
+            BuilderPreviewPointSnapshot(points.toList(), points.indices.toList())
+    }
+}
+
 /**
  * Calculates the nearest preview points away from the server thread.
  *
@@ -11,18 +22,26 @@ import ru.arc.core.LifecycleTaskScope
  */
 internal class BuilderAsyncPreviewWindow(
     private val taskScope: LifecycleTaskScope,
-    points: List<BuilderPreviewPoint>,
+    snapshot: BuilderPreviewPointSnapshot,
     private val limit: Int,
     private val onChange: (List<Int>) -> Unit,
     private val onFailure: (Throwable) -> Unit,
 ) : AutoCloseable {
+    constructor(
+        taskScope: LifecycleTaskScope,
+        points: List<BuilderPreviewPoint>,
+        limit: Int,
+        onChange: (List<Int>) -> Unit,
+        onFailure: (Throwable) -> Unit,
+    ) : this(taskScope, BuilderPreviewPointSnapshot.copyOf(points), limit, onChange, onFailure)
+
     private data class Request(
         val eye: BuilderPreviewPoint,
         val generation: Long,
     )
 
-    private val points = points.toList()
-    private val pointIndices = this.points.indices.toList()
+    private val points = snapshot.points
+    private val pointIndices = snapshot.indices
     private var generation = 0L
     private var closed = false
     private var currentEye: BuilderPreviewPoint? = null

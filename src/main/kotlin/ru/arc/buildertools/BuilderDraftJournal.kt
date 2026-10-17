@@ -121,14 +121,14 @@ internal class BuilderDraftJournal(
     private val maxBlocks: Int,
     gson: Gson = GsonBuilder().disableHtmlEscaping().create(),
 ) {
-    private val journal = DurableRecordJournal(
+    private val journal by lazy { DurableRecordJournal(
         root = dataRoot,
         relativeDirectory = Path.of("data", "builder-book-draft-journal"),
         maxRecordBytes = 64L * 1024L,
         encode = { record: BuilderDraftRecord -> gson.toJson(record).toByteArray(StandardCharsets.UTF_8) },
         decode = { bytes -> gson.fromJson(String(bytes, StandardCharsets.UTF_8), BuilderDraftRecord::class.java) },
         validate = { record -> record.validated(maxBlocks) },
-    )
+    ) }
 
     @Synchronized
     fun commit(record: BuilderDraftRecord): BuilderDraftRecord {

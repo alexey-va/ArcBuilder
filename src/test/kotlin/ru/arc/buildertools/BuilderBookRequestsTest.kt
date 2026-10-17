@@ -121,6 +121,42 @@ class BuilderBookRequestsTest : FunSpec({
         } finally { io.mockk.unmockkStatic(Bukkit::class) }
     }
 
+    test("a new preview keeps accepted independent issuance tickets alive") {
+        io.mockk.mockkStatic(Bukkit::class)
+        try {
+            val f = Fixture()
+            every { Bukkit.getPlayer(f.player.uniqueId) } returns f.player
+            val grant = CompletableFuture<String>()
+            f.requests.run(f.player, null, request = { grant }, latestOnly = false,
+                failed = { f.failed++ }, ready = { f.accepted += it })
+            val preview = f.request()
+            f.requests.size shouldBe 2
+            f.settle(grant, "grant")
+            f.settle(preview, "preview")
+            f.accepted shouldBe listOf("grant", "preview")
+            f.failed shouldBe 0
+            f.requests.size shouldBe 0
+            f.scope.close()
+        } finally { io.mockk.unmockkStatic(Bukkit::class) }
+    }
+
+    test("capture context fence observes book and lifecycle changes before a future completes") {
+        val f = Fixture()
+        var current: (() -> Boolean)? = null
+        val future = CompletableFuture<String>()
+        f.requests.run(f.player, BuilderLocatedBook(0, f.item, BuildBookData("civs/house", "House")),
+            request = { fence -> current = fence; future }, failed = { f.failed++ }, ready = { f.accepted += it })
+        checkNotNull(current).invoke() shouldBe true
+        f.heldSlot = 1
+        checkNotNull(current).invoke() shouldBe false
+        f.heldSlot = 0
+        f.requests.invalidate(f.player.uniqueId)
+        checkNotNull(current).invoke() shouldBe false
+        f.settle(future)
+        f.accepted shouldBe emptyList()
+        f.scope.close()
+    }
+
     test("cancel and lifecycle shutdown reject pending responses") {
         val f = Fixture()
         val cancelled = f.request()

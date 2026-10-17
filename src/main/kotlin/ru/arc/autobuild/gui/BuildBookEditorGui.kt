@@ -17,8 +17,8 @@ import ru.arc.autobuild.PreviewTransformUpdateResult
 import ru.arc.buildertools.BuilderBookCopyPolicy
 import ru.arc.buildertools.BuilderCurrencyPresentation
 import ru.arc.buildertools.BuilderMoney
+import ru.arc.buildertools.BuilderToolsConfiguration
 import ru.arc.config.Config
-import ru.arc.config.ConfigManager
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.menu.MenuContract
 import ru.arc.menu.MenuElementId
@@ -35,7 +35,7 @@ import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.util.TextUtil
 
 object BuildBookEditorGui {
-    private val config: Config get() = ConfigManager.ofModule(ARC.instance.dataPath, "auto-build.yml")
+    private val config: Config get() = BuilderToolsConfiguration.autoBuild()
     private var runtime: PaperMenuRuntime? = null
     private val itemFactory = PaperMenuItemFactory(
         externalItems = PaperMenuItemsAdderResolver(

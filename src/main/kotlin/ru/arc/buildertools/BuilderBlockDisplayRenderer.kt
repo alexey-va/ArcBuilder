@@ -69,6 +69,21 @@ internal object BuilderPreviewWindow {
     }
 }
 
+internal data class BuilderPlanPreviewGeometry(
+    val points: BuilderPreviewPointSnapshot,
+    val bounds: List<BuilderDisplayEdge>,
+) {
+    companion object {
+        fun create(changes: List<BuilderBlockChange>): BuilderPlanPreviewGeometry {
+            val positions = changes.map(BuilderBlockChange::position)
+            return BuilderPlanPreviewGeometry(
+                BuilderPreviewPointSnapshot.copyOf(positions.map { BuilderPreviewPoint(it.x + .5, it.y + .5, it.z + .5) }),
+                BuilderDisplayGeometry.bounds(positions),
+            )
+        }
+    }
+}
+
 /** Client-only BlockDisplay scenes; world reads stay on the server thread. */
 internal class BuilderBlockDisplayRenderer(
     private val plugin: JavaPlugin,
@@ -120,9 +135,11 @@ internal class BuilderBlockDisplayRenderer(
     )
     private data class BookBlock(val location: Location, val blockData: BlockData)
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
+    private class PlanCalculation(val plan: BuilderPlan)
     private val scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
     private val suppressedSelectionGlow = mutableSetOf<UUID>()
     private val movingPreviews = mutableMapOf<Pair<UUID, Layer>, MovingPreview>()
+    private val pendingPlans = mutableMapOf<UUID, PlanCalculation>()
     private val bookSites = mutableMapOf<UUID, ConstructionSite>()
     private val bookBossBars = mutableMapOf<UUID, BossBar>()
     private var viewerRefresh: ScheduledTask? = null
@@ -160,7 +177,7 @@ internal class BuilderBlockDisplayRenderer(
         val worldId: UUID,
         val layer: Layer,
         val sourceId: UUID?,
-        positions: List<BuilderBlockPos>,
+        points: BuilderPreviewPointSnapshot,
         private val decorations: List<DisplaySpec>,
         private val createSpec: (Int) -> DisplaySpec?,
     ) : AutoCloseable {
@@ -171,7 +188,7 @@ internal class BuilderBlockDisplayRenderer(
         private var rendered = false
         private val window = BuilderAsyncPreviewWindow(
             taskScope,
-            positions.map { BuilderPreviewPoint(it.x + .5, it.y + .5, it.z + .5) },
+            points,
             maxPlanDisplays,
             onChange = { indices ->
                 if (isVisible()) {
@@ -258,6 +275,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun plan(player: Player, plan: BuilderPlan) {
+        if (closed) return
         if (plan.changes.firstOrNull()?.position?.worldId != player.world.uid) {
             clearPlan(player.uniqueId)
             return
@@ -267,11 +285,45 @@ internal class BuilderBlockDisplayRenderer(
             it.refreshSurface()
             return
         }
-        val positions = plan.changes.map(BuilderBlockChange::position)
+        if (pendingPlans[player.uniqueId]?.plan === plan) return
+        val request = PlanCalculation(plan)
+        val playerId = player.uniqueId
+        val worldId = player.world.uid
+        pendingPlans[playerId] = request
         movingPreviews.remove(key)?.close()
+        try {
+            val token = taskScope.token()
+            checkNotNull(taskScope.runAsync(token) {
+                val model = runCatching { BuilderPlanPreviewGeometry.create(plan.changes) }
+                taskScope.runSync(token) {
+                    if (!closed && pendingPlans[playerId] === request) {
+                        pendingPlans.remove(playerId)
+                        if (player.isOnline && player.world.uid == worldId) {
+                            model.fold(
+                                onSuccess = { geometry ->
+                                    runCatching { installPlan(player, plan, geometry) }.onFailure { planFailed(playerId, it) }
+                                },
+                                onFailure = { planFailed(playerId, it) },
+                            )
+                        }
+                    }
+                }
+            }) { "Builder preview geometry task was not scheduled" }
+        } catch (failure: Throwable) {
+            if (pendingPlans.remove(playerId, request)) planFailed(playerId, failure)
+        }
+    }
+
+    private fun planFailed(playerId: UUID, failure: Throwable) {
+        remove(playerId, Layer.PLAN)
+        plugin.logger.warning("Builder preview geometry failed for $playerId: ${failure.message}")
+    }
+
+    private fun installPlan(player: Player, plan: BuilderPlan, geometry: BuilderPlanPreviewGeometry) {
+        val key = player.uniqueId to Layer.PLAN
         movingPreviews[key] = MovingPreview(
-            player, player.world.uid, Layer.PLAN, plan.id, positions,
-            bounds(positions, Material.MAGENTA_STAINED_GLASS, Color.fromRGB(197, 116, 255)),
+            player, player.world.uid, Layer.PLAN, plan.id, geometry.points,
+            edgeSpecs(geometry.bounds, Material.MAGENTA_STAINED_GLASS, Color.fromRGB(197, 116, 255)),
         ) { index ->
             val change = plan.changes[index]
             val after = Bukkit.createBlockData(change.afterBlockData)
@@ -293,6 +345,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun clearPlan(playerId: UUID) {
+        pendingPlans.remove(playerId)
         movingPreviews.remove(playerId to Layer.PLAN)?.close()
         remove(playerId, Layer.PLAN)
     }
@@ -395,7 +448,9 @@ internal class BuilderBlockDisplayRenderer(
             }
         }
         movingPreviews[key] = MovingPreview(
-            site.player, site.world.uid, Layer.BOOK, null, model.bounds, decorations,
+            site.player, site.world.uid, Layer.BOOK, null,
+            BuilderPreviewPointSnapshot.copyOf(model.bounds.map { BuilderPreviewPoint(it.x + .5, it.y + .5, it.z + .5) }),
+            decorations,
         ) { index ->
             val block = model.blocks[index]
             val position = model.bounds[index]
@@ -457,8 +512,12 @@ internal class BuilderBlockDisplayRenderer(
     )
 
     private fun bounds(positions: List<BuilderBlockPos>, material: Material, glow: Color): List<DisplaySpec> {
+        return edgeSpecs(BuilderDisplayGeometry.bounds(positions), material, glow)
+    }
+
+    private fun edgeSpecs(edges: List<BuilderDisplayEdge>, material: Material, glow: Color): List<DisplaySpec> {
         val data = material.createBlockData()
-        return BuilderDisplayGeometry.bounds(positions).map { edge ->
+        return edges.map { edge ->
             DisplaySpec(
                 edge.x,
                 edge.y,
@@ -557,11 +616,13 @@ internal class BuilderBlockDisplayRenderer(
 
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
+        pendingPlans.remove(event.player.uniqueId)
         scenes.values.forEach { it.audience.removeViewer(event.player.uniqueId) }
         packets.forget(event.player)
     }
 
     private fun resetViewer(playerId: UUID) {
+        pendingPlans.remove(playerId)
         scenes.values.forEach { it.audience.removeViewer(playerId) }
         movingPreviews.filterKeys { it.first == playerId }.values.forEach(MovingPreview::suspend)
         refreshViewersNextTick()
@@ -594,6 +655,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun clearPlayer(playerId: UUID) {
+        pendingPlans.remove(playerId)
         suppressedSelectionGlow.remove(playerId)
         movingPreviews.keys.filter { it.first == playerId }.forEach { movingPreviews.remove(it)?.close() }
         Layer.entries.forEach { remove(playerId, it) }
@@ -614,6 +676,7 @@ internal class BuilderBlockDisplayRenderer(
         suppressedSelectionGlow.clear()
         movingPreviews.values.forEach(MovingPreview::close)
         movingPreviews.clear()
+        pendingPlans.clear()
         packets.close()
     }
 }

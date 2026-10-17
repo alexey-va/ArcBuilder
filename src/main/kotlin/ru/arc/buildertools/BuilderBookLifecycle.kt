@@ -21,6 +21,9 @@ import ru.arc.onetime.OneTimeUseClaim
 import ru.arc.onetime.OneTimeUseClaimResult
 import ru.arc.onetime.OneTimeUseCommitResult
 import ru.arc.sql.SqlRuntime
+import ru.arc.paper.api.ArcSqlService
+import ru.arc.paper.api.ArcSqlSettings
+import ru.arc.paper.api.ArcSqlSslMode
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.observability.StructuredDebugLine
 import ru.arc.util.Logging.error
@@ -91,6 +94,8 @@ internal class BuilderBookLifecycle(
     draftStorage: BuilderDraftStorage,
     private val schematicVerifier: BuilderBookSchematicVerifier = PlayerBuildBookSchematicVerifier,
     private val loadBuilding: (String, String?) -> CompletableFuture<Building>,
+    private val registryFactory: (() -> BuilderBookRegistry)? = null,
+    private val walletFactory: () -> BuilderBookWallet = { RedisEconomyBuilderBookWallet() },
 ) : AutoCloseable {
     private data class PendingMint(
         val kind: BuilderBookMintKind,
@@ -117,92 +122,92 @@ internal class BuilderBookLifecycle(
         journal = draftJournal,
         storage = draftStorage,
     )
-    private val registry: BuilderBookRegistry? = if (config.bookContractsEnabled) {
-        runCatching {
-            BuilderBookSqlRegistry(
-                SqlRuntime.create(config.bookSqlConfig().connection(), "arc-builder-books"),
+    val recoveryIsolationReady: CompletableFuture<Unit> get() = drafts.isolationReady
+    @Volatile private var registry: BuilderBookRegistry? = null
+    private var releaseQueue: BuilderBookReleaseQueue? = null
+    private var mintCoordinator: BuilderBookMintCoordinator? = null
+    private var statusVerifier: BuilderBookStatusVerifier? = null
+    private var auctionCoordinator: BuilderBookAuctionCoordinator? = null
+    val closeCompletion = CompletableFuture<Unit>()
+
+    /** Coordinators own native callbacks; construct them only after worker SQL acquisition. */
+    private fun bindRegistry(activeRegistry: BuilderBookRegistry) {
+        releaseQueue = activeRegistry.let { activeRegistry ->
+            BuilderBookReleaseQueue(
+                release = activeRegistry.oneTimeUses::release,
+                runSync = { action -> taskScope.runSync(action) },
+                onPending = { claim, result, failure ->
+                    warn(
+                        "Builder-book reservation release queued for retry: instance={} operation={} type={} result={}",
+                        claim.identity.useId,
+                        claim.claimId,
+                        BuilderToolsFailureType.of(failure),
+                        result,
+                    )
+                },
+                onRecovered = { claim ->
+                    info(
+                        "Builder-book reservation release recovered: instance={} operation={}",
+                        claim.identity.useId,
+                        claim.claimId,
+                    )
+                },
+                onCallbackFailure = { failure ->
+                    error(
+                        "Builder-book reservation release callback failed: type=${BuilderToolsFailureType.of(failure)}",
+                    )
+                },
             )
-        }.onFailure { failure ->
-            error("Builder-book MySQL runtime could not be created: type=${BuilderToolsFailureType.of(failure)}")
-        }.getOrNull()
-    } else {
-        null
-    }
-    private val releaseQueue = registry?.let { activeRegistry ->
-        BuilderBookReleaseQueue(
-            release = activeRegistry.oneTimeUses::release,
-            runSync = { action -> taskScope.runSync(action) },
-            onPending = { claim, result, failure ->
-                warn(
-                    "Builder-book reservation release queued for retry: instance={} operation={} type={} result={}",
-                    claim.identity.useId,
-                    claim.claimId,
-                    BuilderToolsFailureType.of(failure),
-                    result,
-                )
-            },
-            onRecovered = { claim ->
-                info(
-                    "Builder-book reservation release recovered: instance={} operation={}",
-                    claim.identity.useId,
-                    claim.claimId,
-                )
-            },
-            onCallbackFailure = { failure ->
-                error(
-                    "Builder-book reservation release callback failed: type=${BuilderToolsFailureType.of(failure)}",
-                )
-            },
-        )
-    }
-    private val mintCoordinator = registry?.let { registry ->
-        BuilderBookMintCoordinator(
-            registry = registry,
-            wallet = RedisEconomyBuilderBookWallet(),
-            runSync = { action -> taskScope.runSync(action) },
-            onManualReview = { mint ->
-                error(
-                    "Builder-book mint requires manual review: " +
-                        "transaction=${mint.transactionId} player=${mint.playerId} status=${mint.status}",
-                )
-            },
-        )
-    }
-    private val statusVerifier = registry?.let { registry ->
-        BuilderBookStatusVerifier(
-            loadInstance = registry::loadInstance,
-            loadBlueprint = registry::loadBlueprint,
-            runSync = { action -> taskScope.runSync(action) },
-        )
-    }
-    private val auctionCoordinator = registry?.let { registry ->
-        val serverName = ARC.serverName ?: return@let null
-        BuilderBookAuctionCoordinator(
-            registry = registry,
-            portProvider = { HookRegistry.auctionHook },
-            serverName = serverName,
-            runSync = { action -> taskScope.runSync(action) },
-            send = { player, path, values ->
-                send(
-                    player,
-                    path,
-                    values.mapValues { (key, value) ->
-                        if (key == "price") moneyLabel(value) else messages.literal(value)
-                    },
-                )
-            },
-            lock = operationLocks::tryBookLock,
-            unlock = operationLocks::unlockBook,
-            recoveryRetryMillis = config.bookAuctionRecoveryRetry.toMillis(),
-        )
+        }
+        mintCoordinator = activeRegistry.let { registry ->
+            BuilderBookMintCoordinator(
+                registry = registry,
+                wallet = walletFactory(),
+                runSync = { action -> taskScope.runSync(action) },
+                onManualReview = { mint ->
+                    error(
+                        "Builder-book mint requires manual review: " +
+                            "transaction=${mint.transactionId} player=${mint.playerId} status=${mint.status}",
+                    )
+                },
+            )
+        }
+        statusVerifier = activeRegistry.let { registry ->
+            BuilderBookStatusVerifier(
+                loadInstance = registry::loadInstance,
+                loadBlueprint = registry::loadBlueprint,
+                runSync = { action -> taskScope.runSync(action) },
+            )
+        }
+        auctionCoordinator = activeRegistry.let { registry ->
+            val serverName = ARC.serverName ?: return@let null
+            BuilderBookAuctionCoordinator(
+                registry = registry,
+                portProvider = { HookRegistry.auctionHook },
+                serverName = serverName,
+                runSync = { action -> taskScope.runSync(action) },
+                send = { player, path, values ->
+                    send(
+                        player,
+                        path,
+                        values.mapValues { (key, value) ->
+                            if (key == "price") moneyLabel(value) else messages.literal(value)
+                        },
+                    )
+                },
+                lock = operationLocks::tryBookLock,
+                unlock = operationLocks::unlockBook,
+                recoveryRetryMillis = config.bookAuctionRecoveryRetry.toMillis(),
+            )
+        }
     }
     private val pendingMints = mutableMapOf<UUID, PendingMint>()
     private val deliveryWaitingForSpace = mutableSetOf<UUID>()
     private val deliveryRecoveries = mutableSetOf<UUID>()
     private var registryReady = !config.bookContractsEnabled
-    private var registryFailed = config.bookContractsEnabled && registry == null
+    private var registryFailed = false
     private var recoveryBlocked = false
-    private var closed = false
+    @Volatile private var closed = false
 
     fun start() {
         check(!closed) { "Builder-book lifecycle is closed" }
@@ -222,7 +227,7 @@ internal class BuilderBookLifecycle(
             },
         ) { "Builder-book delivery retry task was not scheduled" }
         drafts.start()
-        initializeContracts()
+        startContracts()
     }
 
     fun health(): BuilderBookLifecycleHealth {
@@ -333,7 +338,8 @@ internal class BuilderBookLifecycle(
     fun invalidateSchematicRequests(playerId: UUID): Boolean {
         val loading = schematicRequests.invalidate(playerId)
         val quoting = quoteRequests.invalidate(playerId)
-        return loading || quoting
+        val preparing = drafts.cancelPreparation(playerId)
+        return loading || quoting || preparing
     }
 
     fun cancelPreviewActivation(playerId: UUID) {
@@ -1098,10 +1104,93 @@ internal class BuilderBookLifecycle(
         return registry ?: fail("book.registry-unavailable")
     }
 
+    private fun startContracts() {
+        if (!config.bookContractsEnabled) return
+        val factory = try {
+            registryFactory ?: captureRegistryFactory()
+        } catch (failure: Throwable) {
+            failRegistryStartup(failure)
+            return
+        }
+        try {
+            storageExecutor.execute {
+                if (closed) return@execute
+                val created = runCatching(factory)
+                // The same FIFO executor owns creation and final close even if the native
+                // completion is cancelled while acquisition is still blocked in the provider.
+                registry = created.getOrNull()
+                taskScope.runSync {
+                    if (closed) return@runSync
+                    val activeRegistry = created.getOrElse {
+                        failRegistryStartup(it)
+                        return@runSync
+                    }
+                    try {
+                        bindRegistry(activeRegistry)
+                        initializeContracts()
+                    } catch (failure: Throwable) {
+                        failRegistryStartup(failure)
+                    }
+                }
+            }
+        } catch (failure: RejectedExecutionException) {
+            failRegistryStartup(failure)
+        }
+    }
+
+    /** Resolve Bukkit's service only on Paper; acquisition and release remain worker-owned. */
+    private fun captureRegistryFactory(): () -> BuilderBookRegistry {
+        val plugin = ARC.instance
+        val service = checkNotNull(plugin.server.servicesManager.load(ArcSqlService::class.java)) {
+            "Required ArcSqlService is not registered; refusing a private SQL pool"
+        }
+        val owner = plugin.name
+        val sqlConfig = config.bookSqlConfig()
+        return {
+            val connection = sqlConfig.connection()
+            val settings = ArcSqlSettings(
+                host = connection.host,
+                port = connection.port,
+                database = connection.database,
+                username = connection.username,
+                password = connection.password,
+                sslMode = ArcSqlSslMode.valueOf(connection.sslMode.name),
+                minimumIdle = connection.minimumIdle,
+                maximumPoolSize = connection.maximumPoolSize,
+                connectionTimeoutMs = connection.connectionTimeoutMs,
+                socketTimeoutMs = connection.socketTimeoutMs,
+                validationTimeoutMs = connection.validationTimeoutMs,
+                maxLifetimeMs = connection.maxLifetimeMs,
+                failFast = connection.failFast,
+            )
+            val lease = service.acquire(owner, settings)
+            val runtime = SqlRuntime.borrow(
+                dataSource = lease.dataSource,
+                executor = lease.executor,
+                completionExecutor = lease.completionExecutor,
+                lease = lease,
+                evictConnection = lease::evictConnection,
+            )
+            try {
+                BuilderBookSqlRegistry(runtime)
+            } catch (failure: Throwable) {
+                runCatching(runtime::close).exceptionOrNull()?.let(failure::addSuppressed)
+                throw failure
+            }
+        }
+    }
+
+    private fun failRegistryStartup(failure: Throwable) {
+        registryFailed = true
+        registryReady = false
+        error("Builder-book MySQL runtime could not be initialized: type=${BuilderToolsFailureType.of(failure)}")
+    }
+
     private fun initializeContracts() {
         val activeRegistry = registry ?: return
         activeRegistry.initialize().whenComplete { _, failure ->
             taskScope.runSync {
+                if (closed) return@runSync
                 if (failure != null) {
                     registryFailed = true
                     error("Builder-book MySQL initialization failed: type=${BuilderToolsFailureType.of(failure)}")
@@ -1505,16 +1594,33 @@ internal class BuilderBookLifecycle(
     override fun close() {
         if (closed) return
         closed = true
-        schematicRequests.close()
-        quoteRequests.close()
-        auctionCoordinator?.close()
-        statusVerifier?.close()
-        drafts.close()
-        releaseQueue?.close()
-        pendingMints.clear()
-        deliveryWaitingForSpace.clear()
-        deliveryRecoveries.clear()
-        mintCoordinator?.clear()
-        registry?.close()
+        try {
+            schematicRequests.close()
+            quoteRequests.close()
+            auctionCoordinator?.close()
+            statusVerifier?.close()
+            drafts.close()
+            releaseQueue?.close()
+            pendingMints.clear()
+            deliveryWaitingForSpace.clear()
+            deliveryRecoveries.clear()
+            mintCoordinator?.clear()
+        } finally {
+            try {
+                storageExecutor.execute {
+                    try {
+                        registry?.close()
+                        registry = null
+                        closeCompletion.complete(Unit)
+                    } catch (failure: Throwable) {
+                        closeCompletion.completeExceptionally(failure)
+                        error("Builder-book MySQL close failed: type=${BuilderToolsFailureType.of(failure)}")
+                    }
+                }
+            } catch (failure: RejectedExecutionException) {
+                closeCompletion.completeExceptionally(failure)
+                error("Builder-book MySQL close could not be scheduled: type=${BuilderToolsFailureType.of(failure)}")
+            }
+        }
     }
 }

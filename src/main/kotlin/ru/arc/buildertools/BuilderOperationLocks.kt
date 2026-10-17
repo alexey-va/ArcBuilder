@@ -29,6 +29,12 @@ import org.bukkit.event.inventory.InventoryOpenEvent
 import org.bukkit.event.inventory.InventoryPickupItemEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerDropItemEvent
+import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.event.player.PlayerInteractEntityEvent
+import org.bukkit.event.player.PlayerInteractAtEntityEvent
+import org.bukkit.event.player.PlayerArmorStandManipulateEvent
+import org.bukkit.event.player.PlayerItemConsumeEvent
+import org.bukkit.event.player.PlayerItemDamageEvent
 import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.entity.Player
@@ -38,6 +44,13 @@ import org.bukkit.inventory.Inventory
 import org.bukkit.plugin.Plugin
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+
+/** Opaque acquisition identity; a resumed project receives a fresh lease even when its plan ID is unchanged. */
+internal class BuilderBlockLockLease internal constructor(internal val plan: BuilderPlan) {
+    internal var acquiredCount = 0
+    internal var releaseFuture: CompletableFuture<Unit>? = null
+}
 
 internal enum class BuilderCommitBoundary {
     /** The durable record is not committed, so interruption may still roll the mutation back. */
@@ -91,15 +104,17 @@ internal data class BuilderActiveOperation(
  *
  * The registry owns acquisition, release, event isolation, and listener
  * cleanup together. Async storage callbacks must marshal to the Paper primary
- * thread before calling it. A block lock is identified by the exact operation
- * UUID so an old completion cannot release a newer operation's blocks.
+ * thread before calling it. A block lock is identified by the exact lease,
+ * so an old completion cannot release a newer acquisition of the same plan.
  */
 internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
     private val activeOperations = mutableMapOf<UUID, BuilderActiveOperation>()
-    private val lockedBlocks = mutableMapOf<BuilderBlockPos, UUID>()
+    private var lockedBlocks = mutableMapOf<BuilderBlockPos, BuilderBlockLockLease>()
+    private var ordinaryLeases = mutableMapOf<UUID, BuilderBlockLockLease>()
     private val resourceLockedBlocks = mutableMapOf<BuilderBlockPos, UUID>()
     private val bookLockedPlayers = mutableSetOf<UUID>()
     private val recoveryLockedPlayers = mutableSetOf<UUID>()
+    private var recoveryBarrier = false
     private var closed = false
 
     init {
@@ -108,12 +123,70 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
 
     fun tryLock(plan: BuilderPlan): Boolean {
         if (closed || plan.changes.any { lockedBlocks.containsKey(it.position) }) return false
-        plan.changes.forEach { lockedBlocks[it.position] = plan.id }
+        val lease = BuilderBlockLockLease(plan)
+        plan.changes.forEach { lockedBlocks[it.position] = lease }
+        lease.acquiredCount = plan.changes.size
+        ordinaryLeases[plan.id] = lease
         return true
     }
 
     fun unlock(plan: BuilderPlan) {
-        plan.changes.forEach { change -> lockedBlocks.remove(change.position, plan.id) }
+        val lease = ordinaryLeases.remove(plan.id) ?: return
+        lease.plan.changes.forEach { change -> lockedBlocks.remove(change.position, lease) }
+    }
+
+    /**
+     * Captures one provisional block lock per shared-budget step. Provisional locks
+     * already isolate world events, but the caller may mutate only after receiving
+     * the complete lease and revalidating its world snapshot. Collision and context
+     * cancellation finish only after all provisional locks have been released.
+     */
+    fun acquireAsync(
+        plan: BuilderPlan,
+        tasks: BuilderPlanningTasks,
+        isCurrent: () -> Boolean,
+    ): CompletableFuture<BuilderBlockLockLease?> {
+        if (closed) return CompletableFuture.completedFuture(null)
+        val lease = BuilderBlockLockLease(plan)
+        val result = CompletableFuture<BuilderBlockLockLease?>()
+        var collision = false
+        tasks.capture({ !closed && !result.isCancelled && isCurrent() }) {
+            if (lease.acquiredCount == plan.changes.size) return@capture true
+            val position = plan.changes[lease.acquiredCount].position
+            if (position in lockedBlocks) {
+                collision = true
+                true
+            } else {
+                lockedBlocks[position] = lease
+                lease.acquiredCount++
+                false
+            }
+        }.whenComplete { _, failure ->
+            if (failure != null || collision || result.isCancelled) {
+                releaseAsync(lease, tasks).whenComplete { _, releaseFailure ->
+                    when {
+                        failure != null -> result.completeExceptionally(failure)
+                        releaseFailure != null -> result.completeExceptionally(releaseFailure)
+                        else -> result.complete(null)
+                    }
+                }
+            } else if (!result.complete(lease)) {
+                releaseAsync(lease, tasks)
+            }
+        }
+        return result
+    }
+
+    /** Release is idempotent and compares the exact acquisition identity, never only the reusable plan ID. */
+    fun releaseAsync(lease: BuilderBlockLockLease, tasks: BuilderPlanningTasks): CompletableFuture<Unit> {
+        lease.releaseFuture?.let { return it }
+        if (closed || lease.acquiredCount == 0) return CompletableFuture.completedFuture(Unit).also { lease.releaseFuture = it }
+        var cursor = 0
+        return tasks.capture({ !closed }) {
+            if (cursor == lease.acquiredCount) return@capture true
+            lockedBlocks.remove(lease.plan.changes[cursor++].position, lease)
+            false
+        }.also { lease.releaseFuture = it }
     }
 
     /**
@@ -125,7 +198,7 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
         if (closed) return false
         val distinct = positions.toSet()
         if (distinct.any { position ->
-                lockedBlocks[position]?.let { it != projectId } == true ||
+                lockedBlocks[position]?.let { it.plan.id != projectId } == true ||
                     resourceLockedBlocks[position]?.let { it != projectId } == true
             }
         ) return false
@@ -141,7 +214,7 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
         check(!closed) { "Builder operation locks are closed" }
         val playerId = operation.record.playerId
         check(playerId !in activeOperations) { "Builder player already has an active operation" }
-        check(operation.record.plan.changes.all { lockedBlocks[it.position] == operation.record.operationId }) {
+        check(operation.record.plan.changes.all { lockedBlocks[it.position]?.plan?.id == operation.record.operationId }) {
             "Builder operation must own every block lock before registration"
         }
         activeOperations[playerId] = operation
@@ -176,14 +249,27 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
         recoveryLockedPlayers.remove(playerId)
     }
 
+    /** Protects unknown interrupted records until the asynchronous loader has installed every exact lease. */
+    fun beginRecoveryBarrier() {
+        check(!closed) { "Builder operation locks are closed" }
+        recoveryBarrier = true
+    }
+
+    fun endRecoveryBarrier() {
+        recoveryBarrier = false
+    }
+
     fun bookLockedPlayerIds(): Set<UUID> = bookLockedPlayers.toSet()
 
     fun isBookLocked(playerId: UUID): Boolean = playerId in bookLockedPlayers
 
-    fun isRecoveryLocked(playerId: UUID): Boolean = playerId in recoveryLockedPlayers
+    fun isRecoveryLocked(playerId: UUID): Boolean = recoveryBarrier || playerId in recoveryLockedPlayers
 
-    fun isPlayerLocked(playerId: UUID): Boolean =
+    /** Exact owners only, for internal recovery lease installation while the global event barrier is active. */
+    fun isPlayerLeaseHeld(playerId: UUID): Boolean =
         playerId in activeOperations || playerId in bookLockedPlayers || playerId in recoveryLockedPlayers
+
+    fun isPlayerLocked(playerId: UUID): Boolean = recoveryBarrier || isPlayerLeaseHeld(playerId)
 
     val activeOperationCount: Int get() = activeOperations.size
     val bookLockedPlayerCount: Int get() = bookLockedPlayers.size
@@ -241,6 +327,36 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onHeldSlot(event: PlayerItemHeldEvent) {
         if (isPlayerLocked(event.player.uniqueId)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onRecoveryInteract(event: PlayerInteractEvent) {
+        if (isRecoveryLocked(event.player.uniqueId)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onRecoveryEntityInteract(event: PlayerInteractEntityEvent) {
+        if (isRecoveryLocked(event.player.uniqueId)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onRecoveryEntityInteractAt(event: PlayerInteractAtEntityEvent) {
+        if (isRecoveryLocked(event.player.uniqueId)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onRecoveryArmorStand(event: PlayerArmorStandManipulateEvent) {
+        if (isRecoveryLocked(event.player.uniqueId)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onRecoveryConsume(event: PlayerItemConsumeEvent) {
+        if (isRecoveryLocked(event.player.uniqueId)) event.isCancelled = true
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    fun onRecoveryItemDamage(event: PlayerItemDamageEvent) {
+        if (isRecoveryLocked(event.player.uniqueId)) event.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -332,12 +448,12 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
     }
 
     private fun isLocked(block: Block): Boolean =
-        BuilderBlockPos(block.world.uid, block.x, block.y, block.z).let { position ->
+        recoveryBarrier || BuilderBlockPos(block.world.uid, block.x, block.y, block.z).let { position ->
             position in lockedBlocks || position in resourceLockedBlocks
         }
 
     private fun isResourceInventoryLocked(inventory: Inventory): Boolean =
-        inventoryHolderBlocks(inventory).any { block ->
+        recoveryBarrier || inventoryHolderBlocks(inventory).any { block ->
             BuilderBlockPos(block.world.uid, block.x, block.y, block.z) in resourceLockedBlocks
         }
 
@@ -353,9 +469,12 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
         closed = true
         HandlerList.unregisterAll(this)
         activeOperations.clear()
-        lockedBlocks.clear()
+        // No live listener can observe the abandoned generation; do not walk a large project's locks at shutdown.
+        lockedBlocks = mutableMapOf()
+        ordinaryLeases = mutableMapOf()
         resourceLockedBlocks.clear()
         bookLockedPlayers.clear()
         recoveryLockedPlayers.clear()
+        recoveryBarrier = false
     }
 }

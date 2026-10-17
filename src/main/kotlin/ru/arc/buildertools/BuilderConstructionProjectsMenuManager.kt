@@ -12,7 +12,6 @@ import org.bukkit.event.inventory.ClickType
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.autobuild.BuildBookItems
-import ru.arc.config.ConfigManager
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.menu.MenuContract
@@ -210,7 +209,7 @@ internal class BuilderConstructionProjectsMenuManager(
     private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
 
     private fun loadConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
-        ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml"),
+        BuilderToolsConfiguration.builder(plugin.dataPath),
         "construction.projects-menu.layouts",
         "construction.projects-menu.templates",
         mapOf(MENU_ID to CONTRACT),

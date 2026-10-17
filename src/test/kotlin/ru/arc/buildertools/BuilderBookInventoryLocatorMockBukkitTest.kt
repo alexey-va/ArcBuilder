@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import ru.arc.awaitArcBuilderBootstrap
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Material
@@ -16,7 +17,8 @@ class BuilderBookInventoryLocatorMockBukkitTest : FunSpec({
     test("preview book is found outside the selected hotbar slot") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
-            paper.loadPlugin<ArcBuilderPlugin>()
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            awaitArcBuilderBootstrap(paper, plugin)
             BuilderToolsModule.shutdown()
             val player = paper.addPlayer("InventoryBookOwner")
             val expected = BuildBookData("house.schem", "Дом")

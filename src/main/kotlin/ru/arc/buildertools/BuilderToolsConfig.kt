@@ -186,7 +186,8 @@ class BuilderToolsConfig(
     private fun configuredMenuMaterial(path: String, fallback: String): Material =
         Material.matchMaterial(config.string("construction.site.menu.materials.$path", fallback)) ?: Material.AIR
 
-    fun validated(): BuilderToolsConfig = apply {
+    fun validated(validateNativeMaterials: Boolean = true): BuilderToolsConfig = apply {
+        if (validateNativeMaterials) this.validateNativeMaterials()
         selectionPanelSettings()
         if (enabled) {
             require(allowedWorlds.isNotEmpty() && allowedWorlds.all { it == "*" || WORLD_NAME.matches(it) }) {
@@ -247,9 +248,6 @@ class BuilderToolsConfig(
         require(constructionParticleSpread.isFinite() && constructionParticleSpread in 0.0..1.0) {
             "Builder construction particle spread is invalid"
         }
-        require(constructionSiteOutlineMaterial.isBlock && !constructionSiteOutlineMaterial.isAir) {
-            "Builder construction site outline material is invalid"
-        }
         require(constructionSiteOutlineThickness.isFinite() && constructionSiteOutlineThickness in 0.02f..0.25f) {
             "Builder construction site outline thickness is invalid"
         }
@@ -284,9 +282,6 @@ class BuilderToolsConfig(
         require(ITEMS_ADDER_KEY.matches(constructionSiteMenuBackgroundItem)) {
             "Builder construction site menu background item is invalid"
         }
-        require(constructionSiteMenuBackgroundFallback.isItem && !constructionSiteMenuBackgroundFallback.isAir) {
-            "Builder construction site menu background fallback is invalid"
-        }
         val menuSlots = listOf(
             constructionSiteMenuOverviewSlot,
             constructionSiteMenuProgressSlot,
@@ -296,16 +291,6 @@ class BuilderToolsConfig(
         require(menuSlots.distinct().size == menuSlots.size && menuSlots.all { it in 0 until constructionSiteMenuRows * 9 }) {
             "Builder construction site menu slots are invalid"
         }
-        require(
-            listOf(
-                constructionSiteMenuOverviewMaterial,
-                constructionSiteMenuProgressMaterial,
-                constructionSiteMenuResourcesMaterial,
-                constructionSiteMenuPauseMaterial,
-                constructionSiteMenuResumeMaterial,
-                constructionSiteMenuUnavailableMaterial,
-            ).all { it.isItem && !it.isAir },
-        ) { "Builder construction site menu material is invalid" }
         require(constructionSiteViewRange.isFinite() && constructionSiteViewRange in 16.0..128.0) {
             "Builder construction site view range is invalid"
         }
@@ -367,6 +352,26 @@ class BuilderToolsConfig(
         }
         require(replaceableMaterials.isNotEmpty()) { "Builder-tools replaceable material list cannot be empty" }
         messages().validate(MESSAGE_REQUIREMENTS)
+    }
+
+    /** Paper 1.21.11 resolves these predicates through native registries; call on the server thread. */
+    internal fun validateNativeMaterials() {
+        require(constructionSiteOutlineMaterial.isBlock && !constructionSiteOutlineMaterial.isAir) {
+            "Builder construction site outline material is invalid"
+        }
+        require(constructionSiteMenuBackgroundFallback.isItem && !constructionSiteMenuBackgroundFallback.isAir) {
+            "Builder construction site menu background fallback is invalid"
+        }
+        require(
+            listOf(
+                constructionSiteMenuOverviewMaterial,
+                constructionSiteMenuProgressMaterial,
+                constructionSiteMenuResourcesMaterial,
+                constructionSiteMenuPauseMaterial,
+                constructionSiteMenuResumeMaterial,
+                constructionSiteMenuUnavailableMaterial,
+            ).all { it.isItem && !it.isAir },
+        ) { "Builder construction site menu material is invalid" }
     }
 
     fun messages(): LocalizedMiniMessage {

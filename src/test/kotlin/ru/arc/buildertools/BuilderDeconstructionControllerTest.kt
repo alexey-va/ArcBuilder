@@ -18,6 +18,40 @@ import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.UUID
 
 class BuilderDeconstructionControllerTest : FunSpec({
+    test("large native drop collections yield across ticks while preserving exact item metadata") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("deconstruction-async")
+            val player = paper.addPlayer("AsyncDeconstruct")
+            player.teleport(Location(world, 0.5, 64.0, 2.5))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            player.inventory.setItemInMainHand(ItemStack(Material.DIAMOND_PICKAXE))
+            val tasks = QueuedBuilderPlanningTasks()
+            val named = ItemStack(Material.COBBLESTONE).apply {
+                editMeta { it.displayName(net.kyori.adventure.text.Component.text("Exact refund")) }
+            }
+            val harness = DeconstructionHarness(
+                plugin = paper.createSimplePlugin("AsyncDeconstruct"),
+                tasks = tasks,
+                drops = { _, _ -> List(200) { if (it % 2 == 0) named.clone() else ItemStack(Material.COBBLESTONE) } },
+            )
+            harness.select(world, 0, 64, 0, 0, 64, 0)
+            val pending = harness.controller.plan(player)
+            pending.isDone shouldBe false
+            tasks.tick()
+            pending.isDone shouldBe false
+            tasks.captureSteps shouldBe 128
+            val plan = tasks.finish(pending)
+
+            tasks.workerRuns shouldBe 1
+            plan.rewards.map { it.amount } shouldBe listOf(100, 100)
+            BuilderItemCodec.decodePrototype(plan.rewards[0].itemBase64).isSimilar(named) shouldBe true
+            BuilderItemCodec.decodePrototype(plan.rewards[1].itemBase64).isSimilar(ItemStack(Material.COBBLESTONE)) shouldBe true
+            plan.toolDamage shouldBe 1
+            (player.inventory.itemInMainHand.itemMeta as Damageable).damage shouldBe 0
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+        }
+    }
+
     test("drop tool keeps ordinary enchantments but removes Silk Touch") {
         MockBukkitTestRuntime.open().use { paper ->
             val tool = ItemStack(Material.DIAMOND_PICKAXE).apply {
@@ -62,7 +96,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
             player.inventory.setItemInMainHand(held)
             player.inventory.setItem(10, reserve)
 
-            val plan = harness.controller.plan(player)
+            val plan = harness.controller.plan(player).awaitBuilderPlanning()
             val pooled = BuilderPooledToolCodec.decode(checkNotNull(plan.toolFingerprintBase64))
 
             plan.kind shouldBe BuilderPlanKind.DECONSTRUCT
@@ -102,7 +136,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
             }
             player.inventory.setItem(10, inventoryTool)
 
-            val plan = harness.controller.plan(player)
+            val plan = harness.controller.plan(player).awaitBuilderPlanning()
             val pooled = BuilderPooledToolCodec.decode(checkNotNull(plan.toolFingerprintBase64))
 
             pooled.uses.map { it.slot to it.damage } shouldBe listOf(10 to 1)
@@ -131,7 +165,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
             )
             harness.select(world, 0, 64, 0, 0, 64, 0)
 
-            val plan = harness.controller.plan(player)
+            val plan = harness.controller.plan(player).awaitBuilderPlanning()
 
             plan.changes.size shouldBe 1
             plan.rewards shouldBe emptyList()
@@ -160,7 +194,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
                 editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 2 }
             })
 
-            val plan = harness.controller.plan(player)
+            val plan = harness.controller.plan(player).awaitBuilderPlanning()
             val pooled = BuilderPooledToolCodec.decode(checkNotNull(plan.toolFingerprintBase64))
 
             plan.rewards.materialAmounts() shouldBe mapOf(Material.COBBLESTONE to 1, Material.FLINT to 1)
@@ -185,7 +219,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
                 editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 2 }
             })
 
-            shouldThrow<DeconstructionFailure> { harness.controller.plan(player) }.path shouldBe "errors.tool"
+            shouldThrow<DeconstructionFailure> { harness.controller.plan(player).awaitBuilderPlanning() }.path shouldBe "errors.tool"
         }
     }
 
@@ -206,7 +240,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
                 }
             })
 
-            val plan = harness.controller.plan(player)
+            val plan = harness.controller.plan(player).awaitBuilderPlanning()
             BuilderInventory.applyToolDamage(player, checkNotNull(plan.toolFingerprintBase64), plan.toolDamage)
 
             (player.inventory.itemInMainHand.itemMeta as Damageable).damage shouldBe originalDamage
@@ -224,7 +258,7 @@ class BuilderDeconstructionControllerTest : FunSpec({
             val harness = DeconstructionHarness(plugin)
             harness.select(world, 0, 64, 0, 0, 64, 0)
 
-            val plan = harness.controller.plan(player)
+            val plan = harness.controller.plan(player).awaitBuilderPlanning()
 
             plan.changes.size shouldBe 1
             plan.rewards shouldBe emptyList()
@@ -246,12 +280,12 @@ class BuilderDeconstructionControllerTest : FunSpec({
             harness.select(world, 0, 64, 0, 1, 64, 0)
 
             player.inventory.setItemInMainHand(ItemStack(Material.STICK))
-            shouldThrow<DeconstructionFailure> { harness.controller.plan(player) }.path shouldBe "errors.tool"
+            shouldThrow<DeconstructionFailure> { harness.controller.plan(player).awaitBuilderPlanning() }.path shouldBe "errors.tool"
 
             player.inventory.setItemInMainHand(ItemStack(Material.DIAMOND_PICKAXE).apply {
                 editMeta { meta -> (meta as Damageable).damage = type.maxDurability.toInt() - 3 }
             })
-            shouldThrow<DeconstructionFailure> { harness.controller.plan(player) }.path shouldBe "errors.selection-too-large"
+            shouldThrow<DeconstructionFailure> { harness.controller.plan(player).awaitBuilderPlanning() }.path shouldBe "errors.selection-too-large"
             world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
             world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
         }
@@ -262,6 +296,7 @@ private class DeconstructionHarness(
     plugin: Plugin,
     maximumChanges: Int = 64,
     withoutToolPermission: Boolean = false,
+    private val tasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
     drops: (Block, ItemStack?) -> Collection<ItemStack> = { block, _ ->
         listOfNotNull(BuilderPlacementCost.itemOrNull(block.blockData))
     },
@@ -275,8 +310,11 @@ private class DeconstructionHarness(
         safety = safety,
         maximumChanges = maximumChanges,
         isPreferredTool = { _, tool -> tool.type.name.endsWith("_PICKAXE") },
-        blockDrops = { block, tool, _ -> drops(block, tool) },
-        host = object : BuilderDeconstructionHost {
+        blockDrops = { block, tool, _ ->
+            (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
+            drops(block, tool)
+        },
+        host = object : BuilderDeconstructionHost, BuilderPlanningTasks by tasks {
             override fun ensurePermission(player: Player) {
                 permissions++
             }
@@ -289,6 +327,7 @@ private class DeconstructionHarness(
                 Bukkit.getWorld(worldId) ?: throw DeconstructionFailure("errors.world-not-allowed")
 
             override fun ensureMutable(player: Player, block: Block) {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 mutableBlocks++
             }
 
@@ -300,6 +339,7 @@ private class DeconstructionHarness(
                 toolDamage: Int,
                 skippedUnsafeBlocks: Int,
             ): BuilderPlan {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 val now = 1_800_000_000_000L
                 return BuilderPlan(
                     id = UUID.randomUUID(),
@@ -321,6 +361,9 @@ private class DeconstructionHarness(
     )
 
     fun select(world: World, x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int) {
+        for (x in (minOf(x1, x2) shr 4)..(maxOf(x1, x2) shr 4)) {
+            for (z in (minOf(z1, z2) shr 4)..(maxOf(z1, z2) shr 4)) world.loadChunk(x, z)
+        }
         selection = BuilderSelection(
             BuilderBlockPos(world.uid, x1, y1, z1),
             BuilderBlockPos(world.uid, x2, y2, z2),
