@@ -1,5 +1,6 @@
 package ru.arc.autobuild
 
+import ru.arc.paper.api.ArcSchematicBlock
 import ru.arc.paper.api.ArcSchematicLibrary
 import ru.arc.paper.api.ArcSchematicSnapshot
 import ru.arc.paper.api.ArcSchematicTransform
@@ -12,10 +13,14 @@ class Building(
     private val library: ArcSchematicLibrary,
 ) {
     val volume: Long get() = snapshot.volume
-    val blockCount: Int get() = snapshot.nonBarrierCount
+    val blockCount: Int = snapshot.blocks().count { !it.isBuilderIgnored }
     val schematicSha256: String get() = snapshot.fileSha256
     val contentSha256: String get() = snapshot.contentSha256
 
     fun transform(rotation: Int, mirrored: Boolean): CompletableFuture<ArcSchematicSnapshot> =
         library.transform(snapshot, ArcSchematicTransform(BuildBookTransform.normalizeRotation(rotation) / 90, mirrored))
 }
+
+/** Builder-only keep-world cells; the shared snapshot retains marker data for other consumers. */
+internal val ArcSchematicBlock.isBuilderIgnored: Boolean
+    get() = isBarrier || blockData == "minecraft:structure_void"

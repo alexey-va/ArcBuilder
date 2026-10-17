@@ -7,6 +7,7 @@ import org.bukkit.inventory.ItemStack
 import ru.arc.autobuild.Building
 import ru.arc.autobuild.BuildBookMaterialRequirement
 import ru.arc.autobuild.BuildBookMaterialRequirements
+import ru.arc.autobuild.isBuilderIgnored
 import ru.arc.hooks.HookRegistry
 import ru.arc.hooks.economyshop.ShopMaterialQuote
 import ru.arc.hooks.economyshop.ShopPurchaseService
@@ -38,7 +39,7 @@ internal class BuilderBookPricing(
 
     fun quote(player: Player, building: Building): BuilderBookQuoteResult {
         if (building.volume !in 1..config.maxScanVolume) return BuilderBookQuoteResult.LimitExceeded
-        val items = building.snapshot.blocks().asSequence().filterNot { it.isAir || it.isBarrier }.mapNotNull { block ->
+        val items = building.snapshot.blocks().asSequence().filterNot { it.isAir || it.isBuilderIgnored }.mapNotNull { block ->
             BuilderPlacementCost.itemOrNull(Bukkit.createBlockData(block.blockData))
         }.take(config.maxClipboardBlocks + 1).toList()
         if (items.size > config.maxClipboardBlocks) return BuilderBookQuoteResult.LimitExceeded

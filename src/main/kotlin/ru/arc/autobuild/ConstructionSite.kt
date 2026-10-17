@@ -112,9 +112,9 @@ class ConstructionSite internal constructor(
             for (x in bounds.corner1.x()..bounds.corner2.x()) {
                 for (z in bounds.corner1.z()..bounds.corner2.z()) {
                     val relative = BlockVector3.at(x, y, z)
-                    // Schematic barriers are keep-world markers, including after rotation/mirroring.
+                    // Barriers and structure-void hearts keep the world, including after transforms.
                     // Exclude them before either preview or construction touches the target block.
-                    if (!checkNotNull(view).blockAt(relative.x(), relative.y(), relative.z()).isBarrier) yield(relative)
+                    if (!checkNotNull(view).blockAt(relative.x(), relative.y(), relative.z()).isBuilderIgnored) yield(relative)
                 }
             }
         }

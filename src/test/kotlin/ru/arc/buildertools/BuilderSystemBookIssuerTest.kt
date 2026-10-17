@@ -84,7 +84,8 @@ class BuilderSystemBookIssuerTest : FunSpec({
             fixture.player.nextComponentMessage() shouldBe null
             fixture.player.inventory.contents.filterNotNull().size shouldBe 0
 
-            pending.complete(schematicTestBuilding(fixture.definition.buildingId))
+            pending.complete(schematicTestBuilding(fixture.definition.buildingId,
+                listOf("minecraft:structure_void", "minecraft:stone", "minecraft:barrier")))
             fixture.player.inventory.contents.filterNotNull().size shouldBe 0
             fixture.scheduler.executeImmediate()
 
@@ -94,6 +95,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
             book.systemMaterialsIncluded shouldBe true
             book.registered shouldBe false
             book.instanceId shouldBe null
+            book.blockCount shouldBe 1
             val success = fixture.plain.serialize(checkNotNull(fixture.player.nextComponentMessage()))
             success shouldContain "Книга выдана игроку ${fixture.player.name}"
             success shouldContain fixture.definition.title

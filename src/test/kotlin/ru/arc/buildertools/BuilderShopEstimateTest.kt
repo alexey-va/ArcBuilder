@@ -15,6 +15,7 @@ import ru.arc.hooks.economyshop.ShopPurchaseService
 import ru.arc.hooks.economyshop.ShopPurchaseStatus
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.config.Config
+import ru.arc.autobuild.schematicTestBuilding
 import java.nio.file.Files
 import java.util.UUID
 
@@ -260,6 +261,30 @@ class BuilderShopEstimateTest : FunSpec({
             result.quote.cost shouldBe BuilderBookCost(800L, 120L, 920L)
             result.quote.materialTypes shouldBe 2
             result.quote.materialItems shouldBe 6
+        }
+    }
+
+    test("book quote ignores technical hearts without removing them from the shared schematic") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val player = paper.server.addPlayer("HeartBookQuote")
+            val service = FakeShopPurchaseService()
+            service.quotes[Material.STONE] = quote(Material.STONE, 1, 2.0)
+            val config = Config(Files.createTempDirectory("arc-builder-heart-pricing-"), "modules/builder-tools.yml").apply {
+                setBoolean("book-contracts.enabled", true)
+                setBoolean("shop.enabled", true)
+            }
+            val building = schematicTestBuilding("heart.schem",
+                listOf("minecraft:structure_void", "minecraft:stone", "minecraft:barrier", "minecraft:air"))
+
+            val result = BuilderBookPricing(BuilderToolsConfig(config), serviceProvider = { service }).quote(player, building)
+                as BuilderBookQuoteResult.Ready
+
+            result.quote.materialItems shouldBe 1
+            result.quote.materialTypes shouldBe 1
+            result.quote.includedLines.map { it.material to it.amount } shouldBe listOf(Material.STONE to 1)
+            result.quote.playerMaterials shouldBe emptyList()
+            result.quote.cost shouldBe BuilderBookCost(200L, 30L, 230L)
+            building.snapshot.blockAt(0, 0, 0).blockData shouldBe "minecraft:structure_void"
         }
     }
 

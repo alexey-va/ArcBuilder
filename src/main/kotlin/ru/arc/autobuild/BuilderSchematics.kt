@@ -23,7 +23,7 @@ internal class BuilderSchematics(private val root: Path) : AutoCloseable {
     fun load(id: String, expectedSha256: String?): CompletableFuture<Building> = try {
         val access = library()
         (if (expectedSha256 == null) access.load(id, ArcSchematicContentPolicy.IGNORE_ENTITIES_AND_BIOMES) else access.loadVerified(id, expectedSha256, ArcSchematicContentPolicy.IGNORE_ENTITIES_AND_BIOMES))
-            .thenApply { Building(id, it, access) }
+            .thenApplyAsync { Building(id, it, access) }
     } catch (failure: Throwable) {
         CompletableFuture.failedFuture(failure)
     }

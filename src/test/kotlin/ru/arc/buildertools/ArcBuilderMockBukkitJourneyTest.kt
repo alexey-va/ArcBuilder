@@ -358,6 +358,36 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("system book keeps a technical heart out of preview and construction without clearing its world cell") {
+        val definition = SystemBuildBookDefinition("heart.schem", "House", "a".repeat(64), true, true)
+        strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
+            val building = schematicTestBuilding(definition.buildingId,
+                listOf("minecraft:structure_void", "minecraft:stone", "minecraft:barrier"))
+            journey.addBuilding(building)
+            val player = journey.builder("HeartBuilder", GameMode.SURVIVAL)
+            player.teleport(player.location.apply { yaw = -180f })
+            player.inventory.setItemInMainHand(BuildBookItems.create(BuildBookData(definition.buildingId, definition.title)))
+            val anchor = journey.world.getBlockAt(5, 64, 5).also { it.type = Material.DIRT }
+
+            journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, anchor)
+            val site = checkNotNull(BuildingManager.pending(player.uniqueId))
+            val heartTarget = site.worldLocation(BlockVector3.ZERO).block.also { it.type = Material.ANDESITE }
+            val buildingTarget = site.worldLocation(BlockVector3.at(0, 1, 0)).block
+            val barrierTarget = site.worldLocation(BlockVector3.at(0, 2, 0)).block.also { it.type = Material.DIRT }
+            site.relativePositionsBottomUp().toList() shouldBe listOf(BlockVector3.at(0, 1, 0))
+            checkNotNull(BuildBookCodec.read(player.inventory.itemInMainHand)).blockCount shouldBe 1
+
+            journey.confirmBookHologram(player)
+            journey.awaitSettled(player) { buildingTarget.type == Material.STONE }
+
+            heartTarget.type shouldBe Material.ANDESITE
+            barrierTarget.type shouldBe Material.DIRT
+            journey.amount(player, Material.STRUCTURE_VOID) shouldBe 0
+            journey.amount(player, Material.ANDESITE) shouldBe 0
+            building.snapshot.blockAt(0, 0, 0).blockData shouldBe "minecraft:structure_void"
+        }
+    }
+
     test("system book places both door halves in the same construction tick") {
         val definition = SystemBuildBookDefinition(
             buildingId = "atomic-door-test.schem",
@@ -539,13 +569,14 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
-    test("survival player copies, previews, confirms and undoes a build") {
+    test("survival copy paste and undo omit technical hearts while preserving their target cells") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("SurvivalBuilder", GameMode.SURVIVAL)
             val world = journey.world
             player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
             world.getBlockAt(0, 64, 0).type = Material.STONE
             world.getBlockAt(1, 64, 0).type = Material.OAK_PLANKS
+            world.getBlockAt(2, 64, 0).type = Material.STRUCTURE_VOID
             player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
 
             player.performCommand("builder wand") shouldBe true
@@ -561,11 +592,11 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 it.decoration(TextDecoration.ITALIC) == TextDecoration.State.FALSE
             } shouldBe true
 
-            journey.select(player, world, wand, 0, 64, 0, 1, 64, 0)
+            journey.select(player, world, wand, 0, 64, 0, 2, 64, 0)
             val selectionFrame = checkNotNull(journey.renderer.selections[player.uniqueId])
-            checkNotNull(selectionFrame.selection).volume shouldBe 2
+            checkNotNull(selectionFrame.selection).volume shouldBe 3
             selectionFrame.points.first?.x shouldBe 0
-            selectionFrame.points.second?.x shouldBe 1
+            selectionFrame.points.second?.x shouldBe 2
             val selectionRenders = journey.renderer.selectionRenders
             journey.paper.performTicks(30)
             journey.renderer.selectionRenders shouldBeGreaterThan selectionRenders
@@ -573,11 +604,14 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.performCommand("builder copy") shouldBe true
             player.inventory.addItem(ItemStack(Material.STONE), ItemStack(Material.OAK_PLANKS))
             player.teleport(Location(world, 10.5, 64.0, 13.5, 0f, 0f))
+            val heartTarget = world.getBlockAt(12, 64, 10).also { it.type = Material.BEDROCK }
 
             player.performCommand("builder paste") shouldBe true
             world.getBlockAt(10, 64, 10).type shouldBe Material.AIR
             world.getBlockAt(11, 64, 10).type shouldBe Material.AIR
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
+            checkNotNull(journey.renderer.plans[player.uniqueId]).costs.sumOf { it.amount } shouldBe 2
+            heartTarget.type shouldBe Material.BEDROCK
             journey.renderer.selections.containsKey(player.uniqueId) shouldBe true
 
             player.performCommand("builder confirm") shouldBe true
@@ -589,8 +623,11 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.amount(player, Material.OAK_PLANKS) shouldBe 0
             world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
             world.getBlockAt(1, 64, 0).type shouldBe Material.OAK_PLANKS
+            world.getBlockAt(2, 64, 0).type shouldBe Material.STRUCTURE_VOID
+            heartTarget.type shouldBe Material.BEDROCK
 
             player.performCommand("builder undo") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             world.getBlockAt(10, 64, 10).type shouldBe Material.STONE
             world.getBlockAt(11, 64, 10).type shouldBe Material.OAK_PLANKS
             player.performCommand("builder confirm") shouldBe true
@@ -600,6 +637,8 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             }
             journey.amount(player, Material.STONE) shouldBe 1
             journey.amount(player, Material.OAK_PLANKS) shouldBe 1
+            journey.amount(player, Material.STRUCTURE_VOID) shouldBe 0
+            heartTarget.type shouldBe Material.BEDROCK
         }
     }
 
