@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.72"
+version = "1.0.73"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -35,14 +35,14 @@ kotlin { jvmToolchain(25) }
 
 dependencies {
     implementation(kotlin("stdlib"))
-    implementation("ru.ruscrafting.arc:arc-core:2.7.31")
-    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.31")
-    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.31")
-    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.31")
-    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.31")
+    implementation("ru.ruscrafting.arc:arc-core:2.7.32")
+    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.32")
+    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.32")
+    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.32")
+    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.32")
     implementation("org.snakeyaml:snakeyaml-engine:3.0.1")
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.31")
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.31")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.32")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.32")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
     implementation("de.tr7zw:item-nbt-api:2.15.7")
@@ -67,8 +67,8 @@ dependencies {
     testImplementation("com.github.retrooper:packetevents-spigot:2.12.1")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.31")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.31")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.32")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.32")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.Slimefun:Slimefun4:4.10")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
@@ -78,7 +78,7 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.0.3")
 
     "integrationTestImplementation"(sourceSets.test.get().output)
-    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.31")
+    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.32")
     configurations["integrationTestImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["integrationTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
 }
@@ -140,9 +140,9 @@ tasks {
 }
 
 // E2E uses the same separate service provider and API owner as production.
-val e2eArcVersion = "1.4.403"
-val e2eArcCoreVersion = "0.1.7"
-val e2eArcCoreSha256 = "e7a484123b067a6a45c573f2267c6961a70b1e10735215ac41cf5caeb608b4b5"
+val e2eArcVersion = "1.4.407"
+val e2eArcCoreVersion = "0.1.8"
+val e2eArcCoreSha256 = "50c3139cf9b0066aa74f4db01f0e58e7263a3f0d8d0ae3d2bde186f172e36a34"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
 val e2eArcCoreArtifact = configurations.detachedConfiguration(
     dependencies.create("ru.ruscrafting:ArcCore:$e2eArcCoreVersion"),
