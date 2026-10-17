@@ -1,8 +1,8 @@
 schema = 1
 platform = "paper"
-core_version = "2.7.32"
+core_version = "2.7.33"
 
-capabilities = [
+capabilities = ["paper-action-panels",
   "atomic-files",
   "durable-recovery",
   "health",

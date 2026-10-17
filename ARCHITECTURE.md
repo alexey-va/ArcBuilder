@@ -229,11 +229,15 @@ the normal plugin restart path rather than `/builder reload`.
 
 ## Exact block replacement
 
-`BuilderSelectionActionPanel` owns private selection controls while the selector
-is held. Text uses the shared `PaperPacketDisplays` owner; private Interaction
-targets and the same bounded, occlusion-checked aiming rule drive hover and
-both mouse buttons. A compact two-column panel shows six actions per page and
-arrow navigation with a separate page caption. The full panel envelope sits at
+`BuilderSelectionActionPanel` adapts the held-selector view to Core's
+`PaperActionPanels`. Builder owns selection and plan identity, eligibility,
+localized actions, paging and action dispatch; Core owns placement, packet text,
+private Interaction targets, hover, deduplication and lifecycle cleanup. The
+adapter includes both the domain context and the exact selection in every input
+identity and rechecks them before dispatch to the existing runtime. Both mouse
+buttons use Core's bounded, occlusion-checked aiming rule. A compact two-column
+panel shows six actions per page and arrow navigation with a separate page
+caption. The full panel envelope sits at
 the captured eye height, toward the selection's horizontal centre, perpendicular
 to the horizontal player-to-selection line. Body translation and selection changes
 recompute that direction; head turns and crouching in place leave its anchor still.
@@ -252,14 +256,19 @@ and a duplicate-click gate prevent old inputs from confirming a replacement
 plan. Changing a selection corner discards its pending ordinary plan. Tool,
 world, teleport, selection and runtime lifecycle changes clear the controls.
 Geometry lives under `selection-panel` in `builder-tools.yml` and is validated
-before reload activation. Rendering and action callbacks share the configured
-eight-block maximum distance to the nearest selection face; leaving range hides
+before reload activation. The adapter passes the settings directly to Core,
+including zero body-movement tolerance to preserve precise Builder following.
+Rendering and action callbacks share the configured eight-block maximum distance
+to the nearest selection face; leaving range hides
 controls without clearing the selection or pending plan.
 With `selection-panel.suppress-selection-glow` enabled (the default), looking
 toward the panel temporarily disables selection glow while retaining its frame.
 The gaze area covers the full panel with hysteresis; looking away or closing the
 panel restores glow. Changes use budgeted metadata updates on existing display
 IDs. Reload replaces the panel settings, including this switch.
+The adapter retains its owned packet-display runtime and closes it after Core
+has released panel handles and targets. The separate double-sided book-preview
+and persistent construction-site gateways keep their existing owners and anchors.
 The book action copies the current selection before draft creation. It snapshots
 the chosen inventory book slot and revalidates that stack before durable delivery;
 the command's existing main-hand source and journal recovery remain available.

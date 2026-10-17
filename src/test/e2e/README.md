@@ -1,19 +1,19 @@
 # Real Paper tests
 
 Use Java 25 and build ARC from commit
-`d9db074a4122b1b369e6814b7c624299cb540e25` (version `1.4.400`). Pass that
+`a64c7345370d8913cfff0911029e215ffd209c47` (version `1.4.408`). Pass that
 production JAR explicitly:
 
 ```bash
-./gradlew prepareE2eRuntimeArtifacts -Pe2eArcJar=/absolute/path/ARC-1.4.400.jar
-./gradlew plugwrightTest -Pe2eArcJar=/absolute/path/ARC-1.4.400.jar
+./gradlew prepareE2eRuntimeArtifacts -Pe2eArcJar=/absolute/path/ARC-1.4.408.jar
+./gradlew plugwrightTest -Pe2eArcJar=/absolute/path/ARC-1.4.408.jar
 ```
 
-The preparation task resolves the non-transitive `ru.ruscrafting:ArcCore:0.1.2`
+The preparation task resolves the non-transitive `ru.ruscrafting:ArcCore:0.1.9`
 artifact from the configured Maven repository. It checks both plugin versions,
 the pinned ArcCore SHA-256 and shared schematic API ownership, then stages
 `build/e2e-runtime/ARC.jar` and `ArcCore.jar`. An explicit
-`-Pe2eArcCoreJar=/absolute/path/ArcCore-0.1.2.jar` uses the same validation for a
+`-Pe2eArcCoreJar=/absolute/path/ArcCore-0.1.9.jar` uses the same validation for a
 local candidate. No plugin JAR is resolved during ordinary build configuration.
 Preparation does not launch Paper, Node, clients, or external services.
 

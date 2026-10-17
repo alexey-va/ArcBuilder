@@ -27,7 +27,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Verify arc-core consumer architecture
-        uses: alexey-va/arc-core/.github/actions/verify-consumer@5b785b5af561bc794e1702c0b5e05edf8b1c317d
+        uses: alexey-va/arc-core/.github/actions/verify-consumer@cd6968209a40ad80841b14cf434a234edc08922d
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: Unit tests and production JAR
         run: ./gradlew --no-daemon --build-cache test shadowJar
@@ -65,7 +65,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Verify arc-core consumer architecture
-        uses: alexey-va/arc-core/.github/actions/verify-consumer@5b785b5af561bc794e1702c0b5e05edf8b1c317d
+        uses: alexey-va/arc-core/.github/actions/verify-consumer@cd6968209a40ad80841b14cf434a234edc08922d
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: MySQL migrations, contention, recovery, and anti-duplication
         run: ./gradlew --no-daemon integrationTest
@@ -90,7 +90,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: alexey-va/ARC
-          ref: 45af10525b52206f8e8f993c4ce867d593cc8f6a # ARC 1.4.407 release pair; standalone ArcCore 0.1.8 is pinned in build.gradle.kts
+          ref: a64c7345370d8913cfff0911029e215ffd209c47 # ARC 1.4.408 release pair; standalone ArcCore 0.1.9 is pinned in build.gradle.kts
           path: e2e-arc
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
