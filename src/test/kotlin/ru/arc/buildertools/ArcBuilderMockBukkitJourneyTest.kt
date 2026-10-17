@@ -187,7 +187,9 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 journey.operation(player)?.let { it.record.phase == BuilderJournalPhase.APPLYING && !it.inventoryMutated && it.appliedChanges == 0 } == true
             }
             journey.paper.callEvent(PlayerQuitEvent(player, Component.empty()))
-            journey.await("cancelled operation acknowledgement") { journey.activeLeases() == 0 }
+            journey.await("cancelled operation acknowledgement and published readiness") {
+                !journey.playerLeaseActive(player.uniqueId) && journey.health().state == RuntimeHealthState.UP
+            }
             journey.paper.performTicks(10)
             journey.health().state shouldBe RuntimeHealthState.UP
             (0..19).all { x -> (0..14).all { z -> journey.world.getBlockAt(x, 64, z).type == Material.AIR } } shouldBe true
