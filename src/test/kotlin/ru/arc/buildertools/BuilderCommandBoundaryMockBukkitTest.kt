@@ -305,6 +305,12 @@ private class CommandFixture(
 
         action()
 
+        // Planner failures are delivered by a main-thread completion, including failed preflight.
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (messages.forPlayer(player).isEmpty() && System.nanoTime() < deadline) {
+            paper.performTicks(1)
+            Thread.yield()
+        }
         messages.forPlayer(player)
             .joinToString("\n") { plain.serialize(it) }
             .lowercase() shouldContain expectedMessage.lowercase()

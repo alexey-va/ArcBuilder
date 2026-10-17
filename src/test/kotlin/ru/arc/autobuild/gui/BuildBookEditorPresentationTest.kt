@@ -4,6 +4,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextDecoration
+import net.kyori.adventure.text.minimessage.MiniMessage
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import ru.arc.KotestTestBase
@@ -57,18 +58,22 @@ class BuildBookEditorPresentationTest : KotestTestBase({
                 )
                 ConfigManager.clear()
 
-                BuildBookSettings.validate()
+                // Startup/reload owns the disk merge; validate() only reads its prepared snapshot.
+                BuildBookSettings.mergeBundledDefaults(dataPath) shouldBe true
                 val merged = ConfigManager.ofModule(dataPath, "auto-build.yml")
+                BuildBookSettings.validate(merged, mergeForward = false)
                 merged.int("build-book.player-copy.max-offset") shouldBe 12
                 merged.string("build-book.player-copy.default-name") shouldBe "Operator draft"
                 merged.boolean("operator-only.keep") shouldBe true
                 merged.string("build-book.editor.title") shouldBe "<dark_gray>Настройка книги"
-                merged.string("build-book.editor.preview-protection-denied.name") shouldBe
-                    "<#ff9f0f><bold>Положение недоступно"
+                val miniMessage = MiniMessage.miniMessage()
+                miniMessage.deserialize(merged.string("build-book.editor.preview-protection-denied.name")) shouldBe
+                    miniMessage.deserialize("<#ff9f0f><bold>Положение недоступно")
 
-                val afterFirstValidation = Files.readString(path)
-                BuildBookSettings.validate()
-                Files.readString(path) shouldBe afterFirstValidation
+                val afterFirstMerge = Files.readString(path)
+                BuildBookSettings.mergeBundledDefaults(dataPath) shouldBe false
+                BuildBookSettings.validate(merged, mergeForward = false)
+                Files.readString(path) shouldBe afterFirstMerge
             } finally {
                 Files.writeString(path, original)
                 ConfigManager.clear()
