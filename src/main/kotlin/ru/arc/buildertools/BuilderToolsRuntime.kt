@@ -57,6 +57,7 @@ import ru.arc.observability.StructuredDebugLine
 import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.playerstate.PaperPlayerStateCodec
 import ru.arc.paper.playerstate.PaperPlayerStateService
+import ru.arc.paper.protection.PaperBlockProtection
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.error
 import ru.arc.util.Logging.info
@@ -300,7 +301,9 @@ internal class BuilderToolsRuntime(
         onlineRange = config.constructionOnlineInventoryRange,
         worldProvider = Bukkit::getWorld,
         onlinePlayerProvider = Bukkit::getPlayer,
-        canOpenContainer = { playerId, block -> HookRegistry.landsHook?.canOpenContainer(playerId, block) ?: true },
+        canOpenContainer = { playerId, block ->
+            !PaperBlockProtection.isProtected(block) && (HookRegistry.landsHook?.canOpenContainer(playerId, block) ?: true)
+        },
         maxContainerProbesPerCall = config.constructionMaxContainerProbesPerTick,
         maxCachedContainersPerProject = config.constructionMaxCachedContainersPerProject,
         maxResolvedContainersPerCall = config.constructionMaxResolvedContainersPerCall,
@@ -319,7 +322,8 @@ internal class BuilderToolsRuntime(
         override fun currentBlockData(position: BuilderBlockPos): String {
             val world = Bukkit.getWorld(position.worldId)
                 ?: throw IllegalStateException("Builder construction world is unavailable")
-            if (!world.isChunkLoaded(position.x shr 4, position.z shr 4)) {
+            if (!world.isChunkLoaded(position.x shr 4, position.z shr 4) ||
+                PaperBlockProtection.isProtected(position.worldId, position.x, position.y, position.z)) {
                 throw BuilderConstructionTemporarilyUnavailableException()
             }
             return block(world, position).blockData.asString
@@ -343,7 +347,7 @@ internal class BuilderToolsRuntime(
                 throw BuilderConstructionTemporarilyUnavailableException()
             }
             val target = block(world, change.position)
-            if (!world.worldBorder.isInside(target.location)) return false
+            if (PaperBlockProtection.isProtected(target) || !world.worldBorder.isInside(target.location)) return false
             val after = Bukkit.createBlockData(change.afterBlockData)
             val safeSystemContainer = step.lootTableKey != null && safety.isSafeSystemLootContainer(after)
             if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer &&
@@ -409,6 +413,7 @@ internal class BuilderToolsRuntime(
                     throw BuilderConstructionTemporarilyUnavailableException()
                 }
                 val target = block(world, change.position)
+                if (PaperBlockProtection.isProtected(target)) throw BuilderConstructionTemporarilyUnavailableException()
                 val before = Bukkit.createBlockData(change.beforeBlockData)
                 val after = Bukkit.createBlockData(change.afterBlockData)
                 val current = target.blockData.asString
@@ -427,17 +432,22 @@ internal class BuilderToolsRuntime(
             val changed = mutableListOf<BuilderConstructionWorldMutation>()
             try {
                 mutations.filter(BuilderConstructionWorldMutation::required).forEach { mutation ->
+                    if (PaperBlockProtection.isProtected(mutation.target)) throw BuilderConstructionTemporarilyUnavailableException()
                     mutation.target.setBlockData(mutation.after, false)
                     changed += mutation
                 }
                 mutations.forEach { mutation ->
                     mutation.step.lootTableKey?.let { lootTableKey ->
+                        if (PaperBlockProtection.isProtected(mutation.target)) throw BuilderConstructionTemporarilyUnavailableException()
                         lootTableAccess.apply(mutation.target, requiredLootTable(lootTableKey))
                     }
                 }
             } catch (failure: Throwable) {
                 changed.asReversed().forEach { mutation ->
-                    runCatching { mutation.target.setBlockData(mutation.before, false) }
+                    runCatching {
+                        check(!PaperBlockProtection.isProtected(mutation.target)) { "Builder construction rollback target is protected" }
+                        mutation.target.setBlockData(mutation.before, false)
+                    }
                         .exceptionOrNull()
                         ?.let(failure::addSuppressed)
                 }
@@ -2612,7 +2622,7 @@ internal class BuilderToolsRuntime(
                 try {
                     val target = block(requireWorld(change.position.worldId), change.position)
                     // Earlier physics or another player may already have changed this block. Never rewrite it.
-                    if (target.blockData.asString == change.afterBlockData) {
+                    if (target.blockData.asString == change.afterBlockData && !PaperBlockProtection.isProtected(target)) {
                         physicsUpdater.update(target, Bukkit.createBlockData(change.beforeBlockData))
                     }
                 } catch (failure: Throwable) {
@@ -2672,6 +2682,7 @@ internal class BuilderToolsRuntime(
                     "rollback encountered an externally changed block"
                 }
                 if (current == change.afterBlockData) {
+                    check(!PaperBlockProtection.isProtected(block)) { "Builder rollback target is protected" }
                     val after = Bukkit.createBlockData(change.afterBlockData)
                     val before = Bukkit.createBlockData(change.beforeBlockData)
                     block.setBlockData(before, false)
@@ -3013,6 +3024,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun ensureProtected(player: Player, block: Block, placing: Material? = null) {
+        if (PaperBlockProtection.isProtected(block)) throw BuilderUserFailure("errors.protection")
         val lands = HookRegistry.landsHook
         if ((lands != null && !lands.canModify(player, block, placing)) || (lands == null && config.requireLands)) {
             throw BuilderUserFailure("errors.protection")
@@ -3183,6 +3195,7 @@ internal class BuilderToolsRuntime(
             when (BuilderRecoveryRules.action(record.phase, block.blockData.asString, change.beforeBlockData, change.afterBlockData)) {
                 BuilderRecoveryAction.KEEP_BEFORE -> Unit
                 BuilderRecoveryAction.RESTORE_BEFORE -> {
+                    check(!PaperBlockProtection.isProtected(block)) { "Builder recovery target is protected" }
                     val after = Bukkit.createBlockData(change.afterBlockData)
                     val before = Bukkit.createBlockData(change.beforeBlockData)
                     block.setBlockData(before, false)

@@ -1,6 +1,6 @@
 schema = 1
 platform = "paper"
-core_version = "2.7.30"
+core_version = "2.7.31"
 
 capabilities = [
   "atomic-files",
@@ -10,7 +10,7 @@ capabilities = [
   "logging",
   "one-time-use",
   "paper-menu",
-  "paper-schematics",
+  "paper-schematics", "paper-block-protection",
   "paper-testing",
   "player-state",
   "runtime",

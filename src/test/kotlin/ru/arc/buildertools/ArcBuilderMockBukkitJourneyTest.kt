@@ -5,12 +5,14 @@ import com.github.retrooper.packetevents.PacketEventsAPI
 import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
 import com.mojang.brigadier.suggestion.SuggestionsBuilder
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeSameInstanceAs
 import io.mockk.every
+import io.mockk.Called
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
@@ -28,6 +30,7 @@ import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.World
 import org.bukkit.block.BlockFace
+import org.bukkit.block.Container
 import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.BlockData
 import org.bukkit.block.data.MultipleFacing
@@ -43,6 +46,7 @@ import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
+import org.bukkit.plugin.ServicePriority
 import org.bukkit.loot.LootTable
 import org.opentest4j.TestAbortedException
 import ru.arc.autobuild.ConstructionSite
@@ -60,6 +64,7 @@ import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.config.ConfigManager
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
+import ru.arc.paper.api.ArcBlockProtectionService
 import ru.arc.paper.testing.loadPlugin
 import ru.arc.util.BlockUtils.rotateBlockData
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
@@ -73,6 +78,102 @@ import java.util.UUID
  * External MySQL contracts deliberately stay in the GitHub-CI integration suite.
  */
 class ArcBuilderMockBukkitJourneyTest : FunSpec({
+    test("feature protection vetoes book planning and a fill confirmed after protection changed") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("ProtectedBuilder", GameMode.CREATIVE)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            var protected = false
+            journey.paper.server.servicesManager.register(ArcBlockProtectionService::class.java,
+                ArcBlockProtectionService { id, x, _, _ -> protected && id == journey.world.uid && x == 0 },
+                journey.plugin, ServicePriority.Lowest)
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            player.performCommand("builder fill stone") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
+            protected = true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { journey.world.getBlockAt(0, 64, 0).type == Material.AIR }
+            shouldThrow<BuilderUserFailure> {
+                journey.planBuildBookBlock(player, journey.world.getBlockAt(0, 64, 0), Material.STONE.createBlockData())
+            }.path shouldBe "errors.protection"
+            (journey.planBuildBookBlock(player, journey.world.getBlockAt(1, 64, 0), Material.STONE.createBlockData())
+                is BuilderBookPlacementResult.Change) shouldBe true
+        }
+    }
+
+    test("deconstruction rechecks every batch and does not roll back through newly protected blocks") {
+        strictMockBukkit(open = { ArcBuilderJourney.open(blocksPerTick = 2) }) { journey ->
+            val player = journey.builder("ProtectedDigger", GameMode.CREATIVE)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            (0..4).forEach { journey.world.getBlockAt(it, 64, 0).type = Material.STONE }
+            var protected = false
+            journey.paper.server.servicesManager.register(ArcBlockProtectionService::class.java,
+                ArcBlockProtectionService { id, _, _, _ -> protected && id == journey.world.uid },
+                journey.plugin, ServicePriority.Normal)
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 4, 64, 0)
+            player.performCommand("builder deconstruct") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 5
+            player.performCommand("builder confirm") shouldBe true
+            journey.await("first deconstruction batch") { journey.countLine(journey.world, Material.AIR) == 2 }
+            protected = true
+            journey.await("protected deconstruction recovery hold") { journey.health().recoveryBacklog == 1 }
+            journey.health().state shouldBe RuntimeHealthState.DOWN
+            journey.activeLeases() shouldBe 1
+            journey.countLine(journey.world, Material.AIR) shouldBe 2
+            journey.countLine(journey.world, Material.STONE) shouldBe 3
+            journey.amount(player, Material.STONE) shouldBe 0
+        }
+    }
+
+    test("construction cannot recognize foreign protected afterimages or repair protected loot metadata") {
+        val loot = mockk<BuilderLootTableAccess>()
+        strictMockBukkit(open = { ArcBuilderJourney.open(lootTableAccess = loot) }) { journey ->
+            val player = journey.builder("ProtectedConstruction", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            val target = journey.world.getBlockAt(0, 64, 0).apply { type = Material.CHEST }
+            val change = BuilderBlockChange(BuilderBlockPos(journey.world.uid, 0, 64, 0),
+                Material.AIR.createBlockData().asString, target.blockData.asString)
+            val step = BuilderConstructionStep(change, null, null, lootTableKey = "minecraft:chests/simple_dungeon")
+            val project = protectionProject(player.uniqueId, listOf(step))
+            val port = journey.constructionPort()
+            journey.paper.server.servicesManager.register(ArcBlockProtectionService::class.java,
+                ArcBlockProtectionService { id, _, _, _ -> id == journey.world.uid }, journey.plugin, ServicePriority.Normal)
+            port.canModify(project, step) shouldBe false
+            shouldThrow<BuilderConstructionTemporarilyUnavailableException> { port.currentBlockData(change.position) }
+            shouldThrow<BuilderConstructionTemporarilyUnavailableException> { port.isStepApplied(step) }
+            shouldThrow<BuilderConstructionTemporarilyUnavailableException> { port.apply(project, step) }
+            BuilderConstructionProjectController.tick(project, project.updatedAtMillis + 1, port) shouldBe null
+            target.type shouldBe Material.CHEST
+            verify { loot wasNot Called }
+        }
+    }
+
+    test("construction resource receipts cannot withdraw from a newly protected container") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("ProtectedResources", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            val target = journey.world.getBlockAt(0, 64, 0)
+            val input = BuilderItemCodec.aggregate(listOf(ItemStack(Material.STONE, 2))).single()
+            val change = BuilderBlockChange(BuilderBlockPos(journey.world.uid, 0, 64, 0),
+                target.blockData.asString, Material.STONE.createBlockData().asString)
+            val project = protectionProject(player.uniqueId, listOf(BuilderConstructionStep(change, input, null)))
+            val chest = journey.world.getBlockAt(1, 64, 0).apply { type = Material.CHEST }.state as Container
+            chest.inventory.addItem(ItemStack(Material.STONE, 64))
+            val port = journey.constructionPort()
+            var receipt: BuilderResourceMutation? = null
+            repeat(100) { if (receipt == null) receipt = port.prepareInput(player.uniqueId, project, input) }
+            val reserved = checkNotNull(receipt)
+            journey.paper.server.servicesManager.register(ArcBlockProtectionService::class.java,
+                ArcBlockProtectionService { id, x, _, _ -> id == journey.world.uid && x == 1 }, journey.plugin, ServicePriority.Normal)
+            port.reconcileResource(project, reserved) shouldBe BuilderResourceMutationResult.CONFLICT
+            chest.inventory.contents.filterNotNull().sumOf(ItemStack::getAmount) shouldBe 64
+            repeat(100) { port.prepareInput(player.uniqueId, project, input) shouldBe null }
+        }
+    }
+
     test("block-data rotation never mutates a shared schematic rail state") {
         val shared = mockk<BlockData>()
         val firstClone = mockk<BlockData>(relaxed = true)
@@ -1586,6 +1687,11 @@ private class ArcBuilderJourney private constructor(
 
     fun activeLeases(): Int = runtime.runtimeHealthContribution().activeLeases
 
+    fun health() = runtime.runtimeHealthContribution()
+
+    fun constructionPort(): BuilderConstructionProjectPort = BuilderToolsRuntime::class.java
+        .getDeclaredField("constructionPort").apply { isAccessible = true }.get(runtime) as BuilderConstructionProjectPort
+
     fun awaitStableConstruction(description: String, condition: () -> Boolean) {
         // Read the journal only after the runtime has acknowledged its async writes.
         await(description) { runtime.reloadBlocker() == null && condition() }
@@ -1733,6 +1839,26 @@ private class ArcBuilderJourney private constructor(
             }
         }
     }
+}
+
+private fun protectionProject(playerId: UUID, steps: List<BuilderConstructionStep>): BuilderConstructionProjectRecord {
+    val id = UUID.randomUUID()
+    val now = System.currentTimeMillis()
+    val book = BuilderItemCodec.aggregate(listOf(ItemStack(Material.BOOK))).single()
+    return BuilderConstructionProjectRecord(
+        projectId = id,
+        playerId = playerId,
+        playerName = "Builder",
+        plan = BuilderPlan(id, playerId, BuilderPlanKind.BUILD_BOOK, steps.map { it.change },
+            listOf(book) + steps.mapNotNull { it.requiredMaterial }, steps.mapNotNull { it.output },
+            createdAtMillis = now, expiresAtMillis = now + 60_000),
+        steps = steps,
+        bookCost = book,
+        state = BuilderConstructionProjectState.PREPARED,
+        cursor = 0,
+        createdAtMillis = now,
+        updatedAtMillis = now,
+    ).validated().activated(now + 1)
 }
 
 private class InMemoryBuilderDraftStorage : BuilderDraftStorage {
