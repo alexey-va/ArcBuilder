@@ -154,6 +154,8 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
 
                         every { world.isChunkLoaded(0, 0) } returns true
                         paper.callEvent(ChunkLoadEvent(chunk, false))
+                        manager.queueMockedControlCapture(tasks)
+                        tasks.tick()
                         spawned.size shouldBe 1
                         spawned.single().also { interaction ->
                             (interaction is Interaction) shouldBe true
@@ -161,6 +163,8 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         }
                         valid.replaceAll { _, _ -> false }
                         paper.callEvent(ChunkLoadEvent(chunk, false))
+                        manager.queueMockedControlCapture(tasks)
+                        tasks.tick()
                         spawned.size shouldBe 2
                         packetVisuals.size shouldBe 14
                         steps.reads = 0
@@ -173,6 +177,8 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         manager.upsert(project)
                         spawned.size shouldBe 2
                         tasks.runComputations()
+                        tasks.tick()
+                        manager.queueMockedControlCapture(tasks)
                         tasks.tick()
                         spawned.size shouldBe 3
                         packetVisuals.size shouldBe 14
@@ -204,6 +210,17 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
         }
     }
 })
+
+/** The relaxed display mock has no Core tick; execute its real participant on native test steps. */
+private fun BuilderConstructionSiteDisplayManager.queueMockedControlCapture(tasks: QueuedBuilderPlanningTasks) {
+    val controls = javaClass.getDeclaredField("controls").apply { isAccessible = true }.get(this)
+    val participant = controls.javaClass.getDeclaredField("participant").apply { isAccessible = true }.get(controls)
+    val capture = participant.javaClass.getMethod("captureSteps", List::class.java).apply { isAccessible = true }
+    val steps = capture.invoke(participant, emptyList<Any>()) as Iterator<*>
+    tasks.capture({ true }) {
+        if (steps.hasNext()) { steps.next(); false } else true
+    }
+}
 
 private fun siteDisplaySettings() = BuilderConstructionSiteDisplaySettings(
     enabled = true,

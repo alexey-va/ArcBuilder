@@ -1782,7 +1782,8 @@ private class ArcBuilderJourney private constructor(
 
     fun stopForRecovery(): List<BuilderJournalRecord> {
         runtime.close()
-        runtime.closeCompletion.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        await("actual worker and native shutdown before recovery") { runtime.closeCompletion.isDone }
+        runtime.closeCompletion.get(1, java.util.concurrent.TimeUnit.SECONDS)
         return java.util.concurrent.CompletableFuture.supplyAsync {
             BuilderJournalStore(plugin.dataPath, 10_000).loadAll().map { it.value }
         }.get(5, java.util.concurrent.TimeUnit.SECONDS)
@@ -1989,8 +1990,16 @@ private class ArcBuilderJourney private constructor(
 
     override fun close() {
         try {
-            runCatching { runtime.close() }
-            runCatching { paper.server.pluginManager.disablePlugin(plugin) }
+            runCatching {
+                runtime.close()
+                await("actual journey runtime shutdown") { runtime.closeCompletion.isDone }
+                runtime.closeCompletion.get(1, java.util.concurrent.TimeUnit.SECONDS)
+            }
+            runCatching {
+                paper.server.pluginManager.disablePlugin(plugin)
+                await("actual plugin shutdown") { plugin.drained().isDone }
+                plugin.drained().get(1, java.util.concurrent.TimeUnit.SECONDS)
+            }
             paper.close()
             ConfigManager.clear()
         } finally {
@@ -2025,7 +2034,7 @@ private class ArcBuilderJourney private constructor(
             try {
                 val plugin = paper.loadPlugin<ArcBuilderPlugin>()
                 awaitArcBuilderBootstrap(paper, plugin)
-                installArcVisualPacketBudgetFixture(plugin)
+                installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreJourneyVisualHost"))
                 val config = ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml").apply {
                     setBoolean("enabled", true)
                     setStringList("allowed-worlds", listOf("*"))

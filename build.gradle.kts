@@ -121,6 +121,7 @@ tasks {
     shadowJar {
         archiveClassifier.set("")
         mergeServiceFiles()
+        exclude("ru/arc/paper/runtime/PaperNativeCleanupServiceProvider*.class")
         exclude("org/slf4j/**")
         exclude("org/bukkit/**")
         exclude("io/papermc/**")
