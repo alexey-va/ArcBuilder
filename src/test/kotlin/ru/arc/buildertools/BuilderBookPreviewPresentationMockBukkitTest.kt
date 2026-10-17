@@ -414,7 +414,6 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     SystemBuildBookDefinition(
                         buildingId = id,
                         title = "Дом ${index + 1}",
-                        schematicSha256 = "${index + 1}".repeat(64),
                         playerEnabled = true,
                         materialsIncluded = false,
                     ).validated()

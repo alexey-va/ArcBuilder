@@ -381,20 +381,28 @@ protected chest.
 System/legacy physical books are deliberately separate from player-authored
 registered books. `SystemBuildBookCatalog.kt` loads reviewed YAML metadata only.
 `BuilderSchematics` opens the configured root through ArcCore's shared
-`ArcSchematicService`; verified asynchronous loads enforce its path, size and
-SHA-256 policy on use. Startup does not preload the schematic library. Consumers
+`ArcSchematicService`; asynchronous loads enforce its path and size policies on use.
+System books reference mutable catalogue paths without a schematic digest; replacing
+the file changes its size/mtime/file identity and is reloaded on the next request.
+Registered player-authored
+books retain their separate content verification. Startup does not preload the schematic library. Consumers
 keep no permanent schematic cache or WorldEdit clipboards. Core owns the bounded
 expiring cache and native transforms; previews and plans use immutable snapshots.
 Only reviewed entries are callable as system books because the root also contains
 player schematics and operational test files. Nested extensionless IDs and exact
 legacy suffixes are accepted without rewriting issued-book identity.
+Catalogue entries can retain previous IDs in `aliases` after moving a file.
+Aliases resolve to the same canonical definition and asynchronous load;
+they never add duplicate choices to completion or starter pools. Conflicting
+canonical IDs and aliases are rejected while loading metadata.
 
 `BuilderBookRequests` fences deferred continuations by runtime generation,
 player context, exact source item/slot and newest preview request. Activation and
-copy quotes retain the fence through registry lookups. Independent administrative
-grants use bounded individual tickets and check the current recipient session
-and space before issuance. Preview rotations have their own latest-transform
-fence, and confirmation waits for the transformed snapshot. Routine schematic
+copy quotes retain the fence through registry lookups. Administrative system-book
+grants resolve catalogue metadata and immediately write the native book item,
+without schematic I/O. They store the canonical ID, title, material and selector
+policies; geometry and block count are loaded on first preview. Preview rotations
+have their own latest-transform fence, and confirmation waits for the transformed snapshot. Routine schematic
 loads and interactions while a transform is pending stay silent in chat; preview
 readiness and failures retain their existing feedback. Draft file writes and
 their create-only publication/reconciliation remain domain-owned storage-worker

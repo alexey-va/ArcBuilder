@@ -104,27 +104,49 @@ class SystemBuildBookCatalogTest : FunSpec({
         catalog.resolve(data.copy(buildingId = "viking")) shouldBe definition
     }
 
-    test("catalog rejects invalid digest traversal duplicate ids and disabled player entries") {
+    test("moved schemas resolve old book ids but expose only canonical ids in starter and suggestion pools") {
+        val root = Files.createTempDirectory("arc-builder-book-aliases-")
+        val body = """
+            books:
+              - building-id: players/viking
+                aliases: [viking.schem]
+                title: Viking
+                player-enabled: true
+                starter-enabled: true
+        """
+        val catalog = SystemBuildBookCatalog.load(config(root, body), root.resolve("absent"))
+        val canonical = catalog.resolve(BuildBookData("players/viking", "Viking"))
+        listOf("viking", "viking.schem", "viking.schematic", "players/viking.schem").forEach { id ->
+            catalog.resolve(BuildBookData(id, "Old book")) shouldBe canonical
+        }
+        canonical?.buildingId shouldBe "players/viking"
+        catalog.enabledBuildingIds shouldBe listOf("players/viking")
+        catalog.starterBuildingIds shouldBe listOf("players/viking")
+        catalog.resolve(BuildBookData("viking", "Player book", playerCreated = true)) shouldBe null
+        for (invalid in listOf("../outside", "players/viking.schem", "viking, viking.schem")) {
+            shouldThrow<IllegalArgumentException> {
+                SystemBuildBookCatalog.load(config(root, body.replace("viking.schem]", "$invalid]")), root)
+            }
+        }
+        shouldThrow<IllegalArgumentException> {
+            SystemBuildBookCatalog.load(config(root, body.replace("[viking.schem]", "viking.schem")), root)
+        }
+        shouldThrow<IllegalArgumentException> {
+            SystemBuildBookCatalog.load(config(root, body.trimIndent() + "\n" + """
+              - building-id: atelier/viking
+                aliases: [viking]
+                title: Other
+                player-enabled: true
+            """.trimIndent().prependIndent("  ")), root)
+        }
+    }
+
+    test("catalog rejects traversal duplicate ids and disabled player entries") {
         val root = Files.createTempDirectory("arc-builder-system-books-invalid-")
         val bytes = "schematic".toByteArray()
         Files.write(root.resolve("viking.schem"), bytes)
         val digest = sha256(bytes)
 
-        shouldThrow<IllegalArgumentException> {
-            SystemBuildBookCatalog.load(
-                config(
-                    root,
-                    """
-                    books:
-                      - building-id: viking.schem
-                        title: Viking
-                        sha256: invalid-digest
-                        player-enabled: true
-                    """,
-                ),
-                root,
-            )
-        }
         shouldThrow<IllegalArgumentException> {
             SystemBuildBookCatalog.load(
                 config(

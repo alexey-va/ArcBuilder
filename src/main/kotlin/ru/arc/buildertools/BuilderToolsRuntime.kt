@@ -2,6 +2,7 @@ package ru.arc.buildertools
 
 import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
 import com.mojang.brigadier.suggestion.Suggestions
+import io.papermc.paper.command.brigadier.MessageComponentSerializer
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import net.kyori.adventure.title.Title
@@ -131,7 +132,6 @@ internal class BuilderToolsRuntime(
     private val schematics = BuilderSchematics(BuilderStoragePaths.resolveCandidate(plugin.dataPath, config.schematicsRoot))
     private val loadBuilding = schematicLoader ?: schematics::load
     private val bookRequests = BuilderBookRequests(taskScope)
-    private val systemBookRequests = BuilderBookRequests(taskScope)
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
     private val safety = BuilderBlockSafety(plugin, config.replaceableMaterials)
@@ -827,7 +827,6 @@ internal class BuilderToolsRuntime(
             initializedConstructionProjectsMenu?.close()
             initializedConstructionMenus?.close()
             bookRequests.close()
-            systemBookRequests.close()
             schematics.close()
             taskScope.close()
             operationLocks.close()
@@ -846,11 +845,8 @@ internal class BuilderToolsRuntime(
                 sender,
                 args.drop(1),
                 systemBuildBookResolver,
-                config.maxScanVolume,
                 messages,
                 { systemBuildBookStarterIds },
-                loadBuilding,
-                systemBookRequests,
                 { sender.sendMessage(messages.render("errors.no-permission")) },
             )
         }
@@ -1232,6 +1228,14 @@ internal class BuilderToolsRuntime(
     fun onSendSuggestions(event: AsyncPlayerSendSuggestionsEvent) {
         val parts = event.buffer.removePrefix("/").lowercase(Locale.ROOT).split(' ')
         if (parts.firstOrNull() !in setOf("builder", "arcbuilder:builder")) return
+        if (parts.getOrNull(1) == "systembook") {
+            event.suggestions = BuilderSystemBookIssuer.clientSuggestions(event.suggestions,
+                MessageComponentSerializer.message().serialize(
+                    messages.render("book.system-issue.directory-suggestion", locale(event.player)),
+                ),
+            )
+            return
+        }
         if (!(parts.getOrNull(1) == "fill" && parts.size == 3 ||
                 parts.getOrNull(1) == "replace" && parts.size in 3..4)) return
         // Brigadier sorts Bukkit completions again; reorder the final packet without adding suggestions.
@@ -3308,7 +3312,7 @@ internal class BuilderToolsRuntime(
         val definition = if (data.playerCreated) null else systemBuildBookResolver(data)
         if (!data.playerCreated && definition == null) { send(player, "book.invalid"); failed(); return }
         bookRequests.run(player, source,
-            request = { loadBuilding(data.buildingId, data.schematicSha256 ?: definition?.schematicSha256) },
+            request = { loadBuilding(definition?.buildingId ?: data.buildingId, data.schematicSha256.takeIf { data.playerCreated }) },
             failed = { failure ->
                 if (failure != null) warn("Builder schematic request rejected: {}", failure.message)
                 if (player.isOnline) send(player, if (failure == null) "book.source-changed" else "book.invalid")
@@ -3559,7 +3563,7 @@ internal class BuilderToolsRuntime(
             operationLocks.bookLockedPlayerCount > 0 || operationLocks.recoveryLockedPlayerCount > 0 ||
                 bookHealth.deliveryWaitingForSpace > 0 || bookHealth.reservationReleaseBacklog > 0 ||
                 bookHealth.recoveryBlocked -> BuilderToolsReloadBlocker.DURABLE_BOOK_FLOW
-            bookRequests.size > 0 || systemBookRequests.size > 0 || books.pendingSchematicRequests > 0 || previews.pendingCount > 0 || plannedConstructionProjects.isNotEmpty() ->
+            bookRequests.size > 0 || books.pendingSchematicRequests > 0 || previews.pendingCount > 0 || plannedConstructionProjects.isNotEmpty() ->
                 BuilderToolsReloadBlocker.PENDING_PREVIEW
             selections.pendingCount > 0 || clipboardController.pendingCount > 0 || BuildingManager.pendingCount > 0 ->
                 BuilderToolsReloadBlocker.VOLATILE_PLAYER_STATE
@@ -3642,7 +3646,6 @@ internal class BuilderToolsRuntime(
         bookHoldHints.clear()
         bookPreviewPresentation.close()
         bookRequests.close()
-        systemBookRequests.close()
         schematics.close()
         taskScope.close()
         closeStorageExecutor()

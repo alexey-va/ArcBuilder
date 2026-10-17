@@ -217,7 +217,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
     }
 
     test("deferred click preserves original facing and action with identical books in two slots") {
-        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val definition = SystemBuildBookDefinition("civs/house", "House", true, true)
         val loading = java.util.concurrent.CompletableFuture<Building>()
         strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }, schematicLoader = { _, _ -> loading }) }) { journey ->
             val player = journey.builder("DelayedBook", GameMode.CREATIVE)
@@ -242,8 +242,30 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("an existing book loads the canonical moved schema asynchronously and retains its identity") {
+        val definition = SystemBuildBookDefinition("players/viking", "Viking", true, true)
+        val loading = java.util.concurrent.CompletableFuture<Building>()
+        val requests = mutableListOf<Pair<String, String?>>()
+        strictMockBukkit(open = { ArcBuilderJourney.open(
+            systemResolver = { if (it.buildingId == "viking.schem") definition else null },
+            schematicLoader = { id, digest -> requests += id to digest; loading },
+        ) }) { journey ->
+            val player = journey.builder("LegacyBook", GameMode.CREATIVE)
+            val original = BuildBookData("viking.schem", "Viking",
+                contentSha256 = "a".repeat(64), schematicSha256 = "b".repeat(64))
+            player.inventory.setItemInMainHand(BuildBookItems.create(original))
+            journey.rightClickBook(player, Action.RIGHT_CLICK_BLOCK, journey.world.getBlockAt(5, 64, 5))
+            requests shouldBe listOf(definition.buildingId to null)
+            BuildingManager.pending(player.uniqueId) shouldBe null
+            loading.complete(schematicTestBuilding(definition.buildingId))
+            journey.paper.performTicks(3)
+            journey.renderer.hasBook(player.uniqueId) shouldBe true
+            BuildBookCodec.read(player.inventory.itemInMainHand)?.buildingId shouldBe original.buildingId
+        }
+    }
+
     test("book menu waits safely for the initial shared transform") {
-        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val definition = SystemBuildBookDefinition("civs/house", "House", true, true)
         val base = schematicTestBuilding(definition.buildingId)
         val transformed = java.util.concurrent.CompletableFuture<ru.arc.paper.api.ArcSchematicSnapshot>()
         val library = mockk<ru.arc.paper.api.ArcSchematicLibrary>()
@@ -268,7 +290,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
     }
 
     test("quiet schematic loading still reports a failed load") {
-        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val definition = SystemBuildBookDefinition("civs/house", "House", true, true)
         val loading = java.util.concurrent.CompletableFuture<Building>()
         strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }, schematicLoader = { _, _ -> loading }) }) { journey ->
             val player = journey.builder("FailedBookLoad", GameMode.CREATIVE)
@@ -289,7 +311,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
 
     test("book cancel and clear invalidate an initial load before any preview exists") {
         for (command in listOf("builder book cancel", "builder clear")) {
-            val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+            val definition = SystemBuildBookDefinition("civs/house", "House", true, true)
             val loading = java.util.concurrent.CompletableFuture<Building>()
             strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }, schematicLoader = { _, _ -> loading }) }) { journey ->
                 val player = journey.builder("CancelledLoad", GameMode.CREATIVE)
@@ -305,7 +327,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
     }
 
     test("deferred sneak click opens its selector after the modifier is released") {
-        val definition = SystemBuildBookDefinition("civs/house", "House", "a".repeat(64), true, true)
+        val definition = SystemBuildBookDefinition("civs/house", "House", true, true)
         val loading = java.util.concurrent.CompletableFuture<Building>()
         strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition.copy(buildingId = it.buildingId) }, schematicLoader = { _, _ -> loading }) }) { journey ->
             val player = journey.builder("DelayedSelector", GameMode.CREATIVE)
@@ -326,7 +348,6 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         val definition = SystemBuildBookDefinition(
             buildingId = "carve-test.schem",
             title = "Carve test",
-            schematicSha256 = "c".repeat(64),
             playerEnabled = true,
             materialsIncluded = true,
         )
@@ -359,7 +380,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
     }
 
     test("system book keeps a technical heart out of preview and construction without clearing its world cell") {
-        val definition = SystemBuildBookDefinition("heart.schem", "House", "a".repeat(64), true, true)
+        val definition = SystemBuildBookDefinition("heart.schem", "House", true, true)
         strictMockBukkit(open = { ArcBuilderJourney.open(systemResolver = { definition }) }) { journey ->
             val building = schematicTestBuilding(definition.buildingId,
                 listOf("minecraft:structure_void", "minecraft:stone", "minecraft:barrier"))
@@ -392,7 +413,6 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         val definition = SystemBuildBookDefinition(
             buildingId = "atomic-door-test.schem",
             title = "Atomic door test",
-            schematicSha256 = "e".repeat(64),
             playerEnabled = true,
             materialsIncluded = true,
         )
@@ -443,7 +463,6 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         val definition = SystemBuildBookDefinition(
             buildingId = "instant-door-test.schem",
             title = "Atomic door test",
-            schematicSha256 = "e".repeat(64),
             playerEnabled = true,
             materialsIncluded = false,
         )
@@ -475,7 +494,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 journey.confirmBookHologram(player)
                 val store = BuilderConstructionProjectStore(journey.plugin.dataPath, 10000)
                 var projectId: UUID? = null
-                journey.await("waiting for missing materials") {
+                journey.awaitStableConstruction("waiting for missing materials") {
                     val record = store.loadAll().firstOrNull { it.playerId == player.uniqueId }
                     projectId = record?.projectId
                     record?.state == BuilderConstructionProjectState.WAITING_MATERIALS
@@ -492,7 +511,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 journey.paper.performTicks(2)
                 player.openInventory.topInventory.getItem(22)?.type shouldBe Material.NETHER_STAR
                 click(22, org.bukkit.event.inventory.ClickType.LEFT)
-                journey.await("admin completion through the real menu callback") {
+                journey.awaitStableConstruction("admin completion through the real menu callback") {
                     store.loadOrNull(checkNotNull(projectId))?.state == BuilderConstructionProjectState.COMPLETED
                 }
                 player.inventory.contains(Material.OAK_DOOR) shouldBe false
@@ -514,7 +533,6 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         val definition = SystemBuildBookDefinition(
             buildingId = "loot-chest-test.schem",
             title = "Loot chest test",
-            schematicSha256 = "d".repeat(64),
             playerEnabled = true,
             materialsIncluded = true,
             containerLootTableKey = "minecraft:chests/spawn_bonus_chest",
@@ -1440,7 +1458,6 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         val definition = SystemBuildBookDefinition(
             buildingId = "viking.schem",
             title = "Стартовый дом",
-            schematicSha256 = "a".repeat(64),
             playerEnabled = true,
             materialsIncluded = true,
         )
@@ -1568,6 +1585,11 @@ private class ArcBuilderJourney private constructor(
     }
 
     fun activeLeases(): Int = runtime.runtimeHealthContribution().activeLeases
+
+    fun awaitStableConstruction(description: String, condition: () -> Boolean) {
+        // Read the journal only after the runtime has acknowledged its async writes.
+        await(description) { runtime.reloadBlocker() == null && condition() }
+    }
 
     fun selectionPanel(player: Player) = runtime.selectionPanelView(player)
 
