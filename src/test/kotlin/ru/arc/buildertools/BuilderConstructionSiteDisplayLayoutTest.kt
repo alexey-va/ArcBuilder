@@ -9,7 +9,10 @@ import io.kotest.matchers.shouldBe
 import org.bukkit.Color
 import org.bukkit.Material
 import org.bukkit.entity.Display
-import org.bukkit.entity.TextDisplay
+import org.bukkit.Location
+import org.bukkit.World
+import net.kyori.adventure.text.Component
+import ru.arc.paper.scene.SceneAudience
 import java.util.UUID
 
 class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
@@ -129,15 +132,14 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
     }
 
     "construction panel orientation is fixed and applies its persisted face yaw" {
-        val display = mockk<TextDisplay>(relaxed = true)
-
-        BuilderConstructionSitePanelOrientation.apply(display, 90f)
-
-        verify(exactly = 1) { display.billboard = Display.Billboard.FIXED }
-        verify(exactly = 1) { display.setRotation(90f, 0f) }
-        verify(exactly = 1) {
-            display.transformation = match {
-                it.scale == org.joml.Vector3f(2f) && it.translation.z > 0f
+        val packet = BuilderPlaqueDisplays()
+        BuilderWorldPlaque(packet.owner, unblockedPlaqueSpace(), plaqueStyle(), SceneAudience.Public()).use { plaque ->
+            plaque.update(Location(mockk<World>(relaxed = true), 1.0, 66.25, 2.0, 90f, 0f), Component.text("Стройплощадка"))
+            packet.texts.map { it.location.yaw } shouldBe listOf(90f, 270f)
+            packet.texts.forEach { record ->
+                verify(exactly = 1) { record.display.billboard = Display.Billboard.FIXED }
+                record.transform.scale shouldBe org.joml.Vector3f(2f)
+                (record.transform.translation.z > 0f) shouldBe true
             }
         }
     }

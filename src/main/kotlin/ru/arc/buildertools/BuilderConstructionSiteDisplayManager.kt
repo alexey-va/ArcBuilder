@@ -8,25 +8,30 @@ import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.entity.Display
 import org.bukkit.entity.Entity
-import org.bukkit.entity.Interaction
 import org.bukkit.entity.Player
-import org.bukkit.entity.TextDisplay
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
-import org.bukkit.event.player.PlayerInteractEntityEvent
 import org.bukkit.event.world.ChunkLoadEvent
-import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.util.Transformation
 import org.joml.Quaternionf
 import org.joml.Vector3f
 import ru.arc.autobuild.BuildBookItems
-import ru.arc.paper.display.PacketDisplay
-import ru.arc.paper.display.PacketTextDisplay
 import ru.arc.paper.display.PaperPacketDisplays
+import ru.arc.paper.scene.PacketDisplayScene
+import ru.arc.paper.scene.PaperSpatialControls
+import ru.arc.paper.scene.PaperSpatialSpace
+import ru.arc.paper.scene.SceneAudience
+import ru.arc.paper.scene.SceneDisplayStyle
+import ru.arc.paper.scene.SceneFrame
+import ru.arc.paper.scene.ScenePart
+import ru.arc.paper.scene.ScenePose
+import ru.arc.paper.scene.SpatialControlController
+import ru.arc.paper.scene.SpatialControlFrame
+import ru.arc.paper.scene.SpatialSceneKey
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.util.UUID
@@ -83,18 +88,6 @@ internal data class BuilderSitePanelPlacement(
     val z: Double,
     val yaw: Float,
 )
-
-internal object BuilderConstructionSitePanelOrientation {
-    const val SCALE = 2f
-
-    fun apply(display: TextDisplay, yaw: Float) {
-        display.billboard = Display.Billboard.FIXED
-        display.setRotation(yaw, 0f)
-        display.transformation = Transformation(
-            Vector3f(0f, 0f, .02f), Quaternionf(), Vector3f(SCALE), Quaternionf(),
-        )
-    }
-}
 
 internal object BuilderConstructionSiteDisplayLayout {
     fun create(
@@ -191,19 +184,52 @@ internal class BuilderConstructionSiteDisplayManager(
     private val projectLookup: (UUID) -> BuilderConstructionProjectRecord?,
     private val onInspect: (Player, BuilderConstructionProjectRecord) -> Unit,
     private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "construction-sites"),
+    private val space: PaperSpatialSpace = PaperSpatialSpace(),
 ) : Listener, AutoCloseable {
+    /** A new immutable source rotates native input IDs; progress updates retain this identity. */
+    private class SitePanelContext
+
     private data class Scene(
-        val project: BuilderConstructionProjectRecord,
-        val model: BuilderConstructionSiteDisplayModel,
-        val entities: List<PacketDisplay>,
-        val panels: List<PacketTextDisplay>,
-        var interaction: Interaction? = null,
+        var project: BuilderConstructionProjectRecord,
+        var model: BuilderConstructionSiteDisplayModel,
+        val outline: PacketDisplayScene<Int>,
+        val plaque: BuilderWorldPlaque?,
+        var context: SitePanelContext = SitePanelContext(),
     )
 
     private val projectKey = NamespacedKey(plugin, "construction_site_project")
     private val scenes = mutableMapOf<UUID, Scene>()
     private val reconciling = mutableSetOf<UUID>()
     private var closed = false
+    private val audience = SceneAudience.Public()
+    private val outlineStyle = SceneDisplayStyle(
+        brightness = Display.Brightness(15, 15),
+        viewRange = (settings.viewRange / 64.0).toFloat(),
+        glowing = true,
+        glowColor = settings.glowColor,
+    )
+    private val controls = PaperSpatialControls(plugin, displays, object : SpatialControlController<SitePanelContext, Unit>() {
+        override fun current(player: Player, scene: SpatialSceneKey): SpatialControlFrame<SitePanelContext, Unit>? {
+            val projectId = UUID.fromString(scene.value)
+            val shown = scenes[projectId] ?: return null
+            val project = projectLookup(projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)
+            if (project == null) { remove(projectId); return null }
+            if (closed || !sameSource(shown.project, project)) return null
+            return shown.plaque?.controls(shown.context)
+        }
+
+        override fun activate(player: Player, scene: SpatialSceneKey, context: SitePanelContext, action: Unit) {
+            val fresh = current(player, scene) ?: return
+            if (fresh.context !== context) return
+            val project = projectLookup(UUID.fromString(scene.value))?.takeUnless(BuilderConstructionProjectRecord::terminal) ?: return
+            onInspect(player, project)
+        }
+
+        override fun inputFailed(player: Player, scene: SpatialSceneKey, context: SitePanelContext, failure: Exception) {
+            val projectId = UUID.fromString(scene.value)
+            if (scenes[projectId]?.context === context) remove(projectId)
+        }
+    })
 
     init {
         Bukkit.getPluginManager().registerEvents(this, plugin)
@@ -229,32 +255,20 @@ internal class BuilderConstructionSiteDisplayManager(
 
     fun remove(projectId: UUID) {
         scenes.remove(projectId)?.let { scene ->
-            scene.entities.forEach(PacketDisplay::remove)
-            scene.interaction?.remove()
+            try {
+                controls.clear(SpatialSceneKey(projectId.toString()))
+            } finally {
+                try { scene.plaque?.close() } finally { scene.outline.close() }
+            }
         }
-    }
-
-    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
-    fun onInteract(event: PlayerInteractEntityEvent) {
-        if (event.hand != EquipmentSlot.HAND) return
-        val rawProjectId = event.rightClicked.persistentDataContainer.get(projectKey, PersistentDataType.STRING)
-            ?: return
-        val projectId = runCatching { UUID.fromString(rawProjectId) }.getOrNull() ?: return
-        event.isCancelled = true
-        val project = projectLookup(projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)
-        if (project == null) {
-            remove(projectId)
-            return
-        }
-        onInspect(event.player, project)
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     fun onChunkLoad(event: ChunkLoadEvent) {
         if (closed || !settings.enabled) return
         val chunk = event.chunk
+        // Migration-only ownership tag: Core's current native targets use its own registry.
         chunk.entities.filter { it.persistentDataContainer.has(projectKey, PersistentDataType.STRING) }
-            .filter { entity -> scenes.values.none { it.interaction === entity } }
             .forEach(Entity::remove)
         val projects = scenes.entries
             .asSequence()
@@ -269,72 +283,63 @@ internal class BuilderConstructionSiteDisplayManager(
 
     private fun upsertChecked(project: BuilderConstructionProjectRecord) {
         val previous = scenes[project.projectId]
-        if (previous != null && previous.project.plan === project.plan && previous.project.steps === project.steps &&
-            previous.project.siteAnchor == project.siteAnchor && previous.project.sitePanelFace == project.sitePanelFace &&
-            previous.entities.all { it.isValid }
-        ) {
-            val text = panelText(project)
-            previous.panels.forEach { it.text(text) }
-            ensureInteraction(previous)
-            return
-        }
-        val model = BuilderConstructionSiteDisplayLayout.create(project, settings)
+        val unchangedSource = previous != null && sameSource(previous.project, project)
+        val model = if (unchangedSource) checkNotNull(previous).model else BuilderConstructionSiteDisplayLayout.create(project, settings)
         val world = Bukkit.getWorld(model.worldId) ?: return
-        val existing = scenes[project.projectId]
-            ?.takeIf { it.model == model && it.entities.all { display -> display.isValid } }
-        if (existing != null) {
-            existing.panels.forEach { it.text(panelText(project)) }
-            ensureInteraction(existing)
-            return
+        val scene = previous ?: Scene(
+            project,
+            model,
+            PacketDisplayScene(displays),
+            if (settings.panelEnabled) BuilderWorldPlaque(displays, space, BuilderWorldPlaqueStyle(
+                settings.panelInteractionWidth, settings.panelInteractionHeight, settings.panelLineWidth,
+                settings.panelBackgroundColor, settings.glowColor, settings.viewRange,
+            ), audience) else null,
+        ).also { created ->
+            scenes[project.projectId] = created
+            created.plaque?.let { plaque ->
+                plaque.refreshWith {
+                    if (scenes[project.projectId] === created && !closed) {
+                        runCatching {
+                            val current = projectLookup(project.projectId)?.takeUnless(BuilderConstructionProjectRecord::terminal)
+                            if (current == null) remove(project.projectId)
+                            else if (sameSource(created.project, current)) {
+                                plaque.refresh()
+                                controls.apply(SpatialSceneKey(project.projectId.toString()), plaque.controls(created.context))
+                            }
+                        }.onFailure { failure ->
+                            remove(project.projectId)
+                            warn("Builder construction site refresh failed for {}: {}", project.projectId, failure.message)
+                        }
+                    }
+                }
+            }
         }
-        remove(project.projectId)
-        val spawned = mutableListOf<PacketDisplay>()
-        try {
-            if (settings.outlineEnabled) {
-                val blockData = settings.outlineMaterial.createBlockData()
-                model.edges.forEach { edge ->
-                    spawned += displays.spawnBlock(Location(world, edge.x, edge.y, edge.z), blockData).also { display ->
-                        configure(display)
-                        display.transformation = Transformation(
-                            Vector3f(),
-                            Quaternionf(),
-                            Vector3f(edge.scaleX, edge.scaleY, edge.scaleZ),
-                            Quaternionf(),
-                        )
-                    }
-                }
-            }
-            val panels = mutableListOf<PacketTextDisplay>()
-            if (settings.panelEnabled) {
-                val location = Location(world, model.panelX, model.panelY, model.panelZ)
-                for (yaw in listOf(model.panelYaw, model.panelYaw + 180f)) {
-                    val panel = displays.spawnText(location.clone().apply { this.yaw = yaw }, panelText(project)).also { display ->
-                        configure(display)
-                        display.billboard = Display.Billboard.FIXED
-                        display.transformation = Transformation(
-                            Vector3f(0f, 0f, .02f), Quaternionf(),
-                            Vector3f(BuilderConstructionSitePanelOrientation.SCALE), Quaternionf(),
-                        )
-                        display.lineWidth = settings.panelLineWidth
-                        display.backgroundColor = settings.panelBackgroundColor
-                        display.isShadowed = true
-                        display.isSeeThrough = false
-                        display.alignment = TextDisplay.TextAlignment.CENTER
-                        display.displayWidth = settings.panelInteractionWidth
-                        display.displayHeight = settings.panelInteractionHeight
-                    }
-                    spawned += panel
-                    panels += panel
-                }
-            }
-            val scene = Scene(project, model, spawned.toList(), panels.toList())
-            scenes[project.projectId] = scene
-            ensureInteraction(scene)
-        } catch (failure: Throwable) {
-            spawned.forEach(PacketDisplay::remove)
-            throw failure
+        if (!unchangedSource) scene.context = SitePanelContext()
+        scene.project = project
+        scene.model = model
+        if (!unchangedSource || !scene.outline.isValid()) {
+            val blockData = settings.outlineMaterial.createBlockData()
+            scene.outline.apply(SceneFrame(
+                if (settings.outlineEnabled) model.edges.mapIndexed { index, edge -> ScenePart.Block(
+                    index,
+                    ScenePose(Location(world, edge.x, edge.y, edge.z), Transformation(
+                        Vector3f(), Quaternionf(), Vector3f(edge.scaleX, edge.scaleY, edge.scaleZ), Quaternionf(),
+                    )),
+                    outlineStyle,
+                    blockData,
+                ) } else emptyList(),
+                audience,
+            ))
+        }
+        scene.plaque?.let { plaque ->
+            plaque.update(Location(world, model.panelX, model.panelY, model.panelZ, model.panelYaw, 0f), panelText(project))
+            controls.apply(SpatialSceneKey(project.projectId.toString()), plaque.controls(scene.context))
         }
     }
+
+    private fun sameSource(first: BuilderConstructionProjectRecord, second: BuilderConstructionProjectRecord): Boolean =
+        first.plan === second.plan && first.steps === second.steps && first.siteAnchor == second.siteAnchor &&
+            first.sitePanelFace == second.sitePanelFace
 
     private fun panelText(project: BuilderConstructionProjectRecord): Component {
         val title = project.projectTitle ?: project.plan.bookBuildingId
@@ -351,38 +356,6 @@ internal class BuilderConstructionSiteDisplayManager(
                 "percent" to messages.literal(percent),
             ),
         )
-    }
-
-    private fun ensureInteraction(scene: Scene) {
-        if (!settings.panelEnabled || scene.interaction?.isValid == true) return
-        val model = scene.model
-        val world = Bukkit.getWorld(model.worldId) ?: return
-        // A UI hitbox must never load a neighbouring chunk merely to show a plaque.
-        if (!world.isChunkLoaded(model.panelX.chunkCoordinate(), model.panelZ.chunkCoordinate())) return
-        scene.interaction?.remove()
-        scene.interaction = world.spawn(
-            Location(world, model.panelX, model.panelY - settings.panelInteractionHeight / 2.0, model.panelZ),
-            Interaction::class.java,
-        ) { interaction ->
-            configureEntity(interaction, scene.project.projectId)
-            interaction.interactionWidth = settings.panelInteractionWidth
-            interaction.interactionHeight = settings.panelInteractionHeight
-            interaction.isResponsive = true
-        }
-    }
-
-    private fun configure(display: PacketDisplay) {
-        display.isGlowing = true
-        display.glowColorOverride = settings.glowColor
-        display.brightness = Display.Brightness(15, 15)
-        display.viewRange = (settings.viewRange / 64.0).toFloat()
-    }
-
-    private fun configureEntity(entity: Entity, projectId: UUID) {
-        entity.isPersistent = false
-        entity.isInvulnerable = true
-        entity.setGravity(false)
-        entity.persistentDataContainer.set(projectKey, PersistentDataType.STRING, projectId.toString())
     }
 
     private fun BuilderConstructionSiteDisplayModel.touches(chunkX: Int, chunkZ: Int): Boolean =
@@ -403,6 +376,7 @@ internal class BuilderConstructionSiteDisplayManager(
         closed = true
         HandlerList.unregisterAll(this)
         scenes.keys.toList().forEach(::remove)
+        controls.close()
         displays.close()
     }
 }

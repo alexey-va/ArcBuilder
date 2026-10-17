@@ -25,6 +25,8 @@ import ru.arc.autobuild.SystemBuildBookDefinition
 import ru.arc.config.ConfigManager
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
+import ru.arc.paper.display.PaperPacketDisplays
+import ru.arc.paper.scene.PaperSpatialSpace
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
 import java.time.Duration
 import java.util.function.Consumer
@@ -45,16 +47,20 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 val site = previewSite(player, player.location, BuildBookData("house.schem", "Дом"))
                 val panelWorld = mockk<org.bukkit.World>(relaxed = true)
                 every { panelWorld.uid } returns world.uid
-                val displays = mutableListOf<org.bukkit.entity.TextDisplay>()
+                every { panelWorld.minHeight } returns -64
+                every { panelWorld.maxHeight } returns 320
+                every { panelWorld.isChunkLoaded(any<Int>(), any<Int>()) } returns true
+                val packet = BuilderPlaqueDisplays()
                 val panel = mockk<org.bukkit.entity.Interaction>(relaxed = true)
                 every { panel.uniqueId } returns UUID.randomUUID()
-                every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.TextDisplay::class.java, any<java.util.function.Consumer<org.bukkit.entity.TextDisplay>>()) } answers {
-                    mockk<org.bukkit.entity.TextDisplay>(relaxed = true).also {
-                        displays += it
-                        thirdArg<Consumer<org.bukkit.entity.TextDisplay>>().accept(it)
-                    }
-                }
+                every { panel.isValid } returns true
+                every { panel.interactionWidth } returns 3f
+                every { panel.interactionHeight } returns 1.5f
+                var targetLocation = player.location
+                every { panel.location } answers { targetLocation.clone() }
+                every { panel.teleport(any<org.bukkit.Location>()) } answers { targetLocation = firstArg(); true }
                 every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<java.util.function.Consumer<org.bukkit.entity.Interaction>>()) } answers {
+                    targetLocation = firstArg<org.bukkit.Location>().clone()
                     thirdArg<Consumer<org.bukkit.entity.Interaction>>().accept(panel)
                     panel
                 }
@@ -65,16 +71,32 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     blockCount = 1, title = "Дом", cooldownRemaining = Duration.ZERO,
                     requiredMaterials = emptyList(),
                 ))
-                previewPresentation(plugin, config, host).use { presentation ->
+                previewPresentation(plugin, config, host, packet.owner, unblockedPlaqueSpace()).use { presentation ->
                     presentation.close(player.uniqueId)
                     presentation.retainConfirmation(site)
-                    displays.size shouldBe 2
-                    displays.forEach { display ->
-                        io.mockk.verify(exactly = 1) { display.displayWidth = 3f }
-                        io.mockk.verify(exactly = 1) { display.displayHeight = 1.5f }
+                    packet.texts.size shouldBe 2
+                    packet.texts.forEach { record ->
+                        io.mockk.verify(exactly = 1) { record.display.displayWidth = 3f }
+                        io.mockk.verify(exactly = 1) { record.display.displayHeight = 1.5f }
                     }
                     io.mockk.verify(exactly = 1) { panel.interactionWidth = 3f }
                     io.mockk.verify(exactly = 1) { panel.interactionHeight = 1.5f }
+                    presentation.refresh(site)
+                    packet.texts.size shouldBe 2
+                    io.mockk.verify(exactly = 1) {
+                        panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<Consumer<org.bukkit.entity.Interaction>>())
+                    }
+                    val admin = mockk<org.bukkit.entity.Player> {
+                        every { uniqueId } returns UUID.randomUUID()
+                        every { hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION) } returns true
+                    }
+                    val stranger = mockk<org.bukkit.entity.Player> {
+                        every { uniqueId } returns UUID.randomUUID()
+                        every { hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION) } returns false
+                    }
+                    packet.audiencePredicates.single()(player) shouldBe true
+                    packet.audiencePredicates.single()(admin) shouldBe true
+                    packet.audiencePredicates.single()(stranger) shouldBe false
                     presentation.openCurrentPlacement(player, null) shouldBe true
                     val chatMenu = player.openInventory.topInventory
                     val event = org.bukkit.event.player.PlayerInteractEntityEvent(
@@ -87,7 +109,10 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Подтвердить строительство"
                     presentation.clearConfirmation(player.uniqueId)
                     io.mockk.verify(exactly = 1) { panel.remove() }
-                    displays.forEach { display -> io.mockk.verify(exactly = 1) { display.remove() } }
+                    packet.texts.forEach { record -> io.mockk.verify(exactly = 1) { record.display.remove() } }
+                    io.mockk.verify(exactly = 0) {
+                        panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.TextDisplay::class.java, any<Consumer<org.bukkit.entity.TextDisplay>>())
+                    }
                     host.restoreCalls shouldBe 0
                     presentation.openCurrentPlacement(player, null) shouldBe false
                 }
@@ -254,6 +279,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     panelBackgroundColor = Color.fromARGB(0xB2, 0x1C, 0x23, 0x28),
                     panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
                     viewRange = 64.0,
+                    displays = mockk(relaxed = true),
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     val placement = player.openInventory.topInventory
@@ -369,6 +395,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     panelBackgroundColor = Color.fromARGB(0xB2, 0x1C, 0x23, 0x28),
                     panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
                     viewRange = 64.0,
+                    displays = mockk(relaxed = true),
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     val originalMenu = player.openInventory.topInventory
@@ -523,6 +550,8 @@ private fun previewSite(
                 every { site.transforming } returns false
     val snapshot = mockk<ConstructionSiteSnapshot>()
     every { site.player } returns player
+    every { site.world } returns location.world!!
+    every { site.adjustedCenter } returns location
     every { site.bookData } returns book
     every { site.centerBlock } returns location
     every { site.rotation } returns 0
@@ -536,6 +565,8 @@ private fun previewPresentation(
     plugin: ArcBuilderPlugin,
     config: BuilderToolsConfig,
     host: BuilderBookPreviewPresentationHost,
+    displays: PaperPacketDisplays = mockk(relaxed = true),
+    space: PaperSpatialSpace = unblockedPlaqueSpace(),
 ): BuilderBookPreviewPresentation = BuilderBookPreviewPresentation(
     plugin = plugin,
     renderer = mockk(relaxed = true),
@@ -549,6 +580,8 @@ private fun previewPresentation(
     panelBackgroundColor = Color.fromARGB(0xB2, 0x1C, 0x23, 0x28),
     panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
     viewRange = 64.0,
+    displays = displays,
+    space = space,
 )
 
 private fun plan(playerId: UUID, worldId: UUID): BuilderPlan {

@@ -73,6 +73,7 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         projectLookup = { id -> project.takeIf { it.projectId == id } },
                         onInspect = { _, _ -> },
                         displays = displays,
+                        space = unblockedPlaqueSpace(),
                     ).use { manager ->
                         manager.upsert(project)
                         spawned.size shouldBe 0
@@ -97,6 +98,14 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         paper.callEvent(ChunkLoadEvent(chunk, false))
                         spawned.size shouldBe 2
                         packetVisuals.size shouldBe 14
+                        steps.reads = 0
+                        manager.upsert(project.copy(updatedAtMillis = project.updatedAtMillis + 2))
+                        spawned.size shouldBe 2
+                        steps.reads shouldBe 0
+                        manager.upsert(project.copy(siteAnchor = BuilderBlockPos(worldId, 5, 64, 5)))
+                        spawned.size shouldBe 3
+                        packetVisuals.size shouldBe 14
+                        io.mockk.verify(exactly = 1) { spawned[1].remove() }
                         io.mockk.verify(exactly = 0) { world.getChunkAt(any<Int>(), any<Int>()) }
 
                     }
@@ -135,6 +144,8 @@ private fun displayWorld(
 ): World {
     val world = mockk<World>(relaxed = true)
     every { world.uid } returns worldId
+    every { world.minHeight } returns -64
+    every { world.maxHeight } returns 320
 
     fun <T : Entity> tracked(entity: T): T {
         valid[entity] = true
@@ -157,7 +168,16 @@ private fun displayWorld(
     every {
         world.spawn(any(), Interaction::class.java, any<Consumer<Interaction>>())
     } answers {
-        tracked(mockk<Interaction>(relaxed = true)).also { thirdArg<Consumer<Interaction>>().accept(it) }
+        var location = firstArg<org.bukkit.Location>().clone()
+        tracked(mockk<Interaction>(relaxed = true)).also { entity ->
+            every { entity.uniqueId } returns UUID.randomUUID()
+            every { entity.world } returns world
+            every { entity.location } answers { location.clone() }
+            every { entity.teleport(any<org.bukkit.Location>()) } answers { location = firstArg<org.bukkit.Location>().clone(); true }
+            every { entity.interactionWidth } returns 3f
+            every { entity.interactionHeight } returns 1.5f
+            thirdArg<Consumer<Interaction>>().accept(entity)
+        }
     }
     return world
 }

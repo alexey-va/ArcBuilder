@@ -20,6 +20,7 @@ import ru.arc.paper.actionpanel.ActionPanelPlacement
 import ru.arc.paper.actionpanel.ActionPanelPoint
 import ru.arc.paper.display.PacketTextDisplay
 import ru.arc.paper.display.PaperPacketDisplays
+import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.text.LocalizedMiniMessage
 import java.util.Locale
 import java.util.UUID
@@ -143,7 +144,9 @@ class BuilderSelectionActionPanelTest : StringSpec({
     }
 
     "Core runtime keeps the Builder status panel still for head and crouch, follows small motion and clears its guide" {
-        PanelHarness().use { h ->
+        // Shared spatial queries require the real Bukkit primary-thread boundary.
+        MockBukkitTestRuntime.open().use { PanelHarness().use { h ->
+            org.bukkit.Bukkit.isPrimaryThread() shouldBe true
             h.panel.tick()
             val label = h.labels.single()
             val initial = label.location.clone()
@@ -185,7 +188,7 @@ class BuilderSelectionActionPanelTest : StringSpec({
             h.panel.close()
             h.panel.close()
             verify(exactly = 1) { h.displays.close() }
-        }
+        } }
     }
 })
 

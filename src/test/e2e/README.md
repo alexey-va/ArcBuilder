@@ -1,12 +1,12 @@
 # Real Paper tests
 
 Use Java 25 and build ARC from commit
-`a64c7345370d8913cfff0911029e215ffd209c47` (version `1.4.408`). Pass that
+`75724dab83674e5a410fa0bac3ba21cfb117f64f` (version `1.4.409`). Pass that
 production JAR explicitly:
 
 ```bash
-./gradlew prepareE2eRuntimeArtifacts -Pe2eArcJar=/absolute/path/ARC-1.4.408.jar
-./gradlew plugwrightTest -Pe2eArcJar=/absolute/path/ARC-1.4.408.jar
+./gradlew prepareE2eRuntimeArtifacts -Pe2eArcJar=/absolute/path/ARC-1.4.409.jar
+./gradlew plugwrightTest -Pe2eArcJar=/absolute/path/ARC-1.4.409.jar
 ```
 
 The preparation task resolves the non-transitive `ru.ruscrafting:ArcCore:0.1.9`

@@ -7,20 +7,14 @@ import org.bukkit.Color
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.Sound
-import org.bukkit.entity.Display
-import org.bukkit.entity.Entity
-import org.bukkit.entity.Interaction
 import org.bukkit.entity.Player
-import org.bukkit.entity.TextDisplay
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
 import org.bukkit.event.inventory.InventoryCloseEvent
-import org.bukkit.event.player.PlayerInteractEntityEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
-import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.SystemBuildBookDefinition
@@ -44,6 +38,14 @@ import ru.arc.paper.menu.PaperMenuEntry
 import ru.arc.paper.menu.PaperMenuItemsAdderResolver
 import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
+import ru.arc.paper.display.PacketDisplayAudienceGroup
+import ru.arc.paper.display.PaperPacketDisplays
+import ru.arc.paper.scene.PaperSpatialControls
+import ru.arc.paper.scene.PaperSpatialSpace
+import ru.arc.paper.scene.SceneAudience
+import ru.arc.paper.scene.SpatialControlController
+import ru.arc.paper.scene.SpatialControlFrame
+import ru.arc.paper.scene.SpatialSceneKey
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
 import java.time.Duration
@@ -89,15 +91,17 @@ internal class BuilderBookPreviewPresentation(
     private val panelBackgroundColor: Color,
     private val panelGlowColor: Color,
     private val viewRange: Double,
+    private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "book-preview-plaque"),
+    private val space: PaperSpatialSpace = PaperSpatialSpace(),
 ) : BuildBookPreviewBridge, Listener, AutoCloseable {
     private data class PanelScene(
-        val site: ConstructionSite,
-        val entities: List<Entity>,
-        val interactionId: UUID,
+        var site: ConstructionSite,
+        val key: SpatialSceneKey,
+        val plaque: BuilderWorldPlaque,
+        val audience: PacketDisplayAudienceGroup,
     )
 
     private val panels = mutableMapOf<UUID, PanelScene>()
-    private val interactionOwners = mutableMapOf<UUID, UUID>()
     private val snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
     private val placementSites = mutableMapOf<UUID, ConstructionSite>()
     private val preparing = mutableMapOf<UUID, Any>()
@@ -112,6 +116,33 @@ internal class BuilderBookPreviewPresentation(
         ),
     )
     private var closed = false
+    private val controls = PaperSpatialControls(plugin, displays, object : SpatialControlController<ConstructionSite, Unit>() {
+        override fun current(player: Player, scene: SpatialSceneKey): SpatialControlFrame<ConstructionSite, Unit>? {
+            val panel = panels[UUID.fromString(scene.value)] ?: return null
+            val site = panel.site
+            if (closed || !site.player.isOnline || site.player.world.uid != site.world.uid ||
+                BuilderBookPreviewAccess.level(site.player.uniqueId, player.uniqueId,
+                    player.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) == BuilderBookPreviewAccessLevel.NONE
+            ) return null
+            return panel.plaque.controls(site)
+        }
+
+        override fun activate(player: Player, scene: SpatialSceneKey, context: ConstructionSite, action: Unit) {
+            val current = current(player, scene) ?: return
+            if (current.context !== context) return
+            when (BuilderBookPreviewAccess.level(context.player.uniqueId, player.uniqueId,
+                player.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION))) {
+                BuilderBookPreviewAccessLevel.OWNER -> openPlacement(player, context)
+                BuilderBookPreviewAccessLevel.INSPECT -> openInspection(player, context)
+                BuilderBookPreviewAccessLevel.NONE -> Unit
+            }
+        }
+
+        override fun inputFailed(player: Player, scene: SpatialSceneKey, context: ConstructionSite, failure: Exception) {
+            val ownerId = UUID.fromString(scene.value)
+            if (panels[ownerId]?.site === context) removePanel(ownerId)
+        }
+    })
 
     init {
         Bukkit.getPluginManager().registerEvents(this, plugin)
@@ -216,31 +247,10 @@ internal class BuilderBookPreviewPresentation(
         player?.let(menus::session)?.close()
     }
 
-    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
-    fun onPanelClick(event: PlayerInteractEntityEvent) {
-        if (event.hand != EquipmentSlot.HAND) return
-        val ownerId = interactionOwners[event.rightClicked.uniqueId] ?: return
-        event.isCancelled = true
-        val site = panels[ownerId]?.site ?: return
-        when (BuilderBookPreviewAccess.level(
-            ownerId,
-            event.player.uniqueId,
-            event.player.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION),
-        )) {
-            BuilderBookPreviewAccessLevel.OWNER -> openPlacement(event.player, site)
-            BuilderBookPreviewAccessLevel.INSPECT -> openInspection(event.player, site)
-            BuilderBookPreviewAccessLevel.NONE -> Unit
-        }
-    }
-
     @EventHandler
     fun onJoin(event: PlayerJoinEvent) {
         if (!event.player.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) return
         renderer.syncBookViewer(event.player)
-        panels.values
-            .filter { it.site.world.uid == event.player.world.uid }
-            .flatMap(PanelScene::entities)
-            .forEach { event.player.showEntity(plugin, it) }
     }
 
     @EventHandler
@@ -526,8 +536,11 @@ internal class BuilderBookPreviewPresentation(
     )
 
     private fun replacePanel(site: ConstructionSite) {
-        removePanel(site.player.uniqueId)
-        if (!site.player.isOnline || site.player.world.uid != site.world.uid) return
+        val ownerId = site.player.uniqueId
+        if (!site.player.isOnline || site.player.world.uid != site.world.uid) {
+            removePanel(ownerId)
+            return
+        }
         val positions = listOf(site.adjustedCenter.let { anchor ->
             BuilderBlockPos(site.world.uid, anchor.blockX, anchor.blockY, anchor.blockZ)
         })
@@ -542,73 +555,52 @@ internal class BuilderBookPreviewPresentation(
             panelHeightOffset,
             panelFrontOffset,
         )
-        val location = Location(site.world, panel.x, panel.y, panel.z)
-        val entities = mutableListOf<Entity>()
-        try {
-            for (yaw in listOf(panel.yaw, panel.yaw + 180f)) {
-                val display = site.world.spawn(location, TextDisplay::class.java) { entity ->
-                    configure(entity, site.player)
-                    entity.text(
-                        messages.render(
-                            "book.preview-panel",
-                            locale(site.player),
-                            mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24))),
-                        ),
-                    )
-                    BuilderConstructionSitePanelOrientation.apply(entity, yaw)
-                    entity.lineWidth = panelLineWidth
-                    entity.backgroundColor = panelBackgroundColor
-                    entity.isShadowed = true
-                    entity.isSeeThrough = false
-                    entity.alignment = TextDisplay.TextAlignment.CENTER
-                    entity.displayWidth = panelInteractionWidth
-                    entity.displayHeight = panelInteractionHeight
-                    entity.isGlowing = true
-                    entity.glowColorOverride = panelGlowColor
-                    entity.brightness = Display.Brightness(15, 15)
-                    entity.viewRange = (viewRange / 64.0).toFloat()
+        val existing = panels[ownerId] ?: run {
+            val audience = displays.createAudienceGroup { viewer ->
+                viewer.uniqueId == ownerId || viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)
+            }
+            val plaque = BuilderWorldPlaque(displays, space, BuilderWorldPlaqueStyle(
+                panelInteractionWidth, panelInteractionHeight, panelLineWidth, panelBackgroundColor, panelGlowColor, viewRange,
+            ), SceneAudience.Public(audience))
+            PanelScene(site, SpatialSceneKey(ownerId.toString()), plaque, audience).also { created ->
+                panels[ownerId] = created
+                plaque.refreshWith {
+                    if (panels[ownerId] === created && !closed) {
+                        runCatching {
+                            val owner = created.site.player
+                            plaque.refresh(owner.isOnline && owner.world.uid == created.site.world.uid)
+                            controls.apply(created.key, plaque.controls(created.site))
+                        }.onFailure { failure ->
+                            removePanel(ownerId)
+                            warn("Builder build-book plaque refresh failed for {}: {}", ownerId, failure.message)
+                        }
+                    }
                 }
-                entities += display
             }
-            val interaction = site.world.spawn(
-                location.clone().subtract(0.0, panelInteractionHeight / 2.0, 0.0),
-                Interaction::class.java,
-            ) { entity ->
-                configure(entity, site.player)
-                entity.interactionWidth = panelInteractionWidth
-                entity.interactionHeight = panelInteractionHeight
-                entity.isResponsive = true
-            }
-            entities += interaction
-            interactionOwners[interaction.uniqueId] = site.player.uniqueId
-            panels[site.player.uniqueId] = PanelScene(site, entities.toList(), interaction.uniqueId)
-        } catch (failure: Throwable) {
-            entities.forEach(Entity::remove)
-            throw failure
         }
+        existing.site = site
+        existing.plaque.update(Location(site.world, panel.x, panel.y, panel.z, panel.yaw, 0f), messages.render(
+            "book.preview-panel",
+            locale(site.player),
+            mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24))),
+        ))
+        controls.apply(existing.key, existing.plaque.controls(site))
     }
 
     private fun replacePanelSafely(site: ConstructionSite) {
         runCatching { replacePanel(site) }.onFailure { failure ->
+            removePanel(site.player.uniqueId)
             warn("Builder build-book preview panel failed for {}: {}", site.player.name, failure.message)
         }
     }
 
-    private fun configure(entity: Entity, player: Player) {
-        entity.setVisibleByDefault(false)
-        entity.isPersistent = false
-        entity.isInvulnerable = true
-        entity.setGravity(false)
-        player.showEntity(plugin, entity)
-        Bukkit.getOnlinePlayers()
-            .filter { it.world.uid == player.world.uid && it.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION) }
-            .forEach { it.showEntity(plugin, entity) }
-    }
-
     private fun removePanel(playerId: UUID) {
         val scene = panels.remove(playerId) ?: return
-        interactionOwners.remove(scene.interactionId)
-        scene.entities.forEach(Entity::remove)
+        try {
+            controls.clear(scene.key)
+        } finally {
+            try { scene.plaque.close() } finally { scene.audience.close() }
+        }
     }
 
     private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
@@ -630,6 +622,8 @@ internal class BuilderBookPreviewPresentation(
         closed = true
         HandlerList.unregisterAll(this)
         panels.keys.toList().forEach(::removePanel)
+        controls.close()
+        displays.close()
         snapshots.clear()
         confirmationInventories.clear()
         placementSites.clear()

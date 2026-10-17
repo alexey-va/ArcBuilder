@@ -68,8 +68,10 @@ connection's Netty event loop. Entity IDs come directly from Paper's global
 `UnsafeValues.nextEntityId()` allocator; no reflection lookup or native spawn is needed. `BuilderPacketScene` retains unchanged entity IDs,
 tracks the owner and permitted book-preview observers, and replays displays after
 client chunk eviction, world changes, respawn, or reconnect. Cleanup uses the
-same ordered connection queue. Native book panels retain their text and clickable
-Interaction entities in `BuilderBookPreviewPresentation`.
+same ordered connection queue. `BuilderBookPreviewPresentation` assembles its
+two packet-text faces with Core's `PacketDisplayScene` and binds the single
+native Interaction through `PaperSpatialControls`; book ownership, observer
+permissions and placement menus remain in the Builder adapter.
 
 Large preview windows select the nearest K blocks with a bounded heap and retain
 schematic order. Both plan and book previews capture eye coordinates every
@@ -267,8 +269,9 @@ The gaze area covers the full panel with hysteresis; looking away or closing the
 panel restores glow. Changes use budgeted metadata updates on existing display
 IDs. Reload replaces the panel settings, including this switch.
 The adapter retains its owned packet-display runtime and closes it after Core
-has released panel handles and targets. The separate double-sided book-preview
-and persistent construction-site gateways keep their existing owners and anchors.
+has released panel handles and targets. Double-sided book-preview and persistent
+construction-site gateways use the same Core scene and spatial-control family;
+their domain owners and authored project anchors remain in Builder.
 The book action copies the current selection before draft creation. It snapshots
 the chosen inventory book slot and revalidates that stack before durable delivery;
 the command's existing main-hand source and journal recovery remain available.
@@ -656,6 +659,10 @@ Preview and construction plaques have two fixed opposing text faces, each at
 2x scale with a small separation to prevent coincident surfaces. Their hitbox
 uses configured dimensions directly; both faces share updates and cleanup.
 Plaque titles use the localized ArcBuilder prefix on both sides.
+`BuilderWorldPlaque` supplies this authored appearance to `PacketDisplayScene`.
+Stable part keys retain packet entity IDs across text, progress and pose changes;
+a new book session or immutable construction source replaces native input IDs
+so queued interactions cannot act on a different project context.
 
 Construction-site cancellation uses a two-click owner/admin confirmation. The
 existing pause request queue drains any in-flight material/output exchange before
@@ -702,3 +709,33 @@ preserves the existing right-click contract and is created only if its exact
 chunk is already loaded. Chunk loading restores that hitbox without rebuilding
 packet visuals. Exact legacy ownership tags are cleaned on startup/chunk load;
 client visibility, replay and async packet delivery belong to the shared owner.
+
+Both book and site plaques use `PaperSpatialControls` for fresh eye-plane hits,
+native interaction reach, audience, occlusion, duplicate-event suppression and
+the existing early main-hand right-click policy. The Builder callbacks retain
+owner/admin book access and public site inspection; mutation authority remains
+in the existing menus. Book scenes have world scope: an ordinary same-world
+teleport does not discard a retained placement gateway, while owner quit and
+domain teardown still remove it.
+
+`PaperSpatialSpace` searches a bounded deterministic set of nearby plaque poses.
+Only the text and its native target move: site outlines, persisted anchors,
+orientation and construction plans do not. When no pose fits, the plaque and
+target hide while the outline and domain entry points remain. An eligible nearby
+observer triggers cached obstacle refresh every five ticks in the existing
+display capture loop, including hidden-plaque recovery; there is no extra timer
+or construction-step scan. Input also rechecks the current translated visual
+volume, rejecting a newly obstructed edge before that refresh runs.
+
+The placement volume is independent of both culling metadata and the configured
+unscaled native target. Its conservative width uses the authored text wrap width
+at scale 2. Minecraft 1.21.11's renderer anchors text at the bottom and advances
+ten pixels per line at 0.025 blocks per pixel before scale; Builder therefore
+centers the volume above the authored text pose. The native target and two-sided
+input plane follow the estimated visible text center without moving that pose.
+Unknown/private glyphs reserve an authored line and supplementary characters are
+counted by code point; the fallback preserves word boundaries and allows the
+extra bold pixel even after flattening component decorations. This is a
+conservative font bound, not native-client
+pixel measurement; scale, text and the 3 by 1.5 default native dimensions are
+preserved.
