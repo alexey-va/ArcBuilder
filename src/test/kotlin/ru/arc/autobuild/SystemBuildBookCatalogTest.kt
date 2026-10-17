@@ -3,6 +3,8 @@ package ru.arc.autobuild
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.ints.shouldBeGreaterThan
+import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.security.MessageDigest
 
@@ -13,6 +15,52 @@ class SystemBuildBookCatalogTest : FunSpec({
 
     fun config(root: java.nio.file.Path, body: String): java.nio.file.Path =
         root.resolve("system-build-books.yml").also { Files.writeString(it, body.trimIndent()) }
+
+    test("full building library loads only metadata beyond the generic YAML size limit") {
+        val root = Files.createTempDirectory("arc-builder-large-system-books-")
+        val schematicsRoot = root.resolve("schematics-not-present")
+        val entryCount = 16_384
+        fun buildingId(index: Int) = "minecolonies/style_${index % 36}/building_$index.schem"
+        val body = buildString {
+            appendLine("books:")
+            repeat(entryCount) { index ->
+                appendLine("  - building-id: ${buildingId(index)}")
+                appendLine("    title: Дом поселения $index")
+                appendLine("    sha256: ${"a".repeat(64)}")
+                appendLine("    player-enabled: true")
+                appendLine("    starter-enabled: false")
+                appendLine("    materials-included: true")
+            }
+        }
+        body.codePointCount(0, body.length) shouldBeGreaterThan 3_000_000
+
+        val catalog = SystemBuildBookCatalog.load(config(root, body), schematicsRoot)
+
+        catalog.enabledBuildingIds.size shouldBe entryCount
+        catalog.starterBuildingIds shouldBe emptyList()
+        catalog.resolve(BuildBookData(buildingId(0), "First"))?.title shouldBe "Дом поселения 0"
+        catalog.resolve(BuildBookData(buildingId(entryCount - 1), "Last"))?.title shouldBe "Дом поселения ${entryCount - 1}"
+        Files.exists(schematicsRoot) shouldBe false
+    }
+
+    test("catalogue rejects excessive metadata entries before validating individual fields") {
+        val root = Files.createTempDirectory("arc-builder-too-many-system-books-")
+        val body = "books:\n" + "  - {}\n".repeat(65_537)
+
+        shouldThrow<IllegalArgumentException> {
+            SystemBuildBookCatalog.load(config(root, body), root.resolve("schematics-not-present"))
+        }.message shouldBe "System build-book catalog size is invalid"
+    }
+
+    test("catalogue rejects files larger than 64 MiB before parsing") {
+        val root = Files.createTempDirectory("arc-builder-oversize-system-books-")
+        val path = root.resolve("system-build-books.yml")
+        RandomAccessFile(path.toFile(), "rw").use { it.setLength(64L * 1024 * 1024 + 1) }
+
+        shouldThrow<IllegalArgumentException> {
+            SystemBuildBookCatalog.load(path, root.resolve("schematics-not-present"))
+        }.message shouldBe "System build-book catalog exceeds 64 MiB"
+    }
 
     test("catalogue resolves metadata without reading or hashing schematic files") {
         val root = Files.createTempDirectory("arc-builder-system-books-")

@@ -12,7 +12,7 @@ import java.util.concurrent.CompletableFuture
 
 class BuildBookStructureTransformTest : StringSpec({
     "book rotation and mirror use the shared asynchronous transform result" {
-        val source = mockk<ArcSchematicSnapshot>()
+        val source = schematicTestBuilding("civs/house", listOf("minecraft:stone", "minecraft:structure_void")).snapshot
         val transformed = mockk<ArcSchematicSnapshot>()
         val pending = CompletableFuture<ArcSchematicSnapshot>()
         val library = mockk<ArcSchematicLibrary>()

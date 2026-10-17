@@ -47,7 +47,6 @@ internal class SystemBuildBookCatalog private constructor(
         .sorted()
 
     init {
-        require(definitions.size in 1..256) { "System build-book catalog size is invalid" }
         require(this.definitions.size == definitions.size) { "System build-book catalog contains duplicate ids" }
     }
 
@@ -58,10 +57,19 @@ internal class SystemBuildBookCatalog private constructor(
     }
 
     companion object {
+        private const val MAX_CATALOG_ENTRIES = 65_536
+        private const val MAX_CATALOG_BYTES = 64 * 1024 * 1024
+
         fun load(configPath: Path, @Suppress("UNUSED_PARAMETER") schematicsRoot: Path): SystemBuildBookCatalog {
             require(Files.isRegularFile(configPath)) { "System build-book catalog file is missing" }
-            val yaml = YamlConfiguration.loadConfiguration(configPath.toFile())
-            val definitions = yaml.getMapList("books").map { raw ->
+            require(Files.size(configPath) <= MAX_CATALOG_BYTES) { "System build-book catalog exceeds 64 MiB" }
+            val yaml = YamlConfiguration().apply {
+                options().codePointLimit(MAX_CATALOG_BYTES)
+                load(configPath.toFile())
+            }
+            val entries = yaml.getMapList("books")
+            require(entries.size in 1..MAX_CATALOG_ENTRIES) { "System build-book catalog size is invalid" }
+            val definitions = entries.map { raw ->
                 SystemBuildBookDefinition(
                     buildingId = raw["building-id"] as? String
                         ?: throw IllegalArgumentException("System build-book building id is missing"),
