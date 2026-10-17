@@ -73,22 +73,66 @@ class BuilderSystemBookIssuerTest : FunSpec({
         }
     }
 
-    test("explicit give delivers a canonical path-only book to the named recipient for player and console") {
+    test("player explicit give delivers a canonical path-only book including to a recipient named Give") {
         withPlayerIssuer { fixture ->
-            val recipient = fixture.paper.addPlayer("BookRecipient")
-            val console = mockk<ConsoleCommandSender>(relaxed = true)
-            listOf(fixture.player, console).forEachIndexed { index, sender ->
-                BuilderSystemBookIssuer.issue(sender, listOf("GiVe", recipient.name, "old-house.schem"),
+            listOf("BookRecipient", "Give").forEach { name ->
+                val recipient = fixture.paper.addPlayer(name)
+                BuilderSystemBookIssuer.issue(fixture.player, listOf("GiVe", recipient.name, "old-house.schem"),
                     { data -> fixture.definition.takeIf { data.buildingId == "old-house.schem" || data.buildingId == it.buildingId } },
                     fixture.messages, permissionDenied = { error("must not deny") }) shouldBe true
 
-                val book = checkNotNull(BuildBookCodec.read(checkNotNull(recipient.inventory.getItem(index))))
+                val book = checkNotNull(BuildBookCodec.read(checkNotNull(recipient.inventory.getItem(0))))
                 book.buildingId shouldBe fixture.definition.buildingId
                 book.schematicSha256 shouldBe null
                 book.contentSha256 shouldBe null
                 book.blockCount shouldBe null
                 fixture.player.inventory.contents.filterNotNull() shouldBe emptyList()
             }
+        }
+    }
+
+    test("console recipient Give receives both plain and random books through the legacy grammar") {
+        withPlayerIssuer { fixture ->
+            val recipient = fixture.paper.addPlayer("Give")
+            val console = mockk<ConsoleCommandSender>(relaxed = true)
+            listOf(listOf("Give", "house.schem"), listOf("Give", "random", "@starter"))
+                .forEachIndexed { index, args ->
+                    BuilderSystemBookIssuer.issue(console, args,
+                        { data -> fixture.definition.takeIf { data.buildingId == "house.schem" || data.buildingId == it.buildingId } },
+                        fixture.messages, randomBuildingIds = { listOf(fixture.definition.buildingId) },
+                        permissionDenied = { error("must not deny") }) shouldBe true
+
+                    val book = checkNotNull(BuildBookCodec.read(checkNotNull(recipient.inventory.getItem(index))))
+                    book.buildingId shouldBe fixture.definition.buildingId
+                    book.cooldownSeconds shouldBe if (index == 1) 0L else null
+                    book.schematicSha256 shouldBe null
+                    book.contentSha256 shouldBe null
+                    book.blockCount shouldBe null
+                }
+            fixture.player.inventory.contents.filterNotNull() shouldBe emptyList()
+            verify(exactly = 2) { console.sendMessage(match<String> { it.startsWith("SYSTEM_BOOK_ISSUED player=Give ") }) }
+            verify(exactly = 0) { console.sendMessage(match<String> { it.startsWith("SYSTEM_BOOK_REFUSED ") }) }
+
+            BuilderSystemBookIssuer.issue(console, listOf("Give"), { error("must not resolve") },
+                fixture.messages, permissionDenied = { error("must not deny") })
+            verify { console.sendMessage("Usage: builder systembook <online-player> <building-id|random> [alternative-id,...|@starter]") }
+        }
+    }
+
+    test("single give remains a self catalogue id even when a player named Give is online") {
+        withPlayerIssuer { fixture ->
+            val recipient = fixture.paper.addPlayer("Give")
+            val definition = fixture.definition.copy(buildingId = "give")
+            BuilderSystemBookIssuer.issue(fixture.player, listOf("give"),
+                { data -> definition.takeIf { data.buildingId == it.buildingId } },
+                fixture.messages, permissionDenied = { error("must not deny") }) shouldBe true
+
+            val book = checkNotNull(BuildBookCodec.read(fixture.player.inventory.contents.filterNotNull().single()))
+            book.buildingId shouldBe "give"
+            book.schematicSha256 shouldBe null
+            book.contentSha256 shouldBe null
+            book.blockCount shouldBe null
+            recipient.inventory.contents.filterNotNull() shouldBe emptyList()
         }
     }
 
@@ -231,12 +275,12 @@ class BuilderSystemBookIssuerTest : FunSpec({
         complete(admin, "SY") shouldBe listOf("systembook")
         complete(admin, "SYSTEMBOOK", "BIR") shouldBe listOf("birch.schem")
         complete(admin, "systembook", "") shouldBe listOf("birch.schem", "forest.schem", "give", "random")
-        complete(console, "systembook", "") shouldBe listOf("GrocerMC", "give")
+        complete(console, "systembook", "") shouldBe listOf("GrocerMC")
         complete(admin, "systembook", "g") shouldBe listOf("give")
         complete(admin, "systembook", "GiVe", "gro") shouldBe listOf("GrocerMC")
         complete(admin, "systembook", "give", "grocermc", "FOR") shouldBe listOf("forest.schem")
         complete(admin, "systembook", "give", "GrocerMC", "random", "@") shouldBe listOf("@starter")
-        complete(console, "systembook", "give", "GrocerMC", "") shouldBe listOf("birch.schem", "forest.schem", "random")
+        complete(console, "systembook", "give", "GrocerMC", "") shouldBe emptyList()
         complete(admin, "systembook", "give", "MissingPlayer", "") shouldBe emptyList()
         complete(admin, "systembook", "give", "GrocerMC", "forest.schem", "") shouldBe emptyList()
         complete(admin, "systembook", "give", "GrocerMC", "random", "@starter", "") shouldBe emptyList()
@@ -245,6 +289,18 @@ class BuilderSystemBookIssuerTest : FunSpec({
         complete(admin, "systembook", "birch.schem", "") shouldBe emptyList()
         complete(admin, "systembook", "GrocerMC", "forest.schem", "") shouldBe emptyList()
         complete(admin, "book", "") shouldBe emptyList()
+    }
+    test("console completion treats Give as a recipient and does not add a give keyword") {
+        val console = mockk<ConsoleCommandSender>()
+        fun complete(vararg args: String) = BuilderSystemBookIssuer.tabComplete(console, args,
+            { listOf("give", "minecolonies/medieval/house.schem") }, { listOf("Give", "GrocerMC") })
+
+        complete("systembook", "") shouldBe listOf("Give", "GrocerMC")
+        complete("systembook", "gi") shouldBe listOf("Give")
+        complete("systembook", "Give", "") shouldBe listOf("give", "minecolonies/", "random")
+        complete("systembook", "Give", "minecolonies/") shouldBe listOf("minecolonies/medieval/")
+        complete("systembook", "Give", "random", "@") shouldBe listOf("@starter")
+        complete("systembook", "Give", "random", "@starter", "") shouldBe emptyList()
     }
     test("schematic completion reveals one directory level and preserves exact catalogue ids") {
         val admin = mockk<Player>()
@@ -268,7 +324,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
     test("client folder completion leaves each separator for typed navigation without exposing descendants") {
         val admin = mockk<Player>()
         every { admin.hasPermission(BuilderSystemBookIssuer.PERMISSION) } returns true
-        val ids = listOf("minecolonies/medieval/house.schem", "minecolonies/asian/tower.schematic",
+        val ids = listOf("give", "give/house.schem", "minecolonies/medieval/house.schem", "minecolonies/asian/tower.schematic",
             "minecolonies/notice.schem", "civs/cottage.schem")
         val tooltip = LiteralMessage("Папка · / — открыть")
         fun complete(prefix: String): Suggestions {
@@ -297,6 +353,9 @@ class BuilderSystemBookIssuerTest : FunSpec({
         leaf.text shouldBe "minecolonies/medieval/house.schem"
         leaf.tooltip shouldBe null
         leaf.apply(leafInput) shouldBe "/builder systembook minecolonies/medieval/house.schem"
+
+        complete("give").list.map { it.text } shouldBe listOf("give")
+        complete("give/").list.map { it.text } shouldBe listOf("give/house.schem")
     }
 
     test("client completion preserves ranges and leaf metadata and merges matching file and folder labels") {

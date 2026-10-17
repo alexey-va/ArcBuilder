@@ -149,9 +149,9 @@ rollout complete.
 
 ## Console issuance for reviewed schematics
 
-`builder systembook give <online-player> <catalogue-id>` issues one system
-book through ArcBuilder's own codec. It accepts the console or an in-game player with `arcbuild.admin.systembook`
-(default: OP), and requires an enabled catalogue entry and an empty storage slot
+`builder systembook <online-player> <catalogue-id>` issues one system
+book from the console through ArcBuilder's own codec. In-game issuance requires
+`arcbuild.admin.systembook` (default: OP). Both forms require an enabled catalogue entry and an empty storage slot
 on the current node. It never drops overflow
 or manufactures a registered player blueprint. The catalogue remains the source
 of the title and material policy. The resulting book uses the ordinary preview,
@@ -160,8 +160,10 @@ existing unsafe-block exclusions. Issuing a book does not paste blocks.
 
 Administrators can use `/builder systembook <catalogue-id>` to issue
 to themselves, or `/builder systembook give <online-player> <catalogue-id>`
-to select a recipient. The recipient-first form remains accepted for existing
-console integrations and manually entered legacy commands. Command blocks cannot issue books.
+to select a recipient. The console always uses the recipient-first form, including
+for a player named `Give`. In-game `give` is a keyword when followed by arguments;
+a single `give` remains a self-issued catalogue ID. Other manually entered
+recipient-first player commands remain accepted. Command blocks cannot issue books.
 
 Issuance immediately writes the canonical catalogue path, title and material
 policy into the book without loading schematic geometry or storing a digest.
@@ -173,7 +175,7 @@ logged with issuer, recipient, schematic ID and the original cause. Console
 `SYSTEM_BOOK_ISSUED` / `SYSTEM_BOOK_REFUSED` responses remain stable for native tooling.
 
 Use `random @starter` to issue a random starter book, or provide an explicit
-pool: `builder systembook give <online-player> random house-a.schem,house-b.schem`.
+pool: `builder systembook <online-player> random house-a.schem,house-b.schem` from the console.
 The `@starter` pool consists of validated catalogue entries marked
 `starter-enabled: true`; the issued book keeps every selected ID as a selector
 option. Bare `random` is refused so the issuer always controls the pool. Add a
@@ -194,8 +196,8 @@ Chest loot remains an explicit `container-loot-table` catalogue opt-in and uses
 the existing durable loot-table application/recovery path.
 
 Player `systembook` completion offers `give`, `random` and the current catalogue
-level; online recipients appear only after `give`. Console senders can use `give`
-or the legacy recipient-first form. Catalogue suggestions use validated in-memory
+level; online recipients appear only after `give`. Console completion starts with
+online recipients. Catalogue suggestions use validated in-memory
 metadata, never schematic I/O. Folder suggestions have no trailing slash in the
 client; typing `/` opens the next level. Aliases remain callable without adding
 duplicate catalogue choices.
