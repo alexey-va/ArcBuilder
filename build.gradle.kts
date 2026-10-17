@@ -142,8 +142,8 @@ tasks {
 
 // E2E uses the same separate service provider and API owner as production.
 val e2eArcVersion = "1.4.409"
-val e2eArcCoreVersion = "0.1.14"
-val e2eArcCoreSha256 = "d18d0885171e82723cb72974eaa6323ed6ecd56bfd727dd86c551a2a5a5684d9"
+val e2eArcCoreVersion = "0.1.15"
+val e2eArcCoreSha256 = "da90dd3eab7f32da03adcca16c50cf657ba6af7541e8cac3ed3ca3ade51e4da9"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
 val e2eArcCoreArtifact = configurations.detachedConfiguration(
     dependencies.create("ru.ruscrafting:ArcCore:$e2eArcCoreVersion"),
