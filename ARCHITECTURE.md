@@ -634,7 +634,7 @@ bounds-based placement. The area outline still encloses the full plan.
 
 Schema 6 books may persist a bounded list of reviewed system catalogue IDs;
 `buildingId` is the current selection. Older single-house books remain readable.
-`/builder systembook <player> <default.schem> [alternative.schem,...]` verifies
+`/builder systembook give <player> <default.schem> [alternative.schem,...]` verifies
 all options and issues one book with the requested default. Shift-right-click
 opens the house selector; its settings button preserves access to rotation and
 offsets. Selection validates the exact held stack, resets placement offsets,

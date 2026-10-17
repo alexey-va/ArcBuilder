@@ -1,5 +1,7 @@
 package ru.arc.buildertools
 
+import com.destroystokyo.paper.event.brigadier.AsyncPlayerSendSuggestionsEvent
+import com.mojang.brigadier.suggestion.SuggestionsBuilder
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
@@ -33,10 +35,15 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
             "minecolonies/medieval/workshop", "minecolonies/asian/tower.schematic",
         )) { fixture ->
             val admin = fixture.player("GrocerMC")
+            fixture.player("CodexQA_728")
             fixture.grant(admin, BuilderSystemBookIssuer.PERMISSION)
             fun complete(sender: CommandSender, vararg args: String) =
                 fixture.command.tabComplete(sender, "builder", args)
             complete(admin, "sys") shouldBe listOf("systembook")
+            complete(admin, "systembook", "") shouldBe listOf("atelier-house.schem", "give", "minecolonies/", "random")
+            complete(admin, "systembook", "give", "") shouldBe listOf("CodexQA_728", "GrocerMC")
+            complete(admin, "systembook", "give", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "minecolonies/", "random")
+            complete(admin, "systembook", "give", "GrocerMC", "random", "@") shouldBe listOf("@starter")
             complete(admin, "systembook", "ATELIER") shouldBe listOf("atelier-house.schem")
             complete(admin, "systembook", "GrocerMC", "") shouldBe listOf("atelier-house.schem", "minecolonies/", "random")
             complete(admin, "systembook", "minecolonies/") shouldBe listOf("minecolonies/asian/", "minecolonies/medieval/")
@@ -50,6 +57,77 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
             complete(Bukkit.getConsoleSender(), "systembook", "GrocerMC", "random", "minecolonies/") shouldBe
                 listOf("minecolonies/asian/", "minecolonies/medieval/")
             complete(fixture.player("NoBooks"), "sys") shouldBe emptyList()
+
+            for (label in listOf("builder", "arcbuilder:builder")) {
+                fun client(prefix: String): List<String> {
+                    val buffer = "/$label systembook $prefix"
+                    val suggestions = SuggestionsBuilder(buffer, buffer.lastIndexOf(' ') + 1)
+                    complete(admin, "systembook", prefix).forEach { suggestions.suggest(it) }
+                    val event = AsyncPlayerSendSuggestionsEvent(admin, suggestions.build(), buffer)
+                    fixture.runtime.onSendSuggestions(event)
+                    return event.suggestions.list.map { it.text }
+                }
+                client("") shouldBe listOf("atelier-house.schem", "give", "minecolonies", "random")
+                client("minecolonies") shouldBe listOf("minecolonies")
+                client("minecolonies/") shouldBe listOf("minecolonies/asian", "minecolonies/medieval")
+            }
+        }
+    }
+
+    test("command suggestions keep each argument type prefix and terminal position") {
+        withCommandFixture { fixture ->
+            val player = fixture.player("CommandTypes")
+            fixture.grant(player, "arcbuild.use")
+            fun complete(vararg args: String) = fixture.command.tabComplete(player, "builder", args)
+
+            complete("fill", "DIAMOND_BLOCK") shouldBe listOf("diamond_block")
+            complete("fill", "diamond_block", "") shouldBe emptyList()
+            complete("replace", "stone", "DIAMOND_BLOCK") shouldBe listOf("diamond_block")
+            complete("replace", "КАМЕНЬ", "diamond_block", "CON") shouldBe listOf("confirm")
+            complete("replace", "air", "diamond_block", "") shouldBe listOf("confirm")
+            complete("replace", "not_a_material", "") shouldBe emptyList()
+            complete("replace", "chest", "") shouldBe emptyList()
+            complete("replace", "stone", "not_a_material", "") shouldBe emptyList()
+            complete("replace", "stone", "air", "") shouldBe emptyList()
+            complete("replace", "stone", "diamond_block", "confirm", "") shouldBe emptyList()
+            complete("confirm", "B") shouldBe listOf("buy")
+            complete("disconnect", "C") shouldBe listOf("confirm")
+            complete("paste", "R") shouldBe listOf("rotate", "right")
+            complete("crown", "radius", "") shouldBe (3..10).map(Int::toString)
+            complete("crown", "PALETTE", "OAK") shouldBe listOf("oak_leaves")
+            complete("crown", "birch_leaves", "") shouldBe (3..10).map(Int::toString)
+            complete("crown", "stone", "") shouldBe emptyList()
+            complete("crown", "shape", "round", "") shouldBe emptyList()
+            for (root in listOf("help", "wand", "clear", "copy", "deconstruct", "cancel", "undo", "status", "projects", "reload")) {
+                complete(root, "") shouldBe emptyList()
+            }
+            for (terminal in listOf(arrayOf("confirm", "buy"), arrayOf("disconnect", "confirm"),
+                arrayOf("paste", "right"), arrayOf("book", "menu"))) {
+                complete(*terminal, "") shouldBe emptyList()
+            }
+        }
+    }
+
+    test("book suggestions follow the permissions of their command handlers") {
+        withCommandFixture { fixture ->
+            val reader = fixture.player("BookReader")
+            fixture.grant(reader, "arcbuild.book.use")
+            fixture.tab(reader, "book", "") shouldBe listOf("guide", "status", "confirm", "cancel", "menu")
+            fixture.tab(reader, "BOOK", "M") shouldBe listOf("menu")
+            fixture.tab(reader, "crown", "") shouldBe emptyList()
+            fixture.tab(reader, "replace", "") shouldBe emptyList()
+
+            val seller = fixture.player("BookSeller")
+            fixture.grant(seller, "arcbuild.book.sell")
+            fixture.tab(seller, "book", "") shouldBe listOf("guide", "status", "sell", "confirm", "cancel")
+
+            val creator = fixture.player("BookCreator")
+            fixture.grant(creator, "arcbuild.book.create")
+            fixture.tab(creator, "book", "") shouldContain "activate"
+            fixture.tab(creator, "book", "") shouldContain "copy"
+            fixture.tab(creator, "book", "") shouldNotContain "draft"
+            fixture.grant(creator, "arcbuild.copy")
+            fixture.tab(creator, "book", "DR") shouldBe listOf("draft")
         }
     }
 

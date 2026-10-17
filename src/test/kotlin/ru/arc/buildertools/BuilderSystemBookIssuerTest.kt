@@ -73,6 +73,25 @@ class BuilderSystemBookIssuerTest : FunSpec({
         }
     }
 
+    test("explicit give delivers a canonical path-only book to the named recipient for player and console") {
+        withPlayerIssuer { fixture ->
+            val recipient = fixture.paper.addPlayer("BookRecipient")
+            val console = mockk<ConsoleCommandSender>(relaxed = true)
+            listOf(fixture.player, console).forEachIndexed { index, sender ->
+                BuilderSystemBookIssuer.issue(sender, listOf("GiVe", recipient.name, "old-house.schem"),
+                    { data -> fixture.definition.takeIf { data.buildingId == "old-house.schem" || data.buildingId == it.buildingId } },
+                    fixture.messages, permissionDenied = { error("must not deny") }) shouldBe true
+
+                val book = checkNotNull(BuildBookCodec.read(checkNotNull(recipient.inventory.getItem(index))))
+                book.buildingId shouldBe fixture.definition.buildingId
+                book.schematicSha256 shouldBe null
+                book.contentSha256 shouldBe null
+                book.blockCount shouldBe null
+                fixture.player.inventory.contents.filterNotNull() shouldBe emptyList()
+            }
+        }
+    }
+
     test("legacy alias issuance stores the canonical default with its configured selector and material policy") {
         withPlayerIssuer { fixture ->
             val alternative = fixture.definition.copy(buildingId = "minecolonies/farm", title = "Ферма", materialsIncluded = false)
@@ -170,7 +189,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
             }
             val usage = plain.serialize(messages.render("book.system-issue.usage", locale))
             usage shouldContain "/builder systembook <id>"
-            usage shouldContain "/builder systembook <player> <id>"
+            usage shouldContain "/builder systembook give <player> <id>"
             plain.serialize(messages.render("book.system-issue.directory-suggestion", locale)) shouldBe
                 if (locale == "ru") "Папка · / — открыть" else "Folder · / — open"
             val title = "Дом <red>у леса</red>"
@@ -191,6 +210,18 @@ class BuilderSystemBookIssuerTest : FunSpec({
                 { error("must not read catalogue") }, { error("must not read players") }) shouldBe emptyList()
         }
     }
+
+    test("self catalogue and random pool completion never consult the recipient namespace") {
+        val admin = mockk<Player>()
+        every { admin.hasPermission(BuilderSystemBookIssuer.PERMISSION) } returns true
+        fun complete(vararg args: String) = BuilderSystemBookIssuer.tabComplete(admin, args,
+            { listOf("house.schem") }, { error("self issuance must not query player names") })
+
+        complete("systembook", "") shouldBe listOf("give", "house.schem", "random")
+        complete("systembook", "random", "@") shouldBe listOf("@starter")
+        BuilderSystemBookIssuer.tabComplete(admin, arrayOf("systembook", "give", "Gro"),
+            { error("recipient completion must not query the catalogue") }, { listOf("GrocerMC") }) shouldBe listOf("GrocerMC")
+    }
     test("completion respects argument positions prefix and console recipient requirement") {
         val admin = mockk<Player>()
         every { admin.hasPermission(BuilderSystemBookIssuer.PERMISSION) } returns true
@@ -199,8 +230,16 @@ class BuilderSystemBookIssuerTest : FunSpec({
             sender, args, { listOf("birch.schem", "forest.schem") }, { listOf("GrocerMC") })
         complete(admin, "SY") shouldBe listOf("systembook")
         complete(admin, "SYSTEMBOOK", "BIR") shouldBe listOf("birch.schem")
-        complete(admin, "systembook", "") shouldBe listOf("GrocerMC", "birch.schem", "forest.schem", "random")
-        complete(console, "systembook", "") shouldBe listOf("GrocerMC")
+        complete(admin, "systembook", "") shouldBe listOf("birch.schem", "forest.schem", "give", "random")
+        complete(console, "systembook", "") shouldBe listOf("GrocerMC", "give")
+        complete(admin, "systembook", "g") shouldBe listOf("give")
+        complete(admin, "systembook", "GiVe", "gro") shouldBe listOf("GrocerMC")
+        complete(admin, "systembook", "give", "grocermc", "FOR") shouldBe listOf("forest.schem")
+        complete(admin, "systembook", "give", "GrocerMC", "random", "@") shouldBe listOf("@starter")
+        complete(console, "systembook", "give", "GrocerMC", "") shouldBe listOf("birch.schem", "forest.schem", "random")
+        complete(admin, "systembook", "give", "MissingPlayer", "") shouldBe emptyList()
+        complete(admin, "systembook", "give", "GrocerMC", "forest.schem", "") shouldBe emptyList()
+        complete(admin, "systembook", "give", "GrocerMC", "random", "@starter", "") shouldBe emptyList()
         complete(console, "systembook", "GrocerMC", "FOR") shouldBe listOf("forest.schem")
         complete(console, "systembook", "GrocerMC", "ran") shouldBe listOf("random")
         complete(admin, "systembook", "birch.schem", "") shouldBe emptyList()
@@ -217,7 +256,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
         )
         fun complete(prefix: String) = BuilderSystemBookIssuer.tabComplete(
             admin, arrayOf("systembook", prefix), { ids }, { emptyList() })
-        complete("") shouldBe listOf("civs/", "minecolonies/", "random", "root", "root.schematic")
+        complete("") shouldBe listOf("civs/", "give", "minecolonies/", "random", "root", "root.schematic")
         complete("mi") shouldBe listOf("minecolonies/")
         complete("minecolonies/") shouldBe listOf("minecolonies/asian/", "minecolonies/medieval/", "minecolonies/notice.schem")
         complete("MINECOLONIES/me") shouldBe listOf("minecolonies/medieval/")
@@ -351,6 +390,7 @@ class BuilderSystemBookIssuerTest : FunSpec({
 })
 
 private class PlayerIssuerFixture(
+    val paper: MockBukkitTestRuntime,
     val player: PlayerMock,
     val messages: LocalizedMiniMessage,
 ) {
@@ -370,7 +410,7 @@ private fun withPlayerIssuer(test: (PlayerIssuerFixture) -> Unit) {
             val player = paper.addPlayer("BookIssuer")
             player.addAttachment(plugin, BuilderSystemBookIssuer.PERMISSION, true)
             BuilderLocalePolicy.configure("ru", false)
-            test(PlayerIssuerFixture(player, BuilderToolsConfig.load().messages()))
+            test(PlayerIssuerFixture(paper, player, BuilderToolsConfig.load().messages()))
         }
     } finally { ConfigManager.clear() }
 }

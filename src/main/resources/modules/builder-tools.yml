@@ -608,7 +608,7 @@ locales:
         catalogue-unavailable: "<prefix><#ff9f0f>Схема отсутствует в каталоге или отключена.\n  <#e6fff3>Выберите доступную схему через Tab."
         pool-required: "<prefix><#ff9f0f>Укажите список схем для случайной книги.\n  <#e6fff3>Для стартовых домов: /builder systembook random @starter"
         too-large: "<prefix><#ff9f0f>Схема превышает допустимый объём.\n  <#e6fff3>Выберите постройку меньшего размера."
-        usage: "<prefix><#e6fff3>/builder systembook <id> — получить книгу\n  <#e6fff3>/builder systembook <player> <id> — выдать игроку"
+        usage: "<prefix><#e6fff3>/builder systembook <id> — получить книгу\n  <#e6fff3>/builder systembook give <player> <id> — выдать игроку"
       draft-saving: "<prefix><#e6fff3>Сохраняем чертёж…"
       draft-recovery-starting: "<prefix><#e6fff3>Проверяем незавершённые черновики после перезапуска…"
       draft-pending: |-
@@ -1554,7 +1554,7 @@ locales:
         catalogue-unavailable: "<prefix><yellow>The schematic is missing from the catalogue or disabled.\n  <white>Use Tab to choose an available schematic."
         pool-required: "<prefix><yellow>Choose a schematic pool for the random book.\n  <white>For starter homes: /builder systembook random @starter"
         too-large: "<prefix><yellow>The schematic exceeds the allowed volume.\n  <white>Choose a smaller build."
-        usage: "<prefix><white>/builder systembook <id> — get a book\n  <white>/builder systembook <player> <id> — give a book"
+        usage: "<prefix><white>/builder systembook <id> — get a book\n  <white>/builder systembook give <player> <id> — give a book"
       draft-saving: "<prefix><gray>Saving the blueprint…"
       draft-recovery-starting: "<prefix><gray>Checking unfinished drafts after restart…"
       draft-pending: |-

@@ -149,30 +149,31 @@ rollout complete.
 
 ## Console issuance for reviewed schematics
 
-`builder systembook <online-player> <catalogue-file.schem>` issues one system
+`builder systembook give <online-player> <catalogue-id>` issues one system
 book through ArcBuilder's own codec. It accepts the console or an in-game player with `arcbuild.admin.systembook`
-(default: OP), and requires an enabled,
-SHA-256-matched catalogue entry, a readable schematic within the configured scan
-volume, and an empty storage slot on the current node. It never drops overflow
+(default: OP), and requires an enabled catalogue entry and an empty storage slot
+on the current node. It never drops overflow
 or manufactures a registered player blueprint. The catalogue remains the source
 of the title and material policy. The resulting book uses the ordinary preview,
 confirmation, material collection and one-use construction path, including its
 existing unsafe-block exclusions. Issuing a book does not paste blocks.
 
-Administrators can use `/builder systembook <catalogue-file.schem>` to issue
-to themselves, or `/builder systembook <online-player> <catalogue-file.schem>`
-to select a recipient. Command blocks cannot issue books.
+Administrators can use `/builder systembook <catalogue-id>` to issue
+to themselves, or `/builder systembook give <online-player> <catalogue-id>`
+to select a recipient. The recipient-first form remains accepted for existing
+console integrations and manually entered legacy commands. Command blocks cannot issue books.
 
-Issuance loads and verifies the schematic asynchronously. An in-game issuer sees
-loading feedback, then either the delivered catalogue title and recipient or a
-localized refusal with a recovery action. No success is reported before the book
-occupies a recipient slot. Refusals are also logged with issuer, recipient,
-schematic ID and the original cause; technical loader exceptions stay out of
-player chat. Console `SYSTEM_BOOK_ISSUED` / `SYSTEM_BOOK_REFUSED` responses remain
-stable for native operations tooling.
+Issuance immediately writes the canonical catalogue path, title and material
+policy into the book without loading schematic geometry or storing a digest.
+Legacy catalogue aliases resolve to that same canonical ID. The schematic is
+loaded asynchronously on first preview through ArcCore's shared service.
+An in-game issuer sees the delivered title and recipient or a localized refusal;
+success is reported only after the book occupies a recipient slot. Refusals are
+logged with issuer, recipient, schematic ID and the original cause. Console
+`SYSTEM_BOOK_ISSUED` / `SYSTEM_BOOK_REFUSED` responses remain stable for native tooling.
 
 Use `random @starter` to issue a random starter book, or provide an explicit
-pool: `builder systembook <online-player> random house-a.schem,house-b.schem`.
+pool: `builder systembook give <online-player> random house-a.schem,house-b.schem`.
 The `@starter` pool consists of validated catalogue entries marked
 `starter-enabled: true`; the issued book keeps every selected ID as a selector
 option. Bare `random` is refused so the issuer always controls the pool. Add a
@@ -192,11 +193,12 @@ all construction materials, including pots and beds. Player-authored books do no
 Chest loot remains an explicit `container-loot-table` catalogue opt-in and uses
 the existing durable loot-table application/recovery path.
 
-Administrative `systembook` tab completion offers the command, online recipients,
-and enabled reviewed catalogue IDs. Players can complete a catalogue ID directly
-for self-issuance; console senders must first select an online recipient.
-Catalogue suggestions use the validated in-memory catalog; issuance still
-rechecks the schematic digest before creating the item.
+Player `systembook` completion offers `give`, `random` and the current catalogue
+level; online recipients appear only after `give`. Console senders can use `give`
+or the legacy recipient-first form. Catalogue suggestions use validated in-memory
+metadata, never schematic I/O. Folder suggestions have no trailing slash in the
+client; typing `/` opens the next level. Aliases remain callable without adding
+duplicate catalogue choices.
 
 Atelier system houses define their schematic origin at the front-center ground
 block. A ground click maps that origin to the exact clicked block, so floor/ground

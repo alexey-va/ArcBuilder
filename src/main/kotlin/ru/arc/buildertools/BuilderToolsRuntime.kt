@@ -1204,6 +1204,11 @@ internal class BuilderToolsRuntime(
         if (!rootCommandAvailable(sender, root)) return emptyList()
         if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)
         if (root == BuilderRootCommand.REPLACE) {
+            if (args.size !in 2..4) return emptyList()
+            if (args.size >= 3 && BuilderMaterialArguments.parse(args[1])?.let { it.isAir || it in replaceMaterials } != true) {
+                return emptyList()
+            }
+            if (args.size == 4 && BuilderMaterialArguments.parse(args[2]) !in replaceMaterials) return emptyList()
             val suggestions = when (args.size) {
                 2 -> replaceSourceMaterialNames
                 3 -> replaceMaterialNames
@@ -1218,6 +1223,16 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.DISCONNECT -> listOf("confirm")
             BuilderRootCommand.PASTE -> listOf("rotate", "left", "right")
             BuilderRootCommand.BOOK -> listOf("guide", "status", "draft", "activate", "copy", "sell", "confirm", "cancel", "menu")
+                .filter { subcommand ->
+                    when (subcommand) {
+                        "draft" -> sender.hasPermission("arcbuild.book.create") &&
+                            BuilderPermissionPolicy.canUse(BuilderFeature.COPY, sender::hasPermission)
+                        "activate", "copy" -> sender.hasPermission("arcbuild.book.create")
+                        "sell" -> sender.hasPermission("arcbuild.book.sell")
+                        "menu" -> sender.hasPermission("arcbuild.book.use")
+                        else -> true
+                    }
+                }
             BuilderRootCommand.FILL -> safeMaterialNames
             else -> emptyList()
         }

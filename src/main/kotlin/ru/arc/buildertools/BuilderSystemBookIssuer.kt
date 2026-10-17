@@ -28,12 +28,16 @@ internal object BuilderSystemBookIssuer {
             permissionDenied()
             return true
         }
-        val issueArgs = if (sender is Player && (args.size == 1 || args.size == 2 && args[0].equals(RANDOM_SELECTOR, ignoreCase = true))) {
-            listOf(sender.name) + args
-        } else args
+        val explicitRecipient = args.firstOrNull()?.equals(GIVE_SUBCOMMAND, ignoreCase = true) == true
+        val issueArgs = when {
+            explicitRecipient -> args.drop(1)
+            sender is Player && (args.size == 1 || args.size == 2 && args[0].equals(RANDOM_SELECTOR, ignoreCase = true)) ->
+                listOf(sender.name) + args
+            else -> args // Retain the recipient-first form used by console integrations.
+        }
         if (issueArgs.size !in 2..3) {
             if (sender is Player) sender.sendMessage(messages.render("book.system-issue.usage", BuilderLocalePolicy.localeTag(sender)))
-            else sender.sendMessage("Usage: builder systembook <online-player> <building-id|random> [alternative-id,...|@starter]")
+            else sender.sendMessage("Usage: builder systembook give <online-player> <building-id|random> [alternative-id,...|@starter]")
             return true
         }
         var schematicId = issueArgs[1]
@@ -130,11 +134,20 @@ internal object BuilderSystemBookIssuer {
         val suggestions = when {
             args.size == 1 -> listOf("systembook")
             !args[0].equals("systembook", ignoreCase = true) -> emptyList()
-            args.size == 2 -> onlinePlayers() + if (sender is Player) listOf(RANDOM_SELECTOR) + schematicSuggestions() else emptyList()
-            args.size == 3 && onlinePlayers().any { it == args[1] } -> listOf(RANDOM_SELECTOR) + schematicSuggestions()
+            args.size == 2 -> listOf(GIVE_SUBCOMMAND) +
+                if (sender is Player) listOf(RANDOM_SELECTOR) + schematicSuggestions() else onlinePlayers()
+            args[1].equals(GIVE_SUBCOMMAND, ignoreCase = true) -> when {
+                args.size == 3 -> onlinePlayers()
+                args.size == 4 && onlinePlayers().any { it.equals(args[2], ignoreCase = true) } ->
+                    listOf(RANDOM_SELECTOR) + schematicSuggestions()
+                args.size == 5 && onlinePlayers().any { it.equals(args[2], ignoreCase = true) } &&
+                    args[3].equals(RANDOM_SELECTOR, ignoreCase = true) -> listOf(STARTER_SELECTOR) + schematicSuggestions()
+                else -> emptyList()
+            }
             args.size == 3 && sender is Player && args[1].equals(RANDOM_SELECTOR, ignoreCase = true) ->
                 listOf(STARTER_SELECTOR) + schematicSuggestions()
-            args.size == 4 && onlinePlayers().any { it == args[1] } && args[2].equals(RANDOM_SELECTOR, ignoreCase = true) ->
+            args.size == 3 && onlinePlayers().any { it.equals(args[1], ignoreCase = true) } -> listOf(RANDOM_SELECTOR) + schematicSuggestions()
+            args.size == 4 && onlinePlayers().any { it.equals(args[1], ignoreCase = true) } && args[2].equals(RANDOM_SELECTOR, ignoreCase = true) ->
                 listOf(STARTER_SELECTOR) + schematicSuggestions()
             else -> emptyList()
         }
@@ -151,6 +164,7 @@ internal object BuilderSystemBookIssuer {
     }
 
     internal const val PERMISSION = "arcbuild.admin.systembook"
+    internal const val GIVE_SUBCOMMAND = "give"
     internal const val RANDOM_SELECTOR = "random"
     internal const val STARTER_SELECTOR = "@starter"
 
