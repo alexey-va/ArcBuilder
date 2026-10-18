@@ -10,7 +10,7 @@ class BuilderPlanningWorkTest : FunSpec({
     test("one count budget is shared fairly across one hundred simultaneous captures") {
         val scheduler = TestTaskScheduler()
         val scope = LifecycleTaskScope(scheduler)
-        val pump = BudgetedTaskQueue(scope, nanoTime = { 0 })
+        val pump = BudgetedTaskQueue(scope, maximumSteps = 128, nanoTime = { 0 })
         val counts = IntArray(100)
         val results = counts.indices.map { index -> pump.submit({ true }) { ++counts[index] == 3 } }
         scheduler.tick()
@@ -29,7 +29,7 @@ class BuilderPlanningWorkTest : FunSpec({
         val scheduler = TestTaskScheduler()
         val scope = LifecycleTaskScope(scheduler)
         var nanos = 0L
-        val pump = BudgetedTaskQueue(scope, nanoTime = { nanos })
+        val pump = BudgetedTaskQueue(scope, maximumNanos = 2_000_000L, nanoTime = { nanos })
         var count = 0
         val result = pump.submit({ true }) { nanos += 1_000_000; ++count == 5 }
         scheduler.tick()
@@ -65,7 +65,7 @@ class BuilderPlanningWorkTest : FunSpec({
     test("large capture spans ticks and close cancels worker completion publication") {
         val scheduler = TestTaskScheduler()
         val scope = LifecycleTaskScope(scheduler)
-        val pump = BudgetedTaskQueue(scope, nanoTime = { 0 })
+        val pump = BudgetedTaskQueue(scope, maximumSteps = 128, nanoTime = { 0 })
         var count = 0
         val capture = pump.submit({ true }) { ++count == 10_000 }
         scheduler.tick(78)

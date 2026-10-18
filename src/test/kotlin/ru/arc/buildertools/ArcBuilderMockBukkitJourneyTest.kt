@@ -137,16 +137,17 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 player.teleport(Location(journey.world, 0.5, 64.0, z + 3.5))
                 player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
                 player.performCommand("builder wand") shouldBe true
-                player.inventory.addItem(ItemStack(Material.STONE, 300))
-                journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, z, 15, 64, z + 15)
+                player.inventory.addItem(ItemStack(Material.STONE, 812))
+                journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, z, 15, 66, z + 15)
                 journey.command(player, "builder fill stone") shouldBe true
                 player
             }
             val before = players.map { it.inventory.contents.map { item -> item?.clone() } }
-            fun placed(index: Int) = (0..15).sumOf { x -> (0..15).count { z ->
-                journey.world.getBlockAt(x, 64, index * 20 + z).type == Material.STONE
-            } }
-            val interrupted = journey.seedInterruptedPlans(players, appliedChanges = 150)
+            fun placed(index: Int) = (0..15).sumOf { x -> (64..66).sumOf { y -> (0..15).count { z ->
+                journey.world.getBlockAt(x, y, index * 20 + z).type == Material.STONE
+            } } }
+            // Each record exceeds one native slice, exposing partial rollback before inventory restoration.
+            val interrupted = journey.seedInterruptedPlans(players, appliedChanges = 600)
             interrupted.size shouldBe 2
             interrupted.all { it.phase == BuilderJournalPhase.APPLYING } shouldBe true
             players.forEach { journey.amount(it, Material.STONE) shouldBe 44 }
