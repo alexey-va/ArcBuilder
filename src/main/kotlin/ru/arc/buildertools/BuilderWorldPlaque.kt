@@ -172,7 +172,7 @@ internal class BuilderWorldPlaque(
         private const val HIT_PADDING = .1
         private const val MAX_TARGET_WIDTH = 3.0
 
-        private fun visualWidth(lineWidth: Int) = (lineWidth + 4) * PIXEL_SIZE * SCALE
+        internal fun visualWidth(lineWidth: Int) = (lineWidth + 4) * PIXEL_SIZE * SCALE
 
         /**
          * lineWidth bounds the authored mesh; displayWidth is only culling metadata. Minecraft

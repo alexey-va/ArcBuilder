@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import com.sk89q.worldedit.math.BlockVector3
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
@@ -46,6 +47,9 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 val player = paper.addPlayer("FixedPlanOwner").also { it.setLocale(Locale.forLanguageTag("ru-RU")) }
                 player.teleport(world.getBlockAt(10, 64, 20).location)
                 val site = previewSite(player, player.location, BuildBookData("house.schem", "Дом"))
+                every { site.corners } returns ConstructionSite.Corners(
+                    BlockVector3.at(-2, 0, -3), BlockVector3.at(3, 6, 5),
+                )
                 val panelWorld = mockk<org.bukkit.World>(relaxed = true)
                 every { panelWorld.uid } returns world.uid
                 every { panelWorld.minHeight } returns -64
@@ -82,6 +86,9 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     presentation.retainConfirmation(site)
                     presentation.captureMockedPlaqueControls()
                     packet.texts.size shouldBe 2
+                    // The preview's birch columns are packet-only, extending west of the book origin.
+                    // Their minimum world X is 8; both faces must start outside that full block volume.
+                    packet.texts.map { it.location.x }.distinct() shouldBe listOf(7.6)
                     packet.texts.forEach { record ->
                         io.mockk.verify(exactly = 1) { record.display.displayWidth = 3f }
                         io.mockk.verify(exactly = 1) { record.display.displayHeight = 1.5f }
@@ -571,6 +578,11 @@ private fun previewSite(
     every { site.player } returns player
     every { site.world } returns location.world!!
     every { site.adjustedCenter } returns location
+    every { site.corners } returns ConstructionSite.Corners(BlockVector3.ZERO, BlockVector3.ZERO)
+    every { site.worldLocation(any()) } answers {
+        val relative = firstArg<BlockVector3>()
+        location.clone().add(relative.x().toDouble(), relative.y().toDouble(), relative.z().toDouble())
+    }
     every { site.bookData } returns book
     every { site.centerBlock } returns location
     every { site.rotation } returns 0

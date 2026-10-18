@@ -689,10 +689,13 @@ rule. Instant runs do not expose a misleading pause action.
 
 Construction and book-preview control panels sit beside the effective book
 origin, on the side nearest the player, at the configured height above that
-anchor. New projects persist `siteAnchor` together with `sitePanelFace`, so
-restart preserves placement even when the clicked origin differs from the
-changed-block bounds. Legacy projects lacking an anchor retain their former
-bounds-based placement. The area outline still encloses the full plan.
+anchor. The outward coordinate is clamped beyond the full construction/preview
+bounds plus the configured front gap wherever the plaque's width can overlap
+them. Height and the coordinate along that face remain tied to the origin;
+the overlap check includes Core's bounded sideways escape. New projects persist
+`siteAnchor` together with `sitePanelFace`; those values and construction positions
+are unchanged. Legacy projects lacking an anchor retain bounds-based placement.
+The area outline still encloses the full plan.
 
 ## System-book house selector
 
@@ -783,6 +786,13 @@ domain teardown still remove it.
 
 `PaperSpatialSpace` first searches up to two blocks outward from the authored face,
 then permits the existing half-block upward/sideways fallback if no forward pose fits.
+That search reads real Bukkit collision shapes; it cannot see client-only schematic
+BlockDisplays. Book panels therefore derive their initial outer face from the current
+transformed schematic corners through `ConstructionSite.worldLocation`, including the
+whole maximum block (`max + 1`). Construction panels use their cached project bounds.
+This keeps the entire plaque plane in front of ghost columns and roofs before real-world
+obstacle search. An enlarged preview cannot reuse a previous pose behind its new face:
+Core validates previous offsets against the new anchor and permits only outward offsets.
 Only the text and its native target move: site outlines, persisted anchors,
 orientation and construction plans do not. When no pose fits, the plaque and
 target hide while the outline and domain entry points remain. An eligible nearby

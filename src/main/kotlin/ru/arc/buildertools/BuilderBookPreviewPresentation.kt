@@ -552,6 +552,10 @@ internal class BuilderBookPreviewPresentation(
         val positions = listOf(site.adjustedCenter.let { anchor ->
             BuilderBlockPos(site.world.uid, anchor.blockX, anchor.blockY, anchor.blockZ)
         })
+        val corners = site.corners
+        val occupied = listOf(corners.corner1, corners.corner2).map { corner ->
+            site.worldLocation(corner).let { at -> BuilderBlockPos(site.world.uid, at.blockX, at.blockY, at.blockZ) }
+        }
         val face = BuilderConstructionSiteDisplayLayout.nearestFace(
             positions,
             site.player.location.x,
@@ -562,6 +566,8 @@ internal class BuilderBookPreviewPresentation(
             face,
             panelHeightOffset,
             panelFrontOffset,
+            occupiedPositions = occupied,
+            panelWidth = BuilderWorldPlaque.visualWidth(panelLineWidth),
         )
         val existing = panels[ownerId] ?: run {
             val audience = displays.createAudienceGroup { viewer ->

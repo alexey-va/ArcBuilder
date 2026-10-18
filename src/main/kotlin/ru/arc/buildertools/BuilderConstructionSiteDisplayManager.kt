@@ -39,6 +39,8 @@ import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletionException
 import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
 
 internal data class BuilderConstructionSiteDisplaySettings(
     val enabled: Boolean,
@@ -102,7 +104,10 @@ internal object BuilderConstructionSiteDisplayLayout {
         val worldId = positions.first().worldId
         require(positions.all { it.worldId == worldId })
         val face = project.sitePanelFace ?: settings.panelFace
-        val panel = panelPlacement(project.siteAnchor?.let(::listOf) ?: positions, face, settings.panelHeightOffset, settings.panelFrontOffset)
+        val panel = panelPlacement(
+            project.siteAnchor?.let(::listOf) ?: positions, face, settings.panelHeightOffset, settings.panelFrontOffset,
+            occupiedPositions = positions, panelWidth = BuilderWorldPlaque.visualWidth(settings.panelLineWidth),
+        )
         return BuilderConstructionSiteDisplayModel(
             worldId = worldId,
             edges = BuilderDisplayGeometry.bounds(positions, settings.outlineThickness),
@@ -138,10 +143,26 @@ internal object BuilderConstructionSiteDisplayLayout {
         face: BuilderConstructionSitePanelFace,
         heightOffset: Double,
         frontOffset: Double,
+        occupiedPositions: List<BuilderBlockPos> = positions,
+        panelWidth: Double = 0.0,
     ): BuilderSitePanelPlacement {
-        val bounds = bounds(positions)
-        val (x, z) = panelCenter(bounds, face, frontOffset)
-        return BuilderSitePanelPlacement(x, bounds.minY + heightOffset, z, face.yaw)
+        val anchorBounds = bounds(positions)
+        val occupied = bounds(occupiedPositions)
+        var (x, z) = panelCenter(anchorBounds, face, frontOffset)
+        // Packet preview blocks are absent from Bukkit collision shapes. Start outside their
+        // full envelope before Core searches real obstacles; include its half-block side escape.
+        val halfWidth = panelWidth / 2.0 + .5
+        when (face) {
+            BuilderConstructionSitePanelFace.MIN_X -> if (z + halfWidth >= occupied.minZ && z - halfWidth <= occupied.maxZ)
+                x = min(x, occupied.minX - frontOffset)
+            BuilderConstructionSitePanelFace.MAX_X -> if (z + halfWidth >= occupied.minZ && z - halfWidth <= occupied.maxZ)
+                x = max(x, occupied.maxX + frontOffset)
+            BuilderConstructionSitePanelFace.MIN_Z -> if (x + halfWidth >= occupied.minX && x - halfWidth <= occupied.maxX)
+                z = min(z, occupied.minZ - frontOffset)
+            BuilderConstructionSitePanelFace.MAX_Z -> if (x + halfWidth >= occupied.minX && x - halfWidth <= occupied.maxX)
+                z = max(z, occupied.maxZ + frontOffset)
+        }
+        return BuilderSitePanelPlacement(x, anchorBounds.minY + heightOffset, z, face.yaw)
     }
 
     private data class Bounds(

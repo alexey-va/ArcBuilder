@@ -11,6 +11,7 @@ import org.bukkit.Material
 import org.bukkit.entity.Display
 import org.bukkit.Location
 import org.bukkit.World
+import org.bukkit.util.BoundingBox
 import net.kyori.adventure.text.Component
 import ru.arc.paper.scene.SceneAudience
 import java.util.UUID
@@ -129,6 +130,51 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         panel.y shouldBe (66.25 plusOrMinus .00001)
         panel.z shouldBe (19.6 plusOrMinus .00001)
         panel.yaw shouldBe 180f
+    }
+
+    "an offset origin places the full plaque outside wide ghost bounds for every rotated face" {
+        val worldId = UUID.randomUUID()
+        val world = mockk<World>(relaxed = true)
+        val origin = BuilderBlockPos(worldId, 100, 64, 200)
+        val width = BuilderWorldPlaque.visualWidth(180)
+        var relative = listOf(-9 to -4, -9 to 12, 17 to -4, 17 to 12)
+        repeat(4) {
+            val occupied = relative.map { (x, z) -> BuilderBlockPos(worldId, origin.x + x, 60, origin.z + z) }
+            val ghost = BoundingBox(
+                occupied.minOf { it.x }.toDouble(), 60.0, occupied.minOf { it.z }.toDouble(),
+                occupied.maxOf { it.x } + 1.0, 75.0, occupied.maxOf { it.z } + 1.0,
+            )
+            for (face in BuilderConstructionSitePanelFace.entries) {
+                val panel = BuilderConstructionSiteDisplayLayout.panelPlacement(
+                    listOf(origin), face, 2.6, .4, occupiedPositions = occupied, panelWidth = width,
+                )
+                val volume = BuilderWorldPlaque.visualFootprint(
+                    Location(world, panel.x, panel.y, panel.z, panel.yaw, 0f),
+                    Component.text("Настроить постройку\nБерёзовый коттедж\nПКМ — открыть меню"), 180,
+                )
+                volume.overlaps(ghost) shouldBe false
+                panel.y shouldBe (66.6 plusOrMinus 1e-8)
+                panel.yaw shouldBe face.yaw
+                when (face) {
+                    BuilderConstructionSitePanelFace.MIN_X -> panel.x shouldBe (ghost.minX - .4 plusOrMinus 1e-8)
+                    BuilderConstructionSitePanelFace.MAX_X -> panel.x shouldBe (ghost.maxX + .4 plusOrMinus 1e-8)
+                    BuilderConstructionSitePanelFace.MIN_Z -> panel.z shouldBe (ghost.minZ - .4 plusOrMinus 1e-8)
+                    BuilderConstructionSitePanelFace.MAX_Z -> panel.z shouldBe (ghost.maxZ + .4 plusOrMinus 1e-8)
+                }
+            }
+            relative = relative.map { (x, z) -> -z to x }
+        }
+    }
+
+    "a plaque corner near the preview is cleared even when its origin lies beside the bounds" {
+        val worldId = UUID.randomUUID()
+        val occupied = listOf(BuilderBlockPos(worldId, 0, 64, 0), BuilderBlockPos(worldId, 6, 70, 9))
+        val panel = BuilderConstructionSiteDisplayLayout.panelPlacement(
+            listOf(BuilderBlockPos(worldId, 10, 64, 4)), BuilderConstructionSitePanelFace.MAX_Z, 2.6, .4,
+            occupiedPositions = occupied, panelWidth = BuilderWorldPlaque.visualWidth(180),
+        )
+        panel.x shouldBe 10.5
+        panel.z shouldBe (10.4 plusOrMinus 1e-8)
     }
 
     "construction panel orientation is fixed and applies its persisted face yaw" {

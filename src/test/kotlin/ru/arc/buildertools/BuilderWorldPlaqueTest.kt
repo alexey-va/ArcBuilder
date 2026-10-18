@@ -142,6 +142,70 @@ class BuilderWorldPlaqueTest : StringSpec({
         } finally { unmockkStatic(Bukkit::class) }
     }
 
+    "ghost columns are excluded before world collision and expanded bounds reject the old pose" {
+        val world = clearPlaqueWorld()
+        var realWall = false
+        every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers {
+            val boxes = if (realWall && thirdArg<Int>() == 4 && secondArg<Int>() in 66..69)
+                listOf(BoundingBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)) else emptyList()
+            mockk<org.bukkit.block.Block> { every { collisionShape.boundingBoxes } returns boxes }
+        }
+        val origin = BuilderBlockPos(world.uid, 0, 64, 0)
+        val occupied = listOf(BuilderBlockPos(world.uid, -3, 64, -2), BuilderBlockPos(world.uid, 3, 70, 1))
+        val columns = listOf(BoundingBox(-2.0, 65.0, 1.0, -1.0, 70.0, 2.0), BoundingBox(2.0, 65.0, 1.0, 3.0, 70.0, 2.0))
+        val content = Component.text("Настроить постройку\nБерёзовый коттедж\nПКМ — открыть меню")
+        fun location(panel: BuilderSitePanelPlacement) = Location(world, panel.x, panel.y, panel.z, panel.yaw, 0f)
+        fun panel(blocks: List<BuilderBlockPos>) = BuilderConstructionSiteDisplayLayout.panelPlacement(
+            listOf(origin), BuilderConstructionSitePanelFace.MAX_Z, 2.6, .4,
+            occupiedPositions = blocks, panelWidth = BuilderWorldPlaque.visualWidth(180),
+        )
+        val old = location(panel(listOf(origin)))
+        val before = BuilderWorldPlaque.visualFootprint(old, content, 180)
+        columns.all(before::overlaps) shouldBe true
+        val next = location(panel(occupied))
+        val after = BuilderWorldPlaque.visualFootprint(next, content, 180)
+        columns.none(after::overlaps) shouldBe true
+
+        val h = BuilderPlaqueDisplays()
+        val space = PaperSpatialSpace()
+        mockkStatic(Bukkit::class)
+        try {
+            every { Bukkit.isPrimaryThread() } returns true
+            // A packet-only column cannot trigger Core's Bukkit block-collision search.
+            space.place(AnchoredSurface(old, listOf(before))) shouldBe old
+            BuilderWorldPlaque(h.owner, space, plaqueStyle(), SceneAudience.Public()).use { plaque ->
+                plaque.update(next, content)
+                h.texts.first().location.z shouldBe (2.4 plusOrMinus 1e-8)
+                plaque.controls(Unit).controls.size shouldBe 4
+                plaque.controls(Unit).controls.forEach { it.nativeTarget!!.width shouldBe 2.35f }
+                realWall = true
+                val expanded = occupied.dropLast(1) + occupied.last().copy(z = 3)
+                plaque.update(location(panel(expanded)), content)
+                // The old safe real-world pose at Z2.4 is now inside the enlarged ghost house.
+                // Even when the new anchor is blocked, Core must not retain that previous pose.
+                h.texts.first().location.z shouldBe (5.15 plusOrMinus 1e-8)
+                h.texts.first().location.y shouldBe next.y
+                val moved = plaque.controls(Unit).clearanceFootprints.single()
+                moved.overlaps(BoundingBox(-3.0, 64.0, -2.0, 4.0, 71.0, 4.0)) shouldBe false
+                space.clear(world, moved) shouldBe true
+                h.texts.size shouldBe 2
+            }
+        } finally { unmockkStatic(Bukkit::class) }
+
+        fun box(bounds: BoundingBox) = mapOf(
+            "minX" to bounds.minX, "minY" to bounds.minY, "minZ" to bounds.minZ,
+            "maxX" to bounds.maxX, "maxY" to bounds.maxY, "maxZ" to bounds.maxZ,
+        )
+        java.io.File("build/reports/builder-plaque/ghost-placement.json").apply {
+            parentFile.mkdirs()
+            writeText(com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(mapOf(
+                "evidence" to "Source geometry from BuilderWorldPlaqueTest; not a native client render",
+                "ghostBounds" to box(BoundingBox(-3.0, 64.0, -2.0, 4.0, 71.0, 2.0)),
+                "columns" to columns.map(::box), "before" to box(before.bounds), "after" to box(after.bounds),
+            )))
+        }
+    }
+
     "native text is bottom anchored and a supplementary glyph counts as one conservative wrapped line" {
         val at = Location(mockk<World>(relaxed = true), 0.0, 64.0, 0.0)
         val single = BuilderWorldPlaque.visualFootprint(at, Component.text("🛠"), 180).bounds
