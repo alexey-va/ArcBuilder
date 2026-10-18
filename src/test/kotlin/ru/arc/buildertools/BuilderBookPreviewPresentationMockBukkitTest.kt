@@ -52,18 +52,23 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 every { panelWorld.maxHeight } returns 320
                 every { panelWorld.isChunkLoaded(any<Int>(), any<Int>()) } returns true
                 val packet = BuilderPlaqueDisplays()
-                val panel = mockk<org.bukkit.entity.Interaction>(relaxed = true)
-                every { panel.uniqueId } returns UUID.randomUUID()
-                every { panel.isValid } returns true
-                every { panel.interactionWidth } returns 3f
-                every { panel.interactionHeight } returns 1.5f
-                var targetLocation = player.location
-                every { panel.location } answers { targetLocation.clone() }
-                every { panel.teleport(any<org.bukkit.Location>()) } answers { targetLocation = firstArg(); true }
+                val panels = mutableListOf<org.bukkit.entity.Interaction>()
                 every { panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<java.util.function.Consumer<org.bukkit.entity.Interaction>>()) } answers {
-                    targetLocation = firstArg<org.bukkit.Location>().clone()
-                    thirdArg<Consumer<org.bukkit.entity.Interaction>>().accept(panel)
-                    panel
+                    var targetLocation = firstArg<org.bukkit.Location>().clone()
+                    var width = 0f
+                    var height = 0f
+                    mockk<org.bukkit.entity.Interaction>(relaxed = true).also { panel ->
+                        every { panel.uniqueId } returns UUID.randomUUID()
+                        every { panel.isValid } returns true
+                        every { panel.location } answers { targetLocation.clone() }
+                        every { panel.teleport(any<org.bukkit.Location>()) } answers { targetLocation = firstArg(); true }
+                        every { panel.interactionWidth } answers { width }
+                        every { panel.interactionWidth = any() } answers { width = firstArg() }
+                        every { panel.interactionHeight } answers { height }
+                        every { panel.interactionHeight = any() } answers { height = firstArg() }
+                        thirdArg<Consumer<org.bukkit.entity.Interaction>>().accept(panel)
+                        panels += panel
+                    }
                 }
                 every { site.world } returns panelWorld
                 every { site.adjustedCenter } returns player.location
@@ -81,12 +86,15 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                         io.mockk.verify(exactly = 1) { record.display.displayWidth = 3f }
                         io.mockk.verify(exactly = 1) { record.display.displayHeight = 1.5f }
                     }
-                    io.mockk.verify(exactly = 1) { panel.interactionWidth = 3f }
-                    io.mockk.verify(exactly = 1) { panel.interactionHeight = 1.5f }
+                    panels.size shouldBe 4
+                    panels.forEach { panel ->
+                        panel.interactionWidth shouldBe 2.35f
+                        (panel.interactionHeight > 1.5f) shouldBe true
+                    }
                     presentation.refresh(site)
                     presentation.captureMockedPlaqueControls()
                     packet.texts.size shouldBe 2
-                    io.mockk.verify(exactly = 1) {
+                    io.mockk.verify(exactly = 4) {
                         panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.Interaction::class.java, any<Consumer<org.bukkit.entity.Interaction>>())
                     }
                     val admin = mockk<org.bukkit.entity.Player> {
@@ -103,7 +111,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     presentation.openCurrentPlacement(player, null) shouldBe true
                     val chatMenu = player.openInventory.topInventory
                     val event = org.bukkit.event.player.PlayerInteractEntityEvent(
-                        player, panel, org.bukkit.inventory.EquipmentSlot.HAND,
+                        player, panels.first(), org.bukkit.inventory.EquipmentSlot.HAND,
                     )
                     paper.callEvent(event)
                     event.isCancelled.shouldBeTrue()
@@ -111,7 +119,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     player.openInventory.topInventory.getItem(25)?.type shouldBe Material.LIME_CONCRETE
                     plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "Подтвердить строительство"
                     presentation.clearConfirmation(player.uniqueId)
-                    io.mockk.verify(exactly = 1) { panel.remove() }
+                    panels.forEach { panel -> io.mockk.verify(exactly = 1) { panel.remove() } }
                     packet.texts.forEach { record -> io.mockk.verify(exactly = 1) { record.display.remove() } }
                     io.mockk.verify(exactly = 0) {
                         panelWorld.spawn(any<org.bukkit.Location>(), org.bukkit.entity.TextDisplay::class.java, any<Consumer<org.bukkit.entity.TextDisplay>>())

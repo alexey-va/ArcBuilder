@@ -708,8 +708,9 @@ Material and chest-loot policies continue to come from the selected catalogue
 entry. Player-created registered books cannot carry selector options.
 
 Preview and construction plaques have two fixed opposing text faces, each at
-2x scale with a small separation to prevent coincident surfaces. Their hitbox
-uses configured dimensions directly; both faces share updates and cleanup.
+2x scale with a small separation to prevent coincident surfaces. Their clickable
+area covers the full scaled text envelope plus 0.1 block of padding per edge;
+configured interaction dimensions are minima. Both faces share updates and cleanup.
 Plaque titles use the localized ArcBuilder prefix on both sides.
 `BuilderWorldPlaque` supplies this authored appearance to `PacketDisplayScene`.
 Stable part keys retain packet entity IDs across text, progress and pose changes;
@@ -764,9 +765,11 @@ a changed receipt cancels without world writes. An unknown initial commit keeps
 the reservation/area held and blocks recovery-sensitive work.
 
 Construction-site outlines and both plaque faces use `PaperPacketDisplays`:
-no native Display entities, chunk loads or chunk tickets. One native Interaction
-preserves the existing right-click contract and is created only if its exact
-chunk is already loaded. Chunk loading restores that hitbox without rebuilding
+no native Display entities, chunk loads or chunk tickets. Adjacent native Interaction
+strips preserve the existing right-click contract and are created only where
+their bounds are already loaded. Each strip is at most three blocks wide (four
+strips at the default text width), avoiding a text-wide square X/Z click proxy.
+Chunk loading restores those hitboxes without rebuilding
 packet visuals. Exact legacy ownership tags are cleaned on startup/chunk load;
 client visibility, replay and async packet delivery belong to the shared owner.
 
@@ -778,7 +781,8 @@ in the existing menus. Book scenes have world scope: an ordinary same-world
 teleport does not discard a retained placement gateway, while owner quit and
 domain teardown still remove it.
 
-`PaperSpatialSpace` searches a bounded deterministic set of nearby plaque poses.
+`PaperSpatialSpace` first searches up to two blocks outward from the authored face,
+then permits the existing half-block upward/sideways fallback if no forward pose fits.
 Only the text and its native target move: site outlines, persisted anchors,
 orientation and construction plans do not. When no pose fits, the plaque and
 target hide while the outline and domain entry points remain. An eligible nearby
@@ -787,15 +791,15 @@ display capture loop, including hidden-plaque recovery; there is no extra timer
 or construction-step scan. Input also rechecks the current translated visual
 volume, rejecting a newly obstructed edge before that refresh runs.
 
-The placement volume is independent of both culling metadata and the configured
-unscaled native target. Its conservative width uses the authored text wrap width
+The placement volume is independent of culling metadata. Its conservative width
+uses the authored text wrap width
 at scale 2. Minecraft 1.21.11's renderer anchors text at the bottom and advances
 ten pixels per line at 0.025 blocks per pixel before scale; Builder therefore
-centers the volume above the authored text pose. The native target and two-sided
-input plane follow the estimated visible text center without moving that pose.
+centers the volume above the authored text pose. Native targets and adjacent two-sided
+input planes follow this same envelope without moving that pose.
 Unknown/private glyphs reserve an authored line and supplementary characters are
 counted by code point; the fallback preserves word boundaries and allows the
 extra bold pixel even after flattening component decorations. This is a
-conservative font bound, not native-client
-pixel measurement; scale, text and the 3 by 1.5 default native dimensions are
-preserved.
+conservative font bound, not native-client pixel measurement; scale and text are
+preserved. Core still validates the current hit plane, native reach, audience and
+clear ray before the existing domain callback runs.

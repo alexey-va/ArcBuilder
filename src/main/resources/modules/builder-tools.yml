@@ -55,6 +55,7 @@ construction:
       face: MAX_Z
       height-offset: 2.6
       front-offset: 0.4
+      # Minimum clickable size; expands to the scaled text with padding. Wide panels use narrow native targets.
       interaction-width: 3.0
       interaction-height: 1.5
       line-width: 180

@@ -83,7 +83,7 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
         }
     }
 
-    test("packet site visuals never spawn native displays or load chunks and restore only the loaded hitbox") {
+    test("packet site visuals never spawn native displays or load chunks and restore the loaded hitbox strips") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -150,38 +150,39 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         packetVisuals.size shouldBe 14
                         steps.reads shouldBe 0
 
-                        every { world.isChunkLoaded(0, 0) } returns true
+                        every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
                         paper.callEvent(ChunkLoadEvent(chunk, false))
                         manager.queueMockedControlCapture(tasks)
                         tasks.tick()
-                        spawned.size shouldBe 1
-                        spawned.single().also { interaction ->
+                        spawned.size shouldBe 4
+                        spawned.forEach { interaction ->
                             (interaction is Interaction) shouldBe true
-                            io.mockk.verify(exactly = 1) { (interaction as Interaction).interactionWidth = 3f }
+                            (interaction as Interaction).interactionWidth shouldBe 2.35f
+                            (interaction.interactionHeight > 1.5f) shouldBe true
                         }
                         valid.replaceAll { _, _ -> false }
                         paper.callEvent(ChunkLoadEvent(chunk, false))
                         manager.queueMockedControlCapture(tasks)
                         tasks.tick()
-                        spawned.size shouldBe 2
+                        spawned.size shouldBe 8
                         packetVisuals.size shouldBe 14
                         steps.reads = 0
                         manager.upsert(project.copy(updatedAtMillis = project.updatedAtMillis + 2))
-                        spawned.size shouldBe 2
+                        spawned.size shouldBe 8
                         steps.reads shouldBe 0
                         project = project.copy(siteAnchor = BuilderBlockPos(worldId, 5, 64, 5))
                         manager.upsert(project)
                         project = project.copy(siteAnchor = BuilderBlockPos(worldId, 6, 64, 6))
                         manager.upsert(project)
-                        spawned.size shouldBe 2
+                        spawned.size shouldBe 8
                         tasks.runComputations()
                         tasks.tick()
                         manager.queueMockedControlCapture(tasks)
                         tasks.tick()
-                        spawned.size shouldBe 3
+                        spawned.size shouldBe 12
                         packetVisuals.size shouldBe 14
-                        spawned.last().location.x shouldBe 6.5
-                        io.mockk.verify(exactly = 1) { spawned[1].remove() }
+                        spawned.takeLast(4).map { it.location.x }.average() shouldBe 6.5
+                        spawned.subList(4, 8).forEach { old -> io.mockk.verify(exactly = 1) { old.remove() } }
                         io.mockk.verify(exactly = 0) { world.getChunkAt(any<Int>(), any<Int>()) }
 
                         project = project.copy(siteAnchor = BuilderBlockPos(worldId, 7, 64, 7))
@@ -189,14 +190,14 @@ class BuilderConstructionSiteDisplayManagerMockBukkitTest : FunSpec({
                         manager.remove(project.projectId)
                         tasks.runComputations()
                         tasks.tick()
-                        spawned.size shouldBe 3
+                        spawned.size shouldBe 12
                         packetVisuals.size shouldBe 14
                         project = project.copy(siteAnchor = BuilderBlockPos(worldId, 8, 64, 8))
                         manager.upsert(project)
                         manager.close()
                         tasks.runComputations()
                         tasks.tick()
-                        spawned.size shouldBe 3
+                        spawned.size shouldBe 12
                         packetVisuals.size shouldBe 14
                     }
                 } finally {
@@ -270,13 +271,17 @@ private fun displayWorld(
         world.spawn(any(), Interaction::class.java, any<Consumer<Interaction>>())
     } answers {
         var location = firstArg<org.bukkit.Location>().clone()
+        var width = 0f
+        var height = 0f
         tracked(mockk<Interaction>(relaxed = true)).also { entity ->
             every { entity.uniqueId } returns UUID.randomUUID()
             every { entity.world } returns world
             every { entity.location } answers { location.clone() }
             every { entity.teleport(any<org.bukkit.Location>()) } answers { location = firstArg<org.bukkit.Location>().clone(); true }
-            every { entity.interactionWidth } returns 3f
-            every { entity.interactionHeight } returns 1.5f
+            every { entity.interactionWidth } answers { width }
+            every { entity.interactionWidth = any() } answers { width = firstArg() }
+            every { entity.interactionHeight } answers { height }
+            every { entity.interactionHeight = any() } answers { height = firstArg() }
             thirdArg<Consumer<Interaction>>().accept(entity)
         }
     }

@@ -32,9 +32,9 @@ import ru.arc.paper.scene.SpatialReach
 import ru.arc.paper.scene.SpatialSceneScope
 import ru.arc.text.TextAlignment
 import ru.arc.text.TextLayoutResult
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sin
 
 internal data class BuilderWorldPlaqueStyle(
@@ -96,7 +96,12 @@ internal class BuilderWorldPlaque(
     fun refresh(visible: Boolean = true) {
         val anchor = authored ?: return
         enabled = visible
-        placed = if (visible) space.place(AnchoredSurface(anchor, listOf(checkNotNull(footprint))), previous) else null
+        val volumes = listOf(checkNotNull(footprint))
+        placed = if (visible) {
+            // Keep a world plaque beside its authored face: escape toward the viewer side first.
+            space.place(AnchoredSurface(anchor, volumes, maxOutward = 2.0, maxUp = 0.0, maxSide = 0.0), previous)
+                ?: space.place(AnchoredSurface(anchor, volumes, maxOutward = 2.0), previous)
+        } else null
         placed?.let { previous = it.clone() }
         val at = placed ?: anchor
         scene.apply(SceneFrame(
@@ -121,6 +126,13 @@ internal class BuilderWorldPlaque(
         val bounds = checkNotNull(footprint).bounds
         val at = (placed ?: anchor).clone().add(0.0, bounds.centerY - anchor.y, 0.0)
         val visible = enabled && placed != null
+        val width = max(style.interactionWidth.toDouble(), visualWidth(style.lineWidth) + HIT_PADDING * 2)
+        val height = max(style.interactionHeight.toDouble(), bounds.height + HIT_PADDING * 2)
+        // A native Interaction has a square X/Z footprint. Adjacent narrow targets cover the
+        // whole label without turning a wide text panel into a deep, click-catching cube.
+        val columns = ceil(width / MAX_TARGET_WIDTH).toInt()
+        val columnWidth = width / columns
+        val angle = Math.toRadians(at.yaw.toDouble())
         val currentFootprint = checkNotNull(footprint).translated(Vector3d(
             (placed ?: anchor).x - anchor.x,
             (placed ?: anchor).y - anchor.y,
@@ -130,17 +142,21 @@ internal class BuilderWorldPlaque(
             context,
             audience,
             SpatialSceneScope.World,
-            listOf(SpatialControl(
-                "open",
-                Unit,
-                listOf(SpatialHitPlane(at, style.interactionWidth.toDouble(), min(style.interactionHeight.toDouble(), bounds.height - .04))),
-                if (visible) SpatialNativeTarget(
-                    at.clone().subtract(0.0, style.interactionHeight / 2.0, 0.0),
-                    style.interactionWidth,
-                    style.interactionHeight,
-                ) else null,
-                visible = visible,
-            )),
+            List(columns) { column ->
+                val offset = -width / 2 + columnWidth * (column + .5)
+                val center = at.clone().add(cos(angle) * offset, 0.0, sin(angle) * offset)
+                SpatialControl(
+                    "open-$column",
+                    Unit,
+                    listOf(SpatialHitPlane(center, columnWidth, height)),
+                    if (visible) SpatialNativeTarget(
+                        center.clone().subtract(0.0, height / 2.0, 0.0),
+                        columnWidth.toFloat(),
+                        height.toFloat(),
+                    ) else null,
+                    visible = visible,
+                )
+            },
             SpatialInputProfile.ENTITY_RIGHT_EARLY,
             SpatialReach.NativeInteraction,
             clearanceFootprints = if (visible) listOf(currentFootprint) else emptyList(),
@@ -153,6 +169,10 @@ internal class BuilderWorldPlaque(
         const val SCALE = 2f
         private const val FACE_SEPARATION = .02f
         private const val PIXEL_SIZE = .025
+        private const val HIT_PADDING = .1
+        private const val MAX_TARGET_WIDTH = 3.0
+
+        private fun visualWidth(lineWidth: Int) = (lineWidth + 4) * PIXEL_SIZE * SCALE
 
         /**
          * lineWidth bounds the authored mesh; displayWidth is only culling metadata. Minecraft
@@ -165,7 +185,7 @@ internal class BuilderWorldPlaque(
             val measured = if (lineWidth <= 1016 && !hasPrivateGlyph) DialogTextLayout.layout(text, TextAlignment.LEFT, lineWidth + 8) else null
             val lines = (measured as? TextLayoutResult.Aligned)?.lineCount ?: conservativeLines(text, lineWidth)
             val pixelScale = PIXEL_SIZE * SCALE
-            val halfWidth = (lineWidth + 4) * pixelScale / 2.0
+            val halfWidth = visualWidth(lineWidth) / 2.0
             val height = max(1, lines) * 10 * pixelScale
             val angle = Math.toRadians(location.yaw.toDouble())
             return DisplayOrientedVolume(

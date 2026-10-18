@@ -19,6 +19,9 @@ import org.bukkit.entity.Interaction
 import org.bukkit.attribute.Attribute
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.util.Transformation
+import org.bukkit.util.BoundingBox
+import org.bukkit.util.RayTraceResult
+import org.bukkit.util.Vector
 import ru.arc.paper.display.PacketBlockDisplay
 import ru.arc.paper.display.PacketDisplayAudienceGroup
 import ru.arc.paper.display.PacketTextDisplay
@@ -37,7 +40,7 @@ import java.util.UUID
 import java.util.function.Consumer
 
 class BuilderWorldPlaqueTest : StringSpec({
-    "a two-sided plaque retains scale, configured native dimensions and stable visual identities" {
+    "a two-sided plaque covers its full scaled label with narrow native targets and stable visual identities" {
         val h = BuilderPlaqueDisplays()
         val world = mockk<World>(relaxed = true)
         val anchor = Location(world, 10.5, 66.25, 20.4, 90f, 0f)
@@ -55,12 +58,17 @@ class BuilderWorldPlaqueTest : StringSpec({
             control.scope shouldBe SpatialSceneScope.World
             control.input shouldBe SpatialInputProfile.ENTITY_RIGHT_EARLY
             control.reach shouldBe SpatialReach.NativeInteraction
-            control.controls.single().nativeTarget!!.also {
-                it.width shouldBe 3f
-                it.height shouldBe 1.5f
-                it.location().y shouldBe (anchor.y + .5 - .75 plusOrMinus 1e-8)
+            control.controls.size shouldBe 4
+            control.controls.forEach { strip ->
+                strip.nativeTarget!!.also {
+                    it.width shouldBe 2.35f
+                    it.height shouldBe 1.5f
+                    it.location().y shouldBe (anchor.y + .5 - .75 plusOrMinus 1e-8)
+                }
+                strip.planes.single().frontFaceOnly shouldBe false
             }
-            control.controls.single().planes.single().frontFaceOnly shouldBe false
+            control.controls.first().nativeTarget!!.location().z shouldBe (anchor.z - 3.525 plusOrMinus 1e-8)
+            control.controls.last().nativeTarget!!.location().z shouldBe (anchor.z + 3.525 plusOrMinus 1e-8)
             plaque.update(anchor.clone().add(0.0, 0.0, .25), Component.text("Обновлено"))
             h.texts.size shouldBe 2
             h.texts.map { it.location.z }.distinct() shouldBe listOf(20.65)
@@ -86,17 +94,52 @@ class BuilderWorldPlaqueTest : StringSpec({
             plaque.controls(Unit).clearanceFootprints.single().bounds.centerY shouldBe (66.75 plusOrMinus 1e-8)
             blocked = true
             plaque.refresh()
-            plaque.controls(Unit).controls.single().nativeTarget shouldBe null
-            plaque.controls(Unit).controls.single().visible shouldBe false
+            plaque.controls(Unit).controls.all { it.nativeTarget == null && !it.visible } shouldBe true
             h.texts.size shouldBe 2
             blocked = false
             plaque.refresh()
-            plaque.controls(Unit).controls.single().visible shouldBe true
+            plaque.controls(Unit).controls.all { it.visible } shouldBe true
             h.texts.size shouldBe 2
             anchor.x shouldBe 5.5
             anchor.y shouldBe 66.25
             anchor.z shouldBe 7.4
         }
+    }
+
+    "a colliding plaque escapes forward before moving up and retains its two handles" {
+        val h = BuilderPlaqueDisplays()
+        val world = clearPlaqueWorld()
+        var wallDepth = 1
+        every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers {
+            val boxes = if (secondArg<Int>() == 64 && thirdArg<Int>() in 0 until wallDepth)
+                listOf(BoundingBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)) else emptyList()
+            mockk<org.bukkit.block.Block> { every { collisionShape.boundingBoxes } returns boxes }
+        }
+        val anchor = Location(world, .5, 64.8, .8)
+        mockkStatic(Bukkit::class)
+        try {
+            every { Bukkit.isPrimaryThread() } returns true
+            BuilderWorldPlaque(h.owner, PaperSpatialSpace(), plaqueStyle(), SceneAudience.Public()).use { plaque ->
+                plaque.update(anchor, Component.text("Дом"))
+                h.texts.first().location.y shouldBe anchor.y
+                h.texts.first().location.z shouldBe (1.05 plusOrMinus 1e-8)
+                wallDepth = 2
+                plaque.refresh()
+                h.texts.first().location.y shouldBe anchor.y
+                h.texts.first().location.z shouldBe (2.05 plusOrMinus 1e-8)
+                val moved = plaque.controls(Unit).clearanceFootprints.single()
+                PaperSpatialSpace().clear(world, moved) shouldBe true
+                h.texts.size shouldBe 2
+                anchor.z shouldBe .8
+                wallDepth = 4
+                plaque.refresh()
+                h.texts.first().location.z shouldBe anchor.z
+                h.texts.first().location.y shouldBe (65.05 plusOrMinus 1e-8)
+                wallDepth = 0
+                plaque.refresh()
+                h.texts.first().location shouldBe anchor
+            }
+        } finally { unmockkStatic(Bukkit::class) }
     }
 
     "native text is bottom anchored and a supplementary glyph counts as one conservative wrapped line" {
@@ -125,13 +168,9 @@ class BuilderWorldPlaqueTest : StringSpec({
         bold.maxY shouldBe (65.52 plusOrMinus 1e-8)
     }
 
-    "both text faces accept the current visible center and reject the legacy below-text hit" {
+    "both faces accept the full label edges and reject misses walls and remote clicks" {
         val h = BuilderPlaqueDisplays()
-        val world = mockk<World>(relaxed = true)
-        every { world.uid } returns UUID.randomUUID()
-        every { world.minHeight } returns -64
-        every { world.maxHeight } returns 320
-        every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
+        val world = clearPlaqueWorld()
         every { world.rayTraceBlocks(any(), any(), any(), any(), any(), any()) } returns null
         every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()).collisionShape.boundingBoxes } returns emptyList()
         every { world.spawn(any<Location>(), Interaction::class.java, any<Consumer<Interaction>>()) } answers {
@@ -162,7 +201,7 @@ class BuilderWorldPlaqueTest : StringSpec({
         try {
             every { Bukkit.isPrimaryThread() } returns true
             BuilderWorldPlaque(h.owner, unblockedPlaqueSpace(), plaqueStyle(), SceneAudience.Public()).use { plaque ->
-                plaque.update(anchor, Component.text("Постройка\nДом\nПКМ"))
+                plaque.update(anchor, Component.text("Постройка\nДом\nМатериалы\nПКМ"))
                 val key = SpatialSceneKey("plaque")
                 val controller = object : SpatialControlController<String, Unit>() {
                     override fun current(player: Player, scene: SpatialSceneKey): SpatialControlFrame<String, Unit> = plaque.controls("current")
@@ -173,13 +212,38 @@ class BuilderWorldPlaqueTest : StringSpec({
                     controls.target(key, player)?.context shouldBe "current"
                     eye = anchor.clone().add(0.0, .75, -2.0)
                     controls.target(key, player)?.context shouldBe "current"
+                    // The old 3 x 1.5 target missed these visible outer corners.
+                    eye = anchor.clone().add(4.55, 1.95, 2.0).apply { yaw = 180f }
+                    controls.target(key, player)?.context shouldBe "current"
+                    eye = anchor.clone().add(-4.55, .05, -2.0)
+                    controls.target(key, player)?.context shouldBe "current"
+                    eye = anchor.clone().add(4.8, .75, 2.0).apply { yaw = 180f }
+                    controls.target(key, player) shouldBe null
                     eye = anchor.clone().add(0.0, -.25, 2.0).apply { yaw = 180f }
+                    controls.target(key, player) shouldBe null
+                    eye = anchor.clone().add(0.0, .75, 3.1).apply { yaw = 180f }
+                    controls.target(key, player) shouldBe null
+                    eye = anchor.clone().add(0.0, .75, 2.0).apply { yaw = 180f }
+                    every { world.rayTraceBlocks(any(), any(), any(), any(), any(), any()) } returns
+                        RayTraceResult(Vector(anchor.x, anchor.y + .75, anchor.z + 1.0))
+                    controls.target(key, player) shouldBe null
+                    every { world.rayTraceBlocks(any(), any(), any(), any(), any(), any()) } returns null
+                    every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()).collisionShape.boundingBoxes } returns
+                        listOf(BoundingBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
                     controls.target(key, player) shouldBe null
                 }
             }
         } finally { unmockkStatic(Bukkit::class) }
     }
 })
+
+private fun clearPlaqueWorld(): World = mockk<World>(relaxed = true).also { world ->
+    every { world.uid } returns UUID.randomUUID()
+    every { world.minHeight } returns -64
+    every { world.maxHeight } returns 320
+    every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
+    every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()).collisionShape.boundingBoxes } returns emptyList()
+}
 
 internal fun unblockedPlaqueSpace(): PaperSpatialSpace = mockk<PaperSpatialSpace>().also { space ->
     every { space.place(any(), any(), any()) } answers { firstArg<AnchoredSurface>().location() }
