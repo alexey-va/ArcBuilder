@@ -2164,6 +2164,7 @@ internal class BuilderToolsRuntime(
                         }
                         operation.record = durableApplying
                         if (operation.cancelled || !player.isOnline) return@applyingCommit acknowledgeCancelled(operation)
+                        BuilderOnboardingProgressBridge.started(durableApplying.plan)
                         beginMutation(player, operation)
                     },
                 )
@@ -2507,6 +2508,9 @@ internal class BuilderToolsRuntime(
         current: BuilderConstructionProjectRecord,
     ) {
         if (previous.state == current.state) return
+        if (previous.state == BuilderConstructionProjectState.PREPARED && current.state == BuilderConstructionProjectState.ACTIVE) {
+            BuilderOnboardingProgressBridge.started(current)
+        }
         val player = Bukkit.getPlayer(current.playerId)?.takeIf(Player::isOnline) ?: return
         when (current.state) {
             BuilderConstructionProjectState.ACTIVE -> if (previous.state == BuilderConstructionProjectState.PREPARED) {
@@ -2563,6 +2567,7 @@ internal class BuilderToolsRuntime(
                     constructionResources.forget(durable.projectId)
                     unlockConstruction(durable)
                     repairCompletedConstructionConnections(durable)
+                    BuilderOnboardingProgressBridge.completed(durable)
                     Bukkit.getPlayer(durable.playerId)?.takeIf(Player::isOnline)?.let { player ->
                         if (durable.instantBuildRequestedBy == null) emitCommittedOperation(durable.plan, player.gameMode)
                     }
@@ -2833,6 +2838,7 @@ internal class BuilderToolsRuntime(
         }
         info(debugLine.line("event" to "committed", "operation" to durable.operationId, "player" to durable.playerId, "kind" to durable.plan.kind, "blocks" to durable.plan.changes.size))
         ExternalArcBuilderTelemetryBridge.completed(durable.plan.playerId, durable.operationId.toString())
+        BuilderOnboardingProgressBridge.completed(durable.plan)
         emitCommittedOperation(durable.plan, player.gameMode)
         durable.plan.sourceRecordId?.let { markSourceUndone(it) }
         cleanupOldRecords()
@@ -3646,6 +3652,7 @@ internal class BuilderToolsRuntime(
                         building = loaded,
                         rotation = requestedRotation,
                     )
+                    BuilderOnboardingProgressBridge.opened(player.uniqueId, opened.centerBlock)
                     if (current?.isExactOpenPreview(player, effectiveData) != true) {
                         send(
                             player,

@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.81"
+version = "1.0.82"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -43,6 +43,7 @@ dependencies {
     implementation("org.snakeyaml:snakeyaml-engine:3.0.1")
     implementation("ru.ruscrafting.arc:arc-core-sql:2.7.42")
     compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.42")
+    compileOnly("ru.ruscrafting.arc:arc-onboarding-api:0.1.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
     implementation("de.tr7zw:item-nbt-api:2.15.7")
@@ -69,6 +70,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.42")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.42")
+    testImplementation("ru.ruscrafting.arc:arc-onboarding-api:0.1.0")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.Slimefun:Slimefun4:4.10")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
