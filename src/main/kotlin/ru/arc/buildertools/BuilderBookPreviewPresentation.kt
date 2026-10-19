@@ -24,6 +24,7 @@ import ru.arc.autobuild.BuildBookPreviewBridge
 import ru.arc.autobuild.BuildBookPreviewMove
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.ConstructionSiteSnapshot
+import ru.arc.autobuild.isBuilderIgnored
 import ru.arc.core.BukkitTaskScheduler
 import ru.arc.menu.MenuContract
 import ru.arc.menu.MenuElementId
@@ -39,11 +40,13 @@ import ru.arc.paper.menu.PaperMenuItemFactory
 import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.paper.display.PacketDisplayAudienceGroup
 import ru.arc.paper.display.PaperPacketDisplays
+import ru.arc.paper.api.ArcSchematicSnapshot
 import ru.arc.paper.scene.PaperSpatialControls
 import ru.arc.paper.scene.PaperSpatialSpace
 import ru.arc.paper.scene.SceneAudience
 import ru.arc.paper.scene.SpatialControlController
 import ru.arc.paper.scene.SpatialControlFrame
+import ru.arc.paper.scene.SpatialInputReason
 import ru.arc.paper.scene.SpatialSceneKey
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
@@ -93,15 +96,31 @@ internal class BuilderBookPreviewPresentation(
     private val viewRange: Double,
     private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "book-preview-plaque"),
     private val space: PaperSpatialSpace = PaperSpatialSpace(),
+    private val planningTasks: BuilderPlanningTasks,
 ) : BuildBookPreviewBridge, Listener, AutoCloseable {
+    private class PanelSource(
+        val site: ConstructionSite,
+        val view: ArcSchematicSnapshot,
+        val origin: BuilderBlockPos,
+        val face: BuilderConstructionSitePanelFace,
+        val text: Component,
+    ) {
+        fun same(other: PanelSource) = site === other.site && view === other.view &&
+            origin == other.origin && face == other.face && text == other.text
+    }
+
     private data class PanelScene(
         var site: ConstructionSite,
         val key: SpatialSceneKey,
         val plaque: BuilderWorldPlaque,
         val audience: PacketDisplayAudienceGroup,
+        var source: PanelSource,
     )
 
     private var panels = mutableMapOf<UUID, PanelScene>()
+    private val pendingPanels = mutableMapOf<UUID, PanelSource>()
+    private val calculatingPanels = mutableMapOf<UUID, PanelSource>()
+    private val actionDiagnostics = BuilderActionDiagnostics()
     private var snapshots = mutableMapOf<UUID, ConstructionSiteSnapshot>()
     private var placementSites = mutableMapOf<UUID, ConstructionSite>()
     private var preparing = mutableMapOf<UUID, Any>()
@@ -143,6 +162,12 @@ internal class BuilderBookPreviewPresentation(
         override fun inputFailed(player: Player, scene: SpatialSceneKey, context: ConstructionSite, failure: Exception) {
             val ownerId = UUID.fromString(scene.value)
             if (panels[ownerId]?.site === context) removePanel(ownerId)
+        }
+
+        override fun inputObserved(player: Player, scene: SpatialSceneKey, context: ConstructionSite,
+            action: Unit?, accepted: Boolean, reason: SpatialInputReason) {
+            actionDiagnostics.spatialInput(player, "book_plaque", scene.value, context.adjustedCenter,
+                accepted, reason.name.lowercase(), previewId = "${context.player.uniqueId}:${context.expiresAtMillis}")
         }
     })
 
@@ -549,26 +574,76 @@ internal class BuilderBookPreviewPresentation(
             removePanel(ownerId)
             return
         }
-        val positions = listOf(site.adjustedCenter.let { anchor ->
+        val origin = site.adjustedCenter.let { anchor ->
             BuilderBlockPos(site.world.uid, anchor.blockX, anchor.blockY, anchor.blockZ)
-        })
-        val corners = site.corners
-        val occupied = listOf(corners.corner1, corners.corner2).map { corner ->
-            site.worldLocation(corner).let { at -> BuilderBlockPos(site.world.uid, at.blockX, at.blockY, at.blockZ) }
         }
         val face = BuilderConstructionSiteDisplayLayout.nearestFace(
-            positions,
+            listOf(origin),
             site.player.location.x,
             site.player.location.z,
         )
-        val panel = BuilderConstructionSiteDisplayLayout.panelPlacement(
-            positions,
-            face,
-            panelHeightOffset,
-            panelFrontOffset,
-            occupiedPositions = occupied,
-            panelWidth = BuilderWorldPlaque.visualWidth(panelLineWidth),
-        )
+        val source = PanelSource(site, checkNotNull(site.view), origin, face, messages.render(
+            "book.preview-panel", locale(site.player),
+            mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24))),
+        ))
+        panels[ownerId]?.takeIf { it.source.same(source) }?.let { existing ->
+            pendingPanels.remove(ownerId)
+            existing.plaque.refresh()
+            controls.apply(existing.key, existing.plaque.controls(site))
+            return
+        }
+        if (pendingPanels[ownerId]?.same(source) == true) return
+        pendingPanels[ownerId] = source
+        if (ownerId !in calculatingPanels) calculatePanel(ownerId, source)
+    }
+
+    private fun calculatePanel(ownerId: UUID, source: PanelSource) {
+        check(ownerId !in calculatingPanels)
+        calculatingPanels[ownerId] = source
+        val origin = source.origin
+        planningTasks.compute {
+            val occupied = source.view.blocks().asSequence().filter { !it.isAir && !it.isBuilderIgnored }.map { block ->
+                BuilderBlockPos(origin.worldId, origin.x + block.position.x, origin.y + block.position.y, origin.z + block.position.z)
+            }
+            BuilderConstructionSiteDisplayLayout.panelPlacement(
+                listOf(origin), source.face, panelHeightOffset, panelFrontOffset,
+                occupiedPositions = occupied.asIterable(), panelWidth = BuilderWorldPlaque.visualWidth(panelLineWidth),
+                panelHeight = BuilderWorldPlaque.visualHeight(source.text, panelLineWidth),
+            )
+        }.whenComplete { panel, failure ->
+            planningTasks.onMain {
+                completePanel(ownerId, source, panel, failure)
+            }
+        }
+    }
+
+    private fun completePanel(ownerId: UUID, source: PanelSource, panel: BuilderSitePanelPlacement?, failure: Throwable?) {
+        if (calculatingPanels[ownerId] !== source) return
+        try {
+            if (!closed && pendingPanels[ownerId] === source) {
+                runCatching {
+                    if (failure != null) throw failure
+                    val site = source.site
+                    val origin = source.origin
+                    if (!site.player.isOnline || site.player.world.uid != origin.worldId) removePanel(ownerId)
+                    else if (!site.transforming && site.view === source.view && site.adjustedCenter.let {
+                        it.blockX == origin.x && it.blockY == origin.y && it.blockZ == origin.z
+                    }) applyPanel(source, checkNotNull(panel))
+                    pendingPanels.remove(ownerId)
+                }.onFailure {
+                    removePanel(ownerId)
+                    warn("Builder build-book preview panel failed for {}: {}", ownerId, it.message)
+                }
+            }
+        } finally {
+            calculatingPanels.remove(ownerId)
+            if (!closed) pendingPanels[ownerId]?.let { calculatePanel(ownerId, it) }
+        }
+    }
+
+    private fun applyPanel(source: PanelSource, panel: BuilderSitePanelPlacement) {
+        val site = source.site
+        val ownerId = site.player.uniqueId
         val existing = panels[ownerId] ?: run {
             val audience = displays.createAudienceGroup { viewer ->
                 viewer.uniqueId == ownerId || viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)
@@ -576,7 +651,7 @@ internal class BuilderBookPreviewPresentation(
             val plaque = BuilderWorldPlaque(displays, space, BuilderWorldPlaqueStyle(
                 panelInteractionWidth, panelInteractionHeight, panelLineWidth, panelBackgroundColor, panelGlowColor, viewRange,
             ), SceneAudience.Public(audience))
-            PanelScene(site, SpatialSceneKey(ownerId.toString()), plaque, audience).also { created ->
+            PanelScene(site, SpatialSceneKey(ownerId.toString()), plaque, audience, source).also { created ->
                 panels[ownerId] = created
                 plaque.refreshWith {
                     if (panels[ownerId] === created && !closed) {
@@ -593,11 +668,8 @@ internal class BuilderBookPreviewPresentation(
             }
         }
         existing.site = site
-        existing.plaque.update(Location(site.world, panel.x, panel.y, panel.z, panel.yaw, 0f), messages.render(
-            "book.preview-panel",
-            locale(site.player),
-            mapOf("name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24))),
-        ))
+        existing.source = source
+        existing.plaque.update(Location(site.world, panel.x, panel.y, panel.z, panel.yaw, 0f), source.text)
         controls.apply(existing.key, existing.plaque.controls(site))
     }
 
@@ -609,6 +681,8 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun removePanel(playerId: UUID) {
+        pendingPanels.remove(playerId)
+        // A cancelled worker still occupies the owner's slot; reopening only replaces its pending source.
         val scene = panels.remove(playerId) ?: return
         try {
             controls.clear(scene.key)
@@ -652,6 +726,8 @@ internal class BuilderBookPreviewPresentation(
         menuViewers.values.toList().forEach { player -> attempt { menus.session(player)?.close() } }
         attempt { menus.close() }
         panels.clear()
+        pendingPanels.clear()
+        calculatingPanels.clear()
         menuViewers.clear()
         snapshots.clear()
         confirmationInventories.clear()

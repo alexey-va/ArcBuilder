@@ -82,6 +82,7 @@ internal class BuilderWorldPlaque(
     }
 
     fun update(location: Location, content: Component) {
+        if (authored != location) previous = null
         if (authored != location) refreshController?.let {
             scene.refreshWith(SceneRefreshRegion(location, audience, style.viewRange), it)
         }
@@ -100,7 +101,8 @@ internal class BuilderWorldPlaque(
         placed = if (visible) {
             // Keep a world plaque beside its authored face: escape toward the viewer side first.
             space.place(AnchoredSurface(anchor, volumes, maxOutward = 2.0, maxUp = 0.0, maxSide = 0.0), previous)
-                ?: space.place(AnchoredSurface(anchor, volumes, maxOutward = 2.0), previous)
+                ?: space.place(AnchoredSurface(anchor, volumes, maxOutward = 2.0,
+                    maxUp = MAX_UPWARD_SHIFT, maxSide = MAX_SIDE_SHIFT), previous)
         } else null
         placed?.let { previous = it.clone() }
         val at = placed ?: anchor
@@ -171,8 +173,19 @@ internal class BuilderWorldPlaque(
         private const val PIXEL_SIZE = .025
         private const val HIT_PADDING = .1
         private const val MAX_TARGET_WIDTH = 3.0
+        internal const val MAX_UPWARD_SHIFT = .5
+        internal const val MAX_SIDE_SHIFT = .5
+        internal const val VERTICAL_PADDING = .02
 
         internal fun visualWidth(lineWidth: Int) = (lineWidth + 4) * PIXEL_SIZE * SCALE
+
+        internal fun visualHeight(text: Component, lineWidth: Int): Double {
+            val hasPrivateGlyph = PlainTextComponentSerializer.plainText().serialize(text).codePoints()
+                .anyMatch { Character.getType(it) == Character.PRIVATE_USE.toInt() }
+            val measured = if (lineWidth <= 1016 && !hasPrivateGlyph) DialogTextLayout.layout(text, TextAlignment.LEFT, lineWidth + 8) else null
+            val lines = (measured as? TextLayoutResult.Aligned)?.lineCount ?: conservativeLines(text, lineWidth)
+            return max(1, lines) * 10 * PIXEL_SIZE * SCALE
+        }
 
         /**
          * lineWidth bounds the authored mesh; displayWidth is only culling metadata. Minecraft
@@ -180,20 +193,15 @@ internal class BuilderWorldPlaque(
          * -0.025 pixel transform. Unknown glyphs reserve one authored line instead of guessed width.
          */
         internal fun visualFootprint(location: Location, text: Component, lineWidth: Int): DisplayOrientedVolume {
-            val hasPrivateGlyph = PlainTextComponentSerializer.plainText().serialize(text).codePoints()
-                .anyMatch { Character.getType(it) == Character.PRIVATE_USE.toInt() }
-            val measured = if (lineWidth <= 1016 && !hasPrivateGlyph) DialogTextLayout.layout(text, TextAlignment.LEFT, lineWidth + 8) else null
-            val lines = (measured as? TextLayoutResult.Aligned)?.lineCount ?: conservativeLines(text, lineWidth)
-            val pixelScale = PIXEL_SIZE * SCALE
             val halfWidth = visualWidth(lineWidth) / 2.0
-            val height = max(1, lines) * 10 * pixelScale
+            val height = visualHeight(text, lineWidth)
             val angle = Math.toRadians(location.yaw.toDouble())
             return DisplayOrientedVolume(
                 Vector3d(location.x, location.y + height / 2.0, location.z),
                 Vector3d(cos(angle), 0.0, sin(angle)),
                 Vector3d(0.0, 1.0, 0.0),
                 Vector3d(-sin(angle), 0.0, cos(angle)),
-                Vector3d(halfWidth, height / 2.0 + .02, .04),
+                Vector3d(halfWidth, height / 2.0 + VERTICAL_PADDING, .04),
             )
         }
 

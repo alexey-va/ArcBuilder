@@ -35,6 +35,7 @@ import java.util.concurrent.RejectedExecutionException
 internal class BuilderUserFailure(
     val path: String,
     val values: Map<String, Component> = emptyMap(),
+    val diagnostic: BuilderActionRejection? = null,
 ) : RuntimeException(path)
 
 internal interface BuilderBookLifecycleHost {

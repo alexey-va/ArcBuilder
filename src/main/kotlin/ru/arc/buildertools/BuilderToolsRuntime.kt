@@ -99,6 +99,39 @@ internal class BuilderToolsRuntimeActivationException(
     val cleanupFailure: Throwable,
 ) : RuntimeException(cause)
 
+private const val CONSTRUCTION_WORLD_READ_PHASE = "construction_world_read"
+
+/** Keeps the original port behavior while adding the project identity missing from world reads. */
+internal fun builderConstructionWorldReadPort(
+    projectId: UUID,
+    delegate: BuilderConstructionProjectPort,
+    diagnostics: BuilderActionDiagnostics,
+    context: (BuilderBlockPos) -> BuilderActionContext,
+): BuilderConstructionProjectPort = object : BuilderConstructionProjectPort by delegate {
+    override fun currentBlockData(position: BuilderBlockPos): String = read(position, "block_data") {
+        delegate.currentBlockData(position)
+    }
+
+    override fun isStepApplied(step: BuilderConstructionStep): Boolean = read(step.change.position, "step_applied") {
+        delegate.isStepApplied(step)
+    }
+
+    private fun <T> read(position: BuilderBlockPos, check: String, action: () -> T): T = try {
+        action().also {
+            diagnostics.constructionAllowed(projectId, "$CONSTRUCTION_WORLD_READ_PHASE.$check", position)
+        }
+    } catch (failure: Throwable) {
+        val expected = failure is BuilderConstructionTemporarilyUnavailableException
+        diagnostics.constructionBlocked(
+            context(position),
+            if (expected) failure.diagnosticReason ?: "block_temporarily_unavailable" else "unexpected_${BuilderToolsFailureType.of(failure)}",
+            failure.takeUnless { expected },
+            phase = "$CONSTRUCTION_WORLD_READ_PHASE.$check",
+        )
+        throw failure
+    }
+}
+
 internal class BuilderToolsRuntime(
     private val plugin: JavaPlugin,
     private val config: BuilderToolsConfig,
@@ -192,6 +225,7 @@ internal class BuilderToolsRuntime(
     private val storageExecutor = ru.arc.core.BoundedAsyncExecutor("arc-builder-tools-storage", 1, 256)
     private var storageSealed = false
     private val debugLine = StructuredDebugLine("ARC_BUILDER_TOOLS")
+    private val actionDiagnostics = BuilderActionDiagnostics()
     private val wandKey = org.bukkit.NamespacedKey(plugin, "builder_selector")
     private val selections = BuilderSelectionController(
         previewRadius = config.previewRadius,
@@ -357,9 +391,11 @@ internal class BuilderToolsRuntime(
         override fun currentBlockData(position: BuilderBlockPos): String {
             val world = Bukkit.getWorld(position.worldId)
                 ?: throw IllegalStateException("Builder construction world is unavailable")
-            if (!world.isChunkLoaded(position.x shr 4, position.z shr 4) ||
-                PaperBlockProtection.isProtected(position.worldId, position.x, position.y, position.z)) {
-                throw BuilderConstructionTemporarilyUnavailableException()
+            if (!world.isChunkLoaded(position.x shr 4, position.z shr 4)) {
+                throw BuilderConstructionTemporarilyUnavailableException("chunk_unloaded")
+            }
+            if (PaperBlockProtection.isProtected(position.worldId, position.x, position.y, position.z)) {
+                throw BuilderConstructionTemporarilyUnavailableException("block_protection")
             }
             return block(world, position).blockData.asString
         }
@@ -375,48 +411,73 @@ internal class BuilderToolsRuntime(
             project: BuilderConstructionProjectRecord,
             step: BuilderConstructionStep,
         ): Boolean {
-            val playerId = project.playerId
-            val change = step.change
-            val world = Bukkit.getWorld(change.position.worldId) ?: return false
-            if (!config.allowsWorld(world.name) || !world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
-                throw BuilderConstructionTemporarilyUnavailableException()
+            fun context() = constructionActionContext(project, "construction_step", step.change.position)
+            fun denied(reason: String): Boolean {
+                actionDiagnostics.constructionBlocked(context(), reason)
+                return false
             }
-            val target = block(world, change.position)
-            if (PaperBlockProtection.isProtected(target) || !world.worldBorder.isInside(target.location)) return false
-            val after = Bukkit.createBlockData(change.afterBlockData)
-            val safeSystemContainer = step.lootTableKey != null && safety.isSafeSystemLootContainer(after)
-            if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer &&
-                !(step.systemFurniture && safety.isSafeSystemFurniture(after))) return false
-            val replaceable = safety.isReplaceable(target)
-            if (!replaceable && !safety.isSafeExisting(target)) return false
-            return HookRegistry.landsHook?.canModify(
-                playerId,
-                target,
-                after.material.takeUnless(Material::isAir),
-            ) ?: true
+            try {
+                val playerId = project.playerId
+                val change = step.change
+                val world = Bukkit.getWorld(change.position.worldId) ?: return denied("world_unavailable")
+                if (!config.allowsWorld(world.name) || !world.isChunkLoaded(change.position.x shr 4, change.position.z shr 4)) {
+                    actionDiagnostics.constructionBlocked(context(), if (!config.allowsWorld(world.name)) "world_not_allowed" else "chunk_unloaded")
+                    throw BuilderConstructionTemporarilyUnavailableException()
+                }
+                val target = block(world, change.position)
+                if (PaperBlockProtection.isProtected(target)) return denied("block_protection")
+                if (!world.worldBorder.isInside(target.location)) return denied("world_border")
+                val after = Bukkit.createBlockData(change.afterBlockData)
+                val safeSystemContainer = step.lootTableKey != null && safety.isSafeSystemLootContainer(after)
+                if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer &&
+                    !(step.systemFurniture && safety.isSafeSystemFurniture(after))) return denied("unsafe_placement")
+                val replaceable = safety.isReplaceable(target)
+                if (!replaceable && !safety.isSafeExisting(target)) return denied("unsafe_existing_block")
+                val allowed = HookRegistry.landsHook?.canModify(
+                    playerId,
+                    target,
+                    after.material.takeUnless(Material::isAir),
+                ) ?: true
+                if (!allowed) return denied("lands_build_permission")
+                actionDiagnostics.constructionAllowed(project.projectId)
+                return true
+            } catch (failure: BuilderConstructionTemporarilyUnavailableException) {
+                throw failure
+            } catch (failure: Throwable) {
+                actionDiagnostics.constructionBlocked(context(), "unexpected_${BuilderToolsFailureType.of(failure)}", failure)
+                throw failure
+            }
         }
 
         override fun prepareInput(
             playerId: UUID,
             project: BuilderConstructionProjectRecord,
             input: BuilderItemAmount,
-        ): BuilderResourceMutation? = constructionResources.prepareInput(playerId, project, input)
+        ): BuilderResourceMutation? = constructionResourceAction(project, "construction_input") {
+            constructionResources.prepareInput(playerId, project, input)
+        }
 
         override fun prepareOutput(
             playerId: UUID,
             project: BuilderConstructionProjectRecord,
             output: BuilderItemAmount,
-        ): BuilderResourceMutation? = constructionResources.prepareOutput(playerId, project, output)
+        ): BuilderResourceMutation? = constructionResourceAction(project, "construction_output") {
+            constructionResources.prepareOutput(playerId, project, output)
+        }
 
         override fun reconcileResource(
             project: BuilderConstructionProjectRecord,
             mutation: BuilderResourceMutation,
-        ): BuilderResourceMutationResult = constructionResources.reconcile(project, mutation)
+        ): BuilderResourceMutationResult = constructionResourceAction(project, "construction_resource_reconcile") {
+            constructionResources.reconcile(project, mutation)
+        }
 
         override fun rollbackResource(
             project: BuilderConstructionProjectRecord,
             mutation: BuilderResourceMutation,
-        ): BuilderResourceMutationResult = constructionResources.rollback(project, mutation)
+        ): BuilderResourceMutationResult = constructionResourceAction(project, "construction_resource_rollback") {
+            constructionResources.rollback(project, mutation)
+        }
 
         private fun atomicSteps(
             project: BuilderConstructionProjectRecord,
@@ -439,7 +500,8 @@ internal class BuilderToolsRuntime(
             }
         }
 
-        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int {
+        override fun apply(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int =
+            constructionResourceAction(project, "construction_apply", step.change.position) {
             val mutations = atomicSteps(project, step).map { atomicStep ->
                 val change = atomicStep.change
                 val world = Bukkit.getWorld(change.position.worldId)
@@ -501,7 +563,7 @@ internal class BuilderToolsRuntime(
                 project.cursor,
                 constructionFeedbackSettings,
             )
-            return changed.size
+            changed.size
         }
 
         override fun appliedBlockCount(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int =
@@ -567,14 +629,14 @@ internal class BuilderToolsRuntime(
                 taskScope = taskScope,
                 projects = { playerId -> constructionProjects.values.filter { it.playerId == playerId } },
                 onTeleport = ::teleportToConstruction,
-                onInspect = constructionMenus::open,
+                onInspect = { player, project -> openConstructionMenu(player, project, "projects_menu") },
             ).also { initializedConstructionProjectsMenu = it }
             constructionSiteDisplays = BuilderConstructionSiteDisplayManager(
                 plugin = plugin,
                 settings = config.constructionSiteDisplaySettings(),
                 messages = messages,
                 projectLookup = constructionProjects::get,
-                onInspect = constructionMenus::open,
+                onInspect = { player, project -> openConstructionMenu(player, project, "construction_plaque") },
                 planningTasks = planningTasks,
             ).also { initializedConstructionSiteDisplays = it }
             bookPreviewPresentation = BuilderBookPreviewPresentation(
@@ -609,7 +671,7 @@ internal class BuilderToolsRuntime(
 
                     override fun cancel(player: Player) {
                         books.cancelPreviewActivation(player.uniqueId)
-                        runBookPreviewAction(player) { cancelPlan(player) }
+                        runBookPreviewAction(player, "book_preview_cancel") { cancelPlan(player) }
                     }
                 },
                 panelHeightOffset = config.constructionSitePanelHeightOffset,
@@ -622,6 +684,7 @@ internal class BuilderToolsRuntime(
                 ),
                 panelGlowColor = Color.fromRGB(config.constructionSiteGlowColor.removePrefix("#").toInt(16)),
                 viewRange = config.constructionSiteViewRange,
+                planningTasks = planningTasks,
             ).also { initializedBookPreviewPresentation = it }
             BuildingManager.installPreviewBridge(
                 bookPreviewPresentation,
@@ -685,7 +748,7 @@ internal class BuilderToolsRuntime(
                     override fun ensureScannable(player: Player, block: Block) {
                         ensureInRangeAndLoaded(player, block)
                         if (!block.world.worldBorder.isInside(block.location)) {
-                            throw BuilderUserFailure("errors.protection")
+                            throw blockRejection("errors.protection", "world_border", block)
                         }
                     }
 
@@ -936,20 +999,87 @@ internal class BuilderToolsRuntime(
             sender.sendMessage(messages.render("errors.player-only"))
             return true
         }
-        runBuilderAction(player) { handleBuilder(player, args) }
+        runBuilderAction(player, "command_${BuilderRootCommand.parse(args.firstOrNull())?.name?.lowercase(Locale.ROOT) ?: "help"}") {
+            handleBuilder(player, args)
+        }
         return true
     }
 
-    private fun runBuilderAction(player: Player, action: () -> Unit) {
+    private fun constructionActionContext(
+        project: BuilderConstructionProjectRecord,
+        action: String,
+        position: BuilderBlockPos = project.siteAnchor ?: project.plan.changes.first().position,
+    ) = BuilderActionContext(
+        project.playerId, project.playerName, action,
+        BuilderActionTarget(position.worldId, Bukkit.getWorld(position.worldId)?.name, position.x, position.y, position.z),
+        operationId = project.projectId, buildingId = project.plan.bookBuildingId,
+        blueprintId = project.plan.bookBlueprintId, bookInstanceId = project.plan.bookInstanceId,
+    )
+
+    private fun constructionPortFor(project: BuilderConstructionProjectRecord): BuilderConstructionProjectPort =
+        builderConstructionWorldReadPort(project.projectId, constructionPort, actionDiagnostics) { position ->
+            constructionActionContext(project, CONSTRUCTION_WORLD_READ_PHASE, position)
+        }
+
+    private inline fun <T> constructionResourceAction(
+        project: BuilderConstructionProjectRecord,
+        phase: String,
+        position: BuilderBlockPos = project.steps.getOrNull(project.cursor)?.change?.position
+            ?: project.siteAnchor ?: project.plan.changes.first().position,
+        action: () -> T,
+    ): T = try {
+        action().also { actionDiagnostics.constructionAllowed(project.projectId, phase) }
+    } catch (failure: Throwable) {
+        val context = constructionActionContext(project, phase, position)
+        if (failure is BuilderConstructionTemporarilyUnavailableException) {
+            actionDiagnostics.constructionBlocked(context, "temporarily_unavailable")
+        } else {
+            actionDiagnostics.constructionBlocked(context, "unexpected_${BuilderToolsFailureType.of(failure)}", failure)
+        }
+        throw failure
+    }
+
+    private fun beginAction(
+        player: Player,
+        action: String,
+        target: Location? = null,
+        site: ConstructionSite? = BuildingManager.pending(player.uniqueId),
+        data: BuildBookData? = site?.bookData,
+        project: BuilderConstructionProjectRecord? = null,
+        requestedOperationId: UUID? = null,
+    ): BuilderActionDiagnostics.Attempt {
+        val plan = project?.plan ?: previews.plan(player.uniqueId)
+        val position = project?.siteAnchor ?: plan?.changes?.firstOrNull()?.position
+        val at = target?.let(BuilderActionTarget::at) ?: site?.adjustedCenter?.let(BuilderActionTarget::at)
+            ?: position?.let { BuilderActionTarget(it.worldId, Bukkit.getWorld(it.worldId)?.name, it.x, it.y, it.z) }
+            ?: BuilderActionTarget.at(player.location)
+        return actionDiagnostics.begin(BuilderActionContext(
+            player.uniqueId, player.name, action, at,
+            operationId = requestedOperationId ?: project?.projectId ?: plan?.id,
+            previewId = site?.let { "${it.player.uniqueId}:${it.expiresAtMillis}" },
+            buildingId = data?.buildingId ?: plan?.bookBuildingId,
+            blueprintId = data?.blueprintId ?: plan?.bookBlueprintId,
+            bookInstanceId = data?.instanceId ?: plan?.bookInstanceId,
+        ))
+    }
+
+    private fun runBuilderAction(
+        player: Player,
+        actionName: String = "builder_action",
+        diagnostic: BuilderActionDiagnostics.Attempt = beginAction(player, actionName),
+        action: () -> Unit,
+    ) {
         try {
             action()
+            if (!diagnostic.outcomeRecorded) diagnostic.outcome("accepted", "handler_returned")
         } catch (failure: BuilderUserFailure) {
+            diagnostic.failed(failure)
             send(player, failure.path, failure.values)
         } catch (failure: IllegalArgumentException) {
-            warn("Builder-tools rejected command for {}: {}", player.name, failure.message)
+            diagnostic.failed(failure)
             send(player, "errors.plan-failed")
         } catch (failure: Throwable) {
-            error("Builder-tools command failed for ${player.name}", failure)
+            diagnostic.failed(failure)
             send(player, "errors.plan-failed")
         }
     }
@@ -1073,29 +1203,32 @@ internal class BuilderToolsRuntime(
         return available
     }
 
-    internal fun onSelectionPanelAction(player: Player, action: BuilderPanelAction) = runBuilderAction(player) {
-        val current = selectionPanelView(player) ?: return@runBuilderAction
-        if (action !in current.actions) return@runBuilderAction
-        ensureAvailable(player)
-        when (action) {
-            BuilderPanelAction.PREVIOUS_PAGE -> selectionPanelPages.compute(player.uniqueId) { _, page -> (page ?: 0) - 1 }
-            BuilderPanelAction.NEXT_PAGE -> selectionPanelPages.compute(player.uniqueId) { _, page -> (page ?: 0) + 1 }
-            BuilderPanelAction.FILL -> openFillMaterialPicker(player)
-            BuilderPanelAction.REPLACE -> openReplaceMaterialPicker(player)
-            BuilderPanelAction.COPY -> handleBuilder(player, arrayOf("copy"))
-            BuilderPanelAction.PASTE -> handleBuilder(player, arrayOf("paste"))
-            BuilderPanelAction.DECONSTRUCT -> handleBuilder(player, arrayOf("deconstruct"))
-            BuilderPanelAction.DISCONNECT -> handleBuilder(player, arrayOf("disconnect"))
-            BuilderPanelAction.CROWN -> openSelectionCrownDialog(player)
-            BuilderPanelAction.DRAFT -> {
-                requestPlanning(player, { current -> clipboardController.copy(player, current) }) { books.createSelectionDraft(player) }
+    internal fun onSelectionPanelAction(player: Player, action: BuilderPanelAction) {
+        val diagnostic = beginAction(player, "selection_${action.name.lowercase(Locale.ROOT)}")
+        runBuilderAction(player, diagnostic = diagnostic) {
+            val current = selectionPanelView(player) ?: return@runBuilderAction diagnostic.outcome("ignored", "stale_context")
+            if (action !in current.actions) return@runBuilderAction diagnostic.outcome("ignored", "action_unavailable")
+            ensureAvailable(player)
+            when (action) {
+                BuilderPanelAction.PREVIOUS_PAGE -> selectionPanelPages.compute(player.uniqueId) { _, page -> (page ?: 0) - 1 }
+                BuilderPanelAction.NEXT_PAGE -> selectionPanelPages.compute(player.uniqueId) { _, page -> (page ?: 0) + 1 }
+                BuilderPanelAction.FILL -> openFillMaterialPicker(player)
+                BuilderPanelAction.REPLACE -> openReplaceMaterialPicker(player)
+                BuilderPanelAction.COPY -> handleBuilder(player, arrayOf("copy"))
+                BuilderPanelAction.PASTE -> handleBuilder(player, arrayOf("paste"))
+                BuilderPanelAction.DECONSTRUCT -> handleBuilder(player, arrayOf("deconstruct"))
+                BuilderPanelAction.DISCONNECT -> handleBuilder(player, arrayOf("disconnect"))
+                BuilderPanelAction.CROWN -> openSelectionCrownDialog(player)
+                BuilderPanelAction.DRAFT -> {
+                    requestPlanning(player, { current -> clipboardController.copy(player, current) }) { books.createSelectionDraft(player) }
+                }
+                BuilderPanelAction.CLEAR -> handleBuilder(player, arrayOf("clear"))
+                BuilderPanelAction.UNDO -> handleBuilder(player, arrayOf("undo"))
+                BuilderPanelAction.CONFIRM -> handleBuilder(player, arrayOf("confirm"))
+                BuilderPanelAction.CANCEL -> if (materialScans.remove(player.uniqueId) == null) handleBuilder(player, arrayOf("cancel")) else Unit
+                BuilderPanelAction.ROTATE_LEFT -> handleBuilder(player, arrayOf("paste", "left"))
+                BuilderPanelAction.ROTATE_RIGHT -> handleBuilder(player, arrayOf("paste", "right"))
             }
-            BuilderPanelAction.CLEAR -> handleBuilder(player, arrayOf("clear"))
-            BuilderPanelAction.UNDO -> handleBuilder(player, arrayOf("undo"))
-            BuilderPanelAction.CONFIRM -> handleBuilder(player, arrayOf("confirm"))
-            BuilderPanelAction.CANCEL -> if (materialScans.remove(player.uniqueId) == null) handleBuilder(player, arrayOf("cancel")) else Unit
-            BuilderPanelAction.ROTATE_LEFT -> handleBuilder(player, arrayOf("paste", "left"))
-            BuilderPanelAction.ROTATE_RIGHT -> handleBuilder(player, arrayOf("paste", "right"))
         }
     }
 
@@ -1217,6 +1350,7 @@ internal class BuilderToolsRuntime(
     private fun openReplaceMaterialPicker(player: Player) {
         ensureFeaturePermission(player, BuilderFeature.REPLACE)
         val selection = requiredSelection(player)
+        val diagnostic = beginAction(player, "replace_material_scan")
         val id = player.uniqueId
         val token = Any()
         materialScans[id] = token
@@ -1235,8 +1369,15 @@ internal class BuilderToolsRuntime(
                 !positions.hasNext()
             }
         }.whenCompleteSync(taskScope) { _, failure ->
-            if (!materialScans.remove(id, token)) return@whenCompleteSync
-            if (failure != null) return@whenCompleteSync reportPlanningFailure(player, failure)
+            if (!materialScans.remove(id, token)) {
+                diagnostic.outcome("cancelled", "scan_superseded")
+                return@whenCompleteSync
+            }
+            if (failure != null) {
+                diagnostic.failed(failure)
+                return@whenCompleteSync reportPlanningFailure(player, failure)
+            }
+            diagnostic.outcome("ready", "material_choices_scanned")
             materialPicker?.open(player, "material-picker.replace-source-title", materials.toList(),
                 { materialPickerCurrent(player, selection, BuilderFeature.REPLACE) },
                 { source ->
@@ -1407,7 +1548,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun ensureOperationalContext(player: Player) {
-        if (player.uniqueId in constructionStarts) throw BuilderUserFailure("errors.busy")
+        if (player.uniqueId in constructionStarts) throw BuilderUserFailure("errors.busy", diagnostic = BuilderActionRejection("construction_start_pending"))
         if (recovering || constructionRecovering || recoveryBlocked || books.health().recoveryBlocked || playerRecoveries.contains(player.uniqueId)) {
             throw BuilderUserFailure("errors.recovering")
         }
@@ -1758,6 +1899,7 @@ internal class BuilderToolsRuntime(
         failed: (Throwable?) -> Unit = { failure -> reportPlanningFailure(player, failure) },
         ready: (T) -> Unit,
     ) {
+        val diagnostic = beginAction(player, "plan_prepare")
         val world = player.world.uid
         val mode = player.gameMode
         val slot = player.inventory.heldItemSlot
@@ -1769,7 +1911,10 @@ internal class BuilderToolsRuntime(
                 requireCurrentBuilderPlanning(::current)
                 value
             } }
-        }, failed = failed, ready = { value -> runBuilderAction(player) { ready(value) } })
+        }, failed = { failure -> diagnostic.failed(failure); failed(failure) }, ready = { value ->
+            if (value is BuilderPlan) diagnostic.operation(value.id)
+            runBuilderAction(player, diagnostic = diagnostic) { ready(value) }
+        })
     }
 
     private fun startPlanning(
@@ -1787,7 +1932,6 @@ internal class BuilderToolsRuntime(
             is CancellationException -> Unit
             is BuilderUserFailure -> send(player, failure.path, failure.values)
             else -> {
-                warn("Builder planning failed for {}: {}", player.name, failure.message)
                 send(player, "errors.plan-failed")
             }
         }
@@ -1850,7 +1994,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun preflightPlan(player: Player, plan: BuilderPlan) {
-        if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
+        if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy", diagnostic = BuilderActionRejection("player_lock"))
         val used = hourlyUsage(player.uniqueId, System.currentTimeMillis())
         if (plan.kind.usesHourlyLimit() && used + plan.changes.size > hourlyLimit(player)) {
             throw BuilderUserFailure("errors.hourly-limit")
@@ -1891,13 +2035,18 @@ internal class BuilderToolsRuntime(
         player: Player, site: ConstructionSite, located: BuilderLocatedBook,
         announce: Boolean = true, complete: (Boolean) -> Unit,
     ) {
-        if (site.transforming) return complete(false)
+        val diagnostic = beginAction(player, "book_prepare", site = site)
+        if (site.transforming) {
+            diagnostic.outcome("rejected", "transform_pending")
+            return complete(false)
+        }
         ensureBuildBookAvailable(player)
         bookRequests.run(player, located,
             request = { current -> planBuildBook(player, site, located.item, current) },
-            failed = { failure -> reportPlanningFailure(player, failure); complete(false) },
+            failed = { failure -> diagnostic.failed(failure); reportPlanningFailure(player, failure); complete(false) },
             ready = { planned ->
-                val succeeded = runBookPreviewAction(player) {
+                diagnostic.operation(planned.plan.id)
+                val succeeded = runBookPreviewAction(player, diagnostic = diagnostic) {
                     ensureBuildBookAvailable(player)
                     site.cancelSilently()
                     plannedConstructionProjects[planned.plan.id] = planned.project
@@ -1918,7 +2067,12 @@ internal class BuilderToolsRuntime(
     private fun adjustBookPreview(
         player: Player,
         adjustment: ru.arc.autobuild.BuildBookPreviewAdjustment,
-    ): ConstructionSite? = runBookPreviewAction(player) {
+    ): ConstructionSite? = runBookPreviewAction(player, "book_preview_adjust_${when (adjustment) {
+        is ru.arc.autobuild.BuildBookPreviewAdjustment.Move -> adjustment.direction.name.lowercase(Locale.ROOT)
+        is ru.arc.autobuild.BuildBookPreviewAdjustment.Rotate -> "rotate_${adjustment.delta}"
+        ru.arc.autobuild.BuildBookPreviewAdjustment.ToggleMirror -> "mirror"
+        ru.arc.autobuild.BuildBookPreviewAdjustment.Reset -> "reset"
+    }}") {
         val site = BuildingManager.pending(player.uniqueId) ?: throw BuilderUserFailure("errors.expired")
         requireMatchingPreviewBook(player, site)
         BuildingManager.adjustPendingPlacement(player, adjustment, System.currentTimeMillis())
@@ -1930,20 +2084,26 @@ internal class BuilderToolsRuntime(
         site: ConstructionSite,
         complete: (BuilderBookPreviewConfirmation?) -> Unit,
     ) {
-        if (site.transforming) return complete(null)
-        val located = runBookPreviewAction(player) { requireMatchingPreviewBook(player, site) }
+        val diagnostic = beginAction(player, "book_confirmation_prepare", site = site)
+        if (site.transforming) {
+            diagnostic.outcome("rejected", "transform_pending")
+            return complete(null)
+        }
+        val located = runBookPreviewAction(player, diagnostic = diagnostic) { requireMatchingPreviewBook(player, site) }
             ?: return complete(null)
         val data = located.data
         if (data.draft) {
             try {
                 books.preparePreviewActivation(player, located) { blueprint ->
+                    diagnostic.outcome(if (blueprint == null) "rejected" else "quoted", if (blueprint == null) "activation_quote_unavailable" else "activation_quote_ready")
                     complete(blueprint?.toPreviewConfirmation())
                 }
             } catch (failure: BuilderUserFailure) {
+                diagnostic.failed(failure)
                 send(player, failure.path, failure.values)
                 complete(null)
             } catch (failure: Throwable) {
-                error("Builder-book preview activation quote failed for ${player.name}", failure)
+                diagnostic.failed(failure)
                 send(player, "book.failed")
                 complete(null)
             }
@@ -1952,6 +2112,7 @@ internal class BuilderToolsRuntime(
         requestBook(player, located, data, failed = { complete(null) }) { building ->
             if (BuildingManager.pending(player.uniqueId) !== site || site.transforming ||
                 building.schematicSha256 != site.building.schematicSha256) {
+                diagnostic.outcome("rejected", "book_source_changed")
                 send(player, "book.source-changed")
                 complete(null)
             } else {
@@ -1982,15 +2143,23 @@ internal class BuilderToolsRuntime(
     }
 
     private fun confirmBookPreview(player: Player, complete: (Boolean) -> Unit) {
-        val current = currentBookPreviewConfirmation(player) ?: return complete(false)
-        if (!current.cooldownRemaining.isZero) return complete(false)
+        val diagnostic = beginAction(player, "book_preview_confirm")
+        fun rejected(reason: String) { diagnostic.outcome("rejected", reason); complete(false) }
+        val current = currentBookPreviewConfirmation(player) ?: return rejected("confirmation_missing")
+        if (!current.cooldownRemaining.isZero) return rejected("book_application_cooldown")
         if (current.kind == BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION) {
-            val site = BuildingManager.pending(player.uniqueId) ?: return complete(false)
-            books.confirmPreviewActivation(player, site.bookData, complete)
+            val site = BuildingManager.pending(player.uniqueId) ?: return rejected("preview_missing")
+            books.confirmPreviewActivation(player, site.bookData) { accepted ->
+                diagnostic.outcome(if (accepted) "accepted" else "rejected", "activation_callback")
+                complete(accepted)
+            }
             return
         }
-        runBookPreviewAction(player) {
-            confirm(player, buildBook = true, complete = complete)
+        runBookPreviewAction(player, diagnostic = diagnostic) {
+            confirm(player, buildBook = true, complete = { accepted ->
+                diagnostic.outcome(if (accepted) "submitted" else "rejected", "construction_confirmation_callback")
+                complete(accepted)
+            })
             true
         } ?: complete(false)
     }
@@ -2009,7 +2178,7 @@ internal class BuilderToolsRuntime(
     private fun restoreBookPreview(
         player: Player,
         snapshot: ru.arc.autobuild.ConstructionSiteSnapshot,
-    ): ConstructionSite? = runBookPreviewAction(player) {
+    ): ConstructionSite? = runBookPreviewAction(player, "book_preview_restore") {
         requireMatchingPreviewBook(player, snapshot.bookData)
         books.cancelPreviewActivation(player.uniqueId)
         discardPreparedBookPlan(player.uniqueId)
@@ -2023,17 +2192,24 @@ internal class BuilderToolsRuntime(
     private fun requireMatchingPreviewBook(player: Player, expected: BuildBookData): BuilderLocatedBook =
         BuilderBookInventoryLocator.find(player, expected) { _, item, raw -> item to raw } ?: throw BuilderUserFailure("book.missing")
 
-    private fun <T> runBookPreviewAction(player: Player, action: () -> T): T? = try {
-        action()
+    private fun <T> runBookPreviewAction(
+        player: Player,
+        actionName: String = "book_preview",
+        site: ConstructionSite? = BuildingManager.pending(player.uniqueId),
+        diagnostic: BuilderActionDiagnostics.Attempt = beginAction(player, actionName, site = site),
+        action: () -> T,
+    ): T? = try {
+        action().also { if (!diagnostic.outcomeRecorded) diagnostic.outcome("accepted", "handler_returned") }
     } catch (failure: BuilderUserFailure) {
+        diagnostic.failed(failure)
         send(player, failure.path, failure.values)
         null
     } catch (failure: IllegalArgumentException) {
-        warn("Builder-book preview action was rejected for {}: {}", player.name, failure.message)
+        diagnostic.failed(failure)
         send(player, "book.failed")
         null
     } catch (failure: Throwable) {
-        error("Builder-book preview action failed for ${player.name}", failure)
+        diagnostic.failed(failure)
         send(player, "book.failed")
         null
     }
@@ -2107,7 +2283,7 @@ internal class BuilderToolsRuntime(
                 immediateToolDamage,
             )
         ) {
-            throw BuilderUserFailure("errors.inventory")
+            throw BuilderUserFailure("errors.inventory", diagnostic = BuilderActionRejection("inventory_exchange_unavailable"))
         }
         if (construction != null) {
             if (player.uniqueId in constructionStarts || constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
@@ -2179,38 +2355,50 @@ internal class BuilderToolsRuntime(
         planned: BuilderConstructionProjectRecord,
         plannedMode: GameMode,
     ) {
-        ensureBookApplicationCooldown(player)
-        plannedConstructionProjects.remove(planned.projectId)
-        if (player.gameMode != plannedMode) {
-            books.releasePlanReservation(planned.plan)
-            throw BuilderUserFailure("errors.game-mode-changed")
-        }
-        if (player.uniqueId in constructionStarts || constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
-            books.releasePlanReservation(planned.plan)
-            throw BuilderUserFailure("errors.busy")
-        }
-        constructionStarts.add(player.uniqueId)
-        val location = player.location
-        val x = location.x
-        val z = location.z
-        planningTasks.compute {
-            planned.copy(sitePanelFace = BuilderConstructionSiteDisplayLayout.nearestFace(planned, x, z))
-        }.thenCompose { prepared -> planningTasks.onMain {
-            lockConstructionAsync(prepared) { !closed && player.isOnline && player.gameMode == plannedMode }
-                .thenApply { locked -> prepared to locked }
-        }.thenCompose { it } }.whenCompleteSync(taskScope) { result, failure ->
-            if (failure != null || result?.second != true) {
-                constructionStarts.remove(player.uniqueId)
+        val diagnostic = beginAction(player, "construction_start", site = null, project = planned)
+        try {
+            ensureBookApplicationCooldown(player)
+            plannedConstructionProjects.remove(planned.projectId)
+            if (player.gameMode != plannedMode) {
                 books.releasePlanReservation(planned.plan)
-                unlockConstruction(planned)
-                reportPlanningFailure(player, failure ?: BuilderUserFailure("errors.busy"))
-            } else {
-                runBookPreviewAction(player) { activateLockedConstruction(player, result.first) }
+                throw BuilderUserFailure("errors.game-mode-changed")
             }
+            if (player.uniqueId in constructionStarts || constructionProjects.values.any { it.playerId == player.uniqueId && !it.terminal }) {
+                books.releasePlanReservation(planned.plan)
+                throw BuilderUserFailure("errors.busy")
+            }
+            constructionStarts.add(player.uniqueId)
+            val location = player.location
+            val x = location.x
+            val z = location.z
+            planningTasks.compute {
+                planned.copy(sitePanelFace = BuilderConstructionSiteDisplayLayout.nearestFace(planned, x, z))
+            }.thenCompose { prepared -> planningTasks.onMain {
+                lockConstructionAsync(prepared) { !closed && player.isOnline && player.gameMode == plannedMode }
+                    .thenApply { locked -> prepared to locked }
+            }.thenCompose { it } }.whenCompleteSync(taskScope) { result, failure ->
+                if (failure != null || result?.second != true) {
+                    constructionStarts.remove(player.uniqueId)
+                    books.releasePlanReservation(planned.plan)
+                    unlockConstruction(planned)
+                    val rejected = failure ?: BuilderUserFailure("errors.busy", diagnostic = BuilderActionRejection("region_lock_unavailable"))
+                    diagnostic.failed(rejected)
+                    reportPlanningFailure(player, rejected)
+                } else {
+                    runBookPreviewAction(player, diagnostic = diagnostic) { activateLockedConstruction(player, result.first, diagnostic) }
+                }
+            }
+        } catch (failure: Throwable) {
+            diagnostic.failed(failure)
+            throw failure
         }
     }
 
-    private fun activateLockedConstruction(player: Player, prepared: BuilderConstructionProjectRecord) {
+    private fun activateLockedConstruction(
+        player: Player,
+        prepared: BuilderConstructionProjectRecord,
+        diagnostic: BuilderActionDiagnostics.Attempt,
+    ) {
         // Capture the receipt on the server thread, but perform validation, encoding and
         // durable I/O on the storage executor. No inventory mutation precedes the commit.
         val activation = try {
@@ -2227,7 +2415,7 @@ internal class BuilderToolsRuntime(
             constructionStarts.remove(player.uniqueId)
             books.releasePlanReservation(prepared.plan)
             unlockConstruction(prepared)
-            error("Builder construction activation failed for ${prepared.projectId}", failure)
+            diagnostic.failed(failure)
             throw BuilderUserFailure("book.failed")
         }
         constructionWrites.add(activation.projectId)
@@ -2239,12 +2427,13 @@ internal class BuilderToolsRuntime(
                 if (failure != null || durable == null) {
                     if (failure is BuilderConstructionProjectUnknownOutcomeException) {
                         recoveryBlocked = true
-                        error("Builder construction initial durable commit has an unknown outcome for ${activation.projectId}", failure)
+                        diagnostic.failed(failure)
+                        diagnostic.outcome("recovery_required", "initial_commit_unknown")
                         if (player.isOnline) send(player, "construction.recovery-required")
                     } else {
                         books.releasePlanReservation(activation.plan)
                         unlockConstruction(activation)
-                        error("Builder construction activation failed for ${activation.projectId}", failure)
+                        diagnostic.failed(failure ?: IllegalStateException("Construction initial commit returned no record"))
                         if (player.isOnline) send(player, "book.failed")
                     }
                     return@writeAsync
@@ -2253,8 +2442,10 @@ internal class BuilderToolsRuntime(
                 // asynchronous PREPARED -> ACTIVE commit, including disconnect recovery.
                 constructionProjects[durable.projectId] = durable
                 constructionSiteDisplays.upsert(durable)
+                diagnostic.outcome("durable_prepared", "initial_commit_confirmed", "state" to durable.state)
             },
         )
+        if (!diagnostic.outcomeRecorded) diagnostic.outcome("submitted", "initial_commit_pending")
     }
 
     private fun loadConstructionProjects() {
@@ -2296,7 +2487,7 @@ internal class BuilderToolsRuntime(
                     } else if (!waiting) {
                         val (loaded, normalized) = records[index]
                         val resumed = if (loaded.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) {
-                            BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(normalized, System.currentTimeMillis(), constructionPort)
+                            BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(normalized, System.currentTimeMillis(), constructionPortFor(normalized))
                         } else normalized
                         if (resumed == loaded) durable = loaded else {
                             waiting = true
@@ -2375,12 +2566,13 @@ internal class BuilderToolsRuntime(
             var target: BuilderConstructionProjectRecord? = null
             var ordinary = false
             var leased = false
+            val observedPort = constructionPortFor(expected)
             fun current() = !closed && constructionProjects[expected.projectId] === expected
             planningTasks.capture(::current) {
                 leased = constructionPlayerLeases.acquire(expected.projectId, expected.playerId, expected.pendingResourceMutation)
                 if (leased) {
                     if (expected.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) {
-                        target = BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(expected, now, constructionPort).takeUnless { it == expected }
+                        target = BuilderConstructionRecoveryPolicy.resumeAppliedNoExchangeStep(expected, now, observedPort).takeUnless { it == expected }
                     } else {
                         target = constructionPauseRequests.pauseTarget(expected, now)
                             ?: constructionInstantRequests[expected.projectId]?.let { BuilderInstantConstruction.prepare(expected, it, now) }
@@ -2389,7 +2581,7 @@ internal class BuilderToolsRuntime(
                 }
                 true
             }.thenCompose {
-                if (leased && ordinary) BuilderConstructionProjectController.tickAsync(expected, now, constructionPort, maximumBlocks, planningTasks, ::current)
+                if (leased && ordinary) BuilderConstructionProjectController.tickAsync(expected, now, observedPort, maximumBlocks, planningTasks, ::current)
                 else CompletableFuture.completedFuture(target)
             }.whenCompleteSync(taskScope) { next, failure ->
                 if (failure != null || next == null) {
@@ -2510,6 +2702,21 @@ internal class BuilderToolsRuntime(
         current: BuilderConstructionProjectRecord,
     ) {
         if (previous.state == current.state) return
+        val diagnosticState = when {
+            previous.state == BuilderConstructionProjectState.PREPARED && current.state == BuilderConstructionProjectState.ACTIVE -> "active"
+            current.state in setOf(
+                BuilderConstructionProjectState.WAITING_MATERIALS, BuilderConstructionProjectState.WAITING_OUTPUT_SPACE,
+                BuilderConstructionProjectState.CANCELLED, BuilderConstructionProjectState.RECOVERY_REQUIRED,
+                BuilderConstructionProjectState.COMPLETED,
+            ) -> current.state.name.lowercase(Locale.ROOT)
+            else -> null
+        }
+        if (diagnosticState != null) {
+            val position = current.steps.getOrNull(current.cursor)?.change?.position
+                ?: current.siteAnchor ?: current.plan.changes.first().position
+            actionDiagnostics.constructionTransition(constructionActionContext(current, "construction_state", position), diagnosticState, current.cursor)
+        }
+        if (current.terminal) actionDiagnostics.forgetConstruction(current.projectId)
         if (previous.state == BuilderConstructionProjectState.PREPARED && current.state == BuilderConstructionProjectState.ACTIVE) {
             BuilderOnboardingProgressBridge.started(current)
         }
@@ -3071,24 +3278,41 @@ internal class BuilderToolsRuntime(
         construction: BuilderConstructionProjectRecord,
     ): Boolean = player.uniqueId == construction.playerId || player.hasPermission(CONSTRUCTION_ADMIN_PERMISSION)
 
+    private fun openConstructionMenu(player: Player, project: BuilderConstructionProjectRecord, source: String) =
+        runBuilderAction(player, "construction_menu_$source", beginAction(player, "construction_menu_$source", site = null, project = project)) {
+            constructionMenus.open(player, project)
+        }
+
     private fun requestConstructionCancelled(player: Player, projectId: UUID): Boolean {
-        val project = constructionProjects[projectId] ?: return false
-        if (!canControlConstruction(player, project) || recoveryBlocked || projectId in constructionInstantRequests) return false
-        if (!constructionPauseRequests.requestCancel(project, player.uniqueId)) return false
+        val diagnostic = beginAction(player, "construction_cancel", site = null, project = constructionProjects[projectId], requestedOperationId = projectId)
+        fun rejected(reason: String): Boolean { diagnostic.outcome("rejected", reason); return false }
+        val project = constructionProjects[projectId] ?: return rejected("project_missing")
+        if (!canControlConstruction(player, project)) return rejected("not_owner_or_admin")
+        if (recoveryBlocked) return rejected("recovery_blocked")
+        if (projectId in constructionInstantRequests) return rejected("instant_request_pending")
+        if (!constructionPauseRequests.requestCancel(project, player.uniqueId)) return rejected("cancellation_unavailable")
         send(player, "construction.cancel-requested")
+        diagnostic.outcome("accepted", "cancel_requested")
         return true
     }
 
     private fun requestConstructionPaused(player: Player, projectId: UUID, pause: Boolean): Boolean {
+        val diagnostic = beginAction(player, if (pause) "construction_pause" else "construction_resume", site = null,
+            project = constructionProjects[projectId], requestedOperationId = projectId)
+        fun rejected(reason: String): Boolean { diagnostic.outcome("rejected", reason); return false }
         val expected = constructionProjects[projectId]?.takeUnless(BuilderConstructionProjectRecord::terminal)
-            ?: return false
-        if (!canControlConstruction(player, expected) || expected.instantBuildRequestedBy != null) return false
-        if (pause) return constructionPauseRequests.request(expected, player.uniqueId)
-        if (expected.state != BuilderConstructionProjectState.PAUSED || !constructionWrites.add(projectId)) return false
+            ?: return rejected("project_missing_or_terminal")
+        if (!canControlConstruction(player, expected)) return rejected("not_owner_or_admin")
+        if (expected.instantBuildRequestedBy != null) return rejected("instant_build_active")
+        if (pause) return constructionPauseRequests.request(expected, player.uniqueId).also {
+            diagnostic.outcome(if (it) "accepted" else "rejected", if (it) "pause_requested" else "pause_unavailable")
+        }
+        if (expected.state != BuilderConstructionProjectState.PAUSED) return rejected("project_not_paused")
+        if (!constructionWrites.add(projectId)) return rejected("project_write_pending")
         val target = runCatching { expected.resumed(System.currentTimeMillis()) }.getOrNull()
         if (target == null) {
             constructionWrites.remove(projectId)
-            return false
+            return rejected("resume_transition_unavailable")
         }
         writeAsync(
             action = { constructionStore.transition(expected, target) },
@@ -3096,13 +3320,14 @@ internal class BuilderToolsRuntime(
                 constructionWrites.remove(projectId)
                 if (failure != null || durable == null) {
                     constructionInstantRequests.remove(projectId)
-                    error("Builder construction pause transition failed for $projectId", failure)
+                    diagnostic.failed(failure ?: IllegalStateException("Construction resume commit returned no record"))
                     constructionMenus.refreshProject(projectId)
                     return@writeAsync
                 }
                 constructionProjects[projectId] = durable
                 constructionSiteDisplays.upsert(durable)
                 constructionMenus.refreshProject(projectId)
+                diagnostic.outcome("durable", "resume_transition_committed", "cursor" to durable.cursor)
                 info(
                     debugLine.line(
                         "event" to "construction_resumed",
@@ -3114,14 +3339,17 @@ internal class BuilderToolsRuntime(
                 continueInstantConstruction(durable)
             },
         )
+        if (!diagnostic.outcomeRecorded) diagnostic.outcome("accepted", "resume_requested")
         return true
     }
 
     private fun requestInstantConstruction(player: Player, projectId: UUID): Boolean {
-        if (!player.hasPermission(CONSTRUCTION_ADMIN_PERMISSION)) return false
+        val diagnostic = beginAction(player, "construction_instant", site = null, project = constructionProjects[projectId], requestedOperationId = projectId)
+        fun rejected(reason: String): Boolean { diagnostic.outcome("rejected", reason); return false }
+        if (!player.hasPermission(CONSTRUCTION_ADMIN_PERMISSION)) return rejected("admin_permission_required")
         val project = constructionProjects[projectId]?.takeUnless(BuilderConstructionProjectRecord::terminal)
-            ?: return false
-        if (project.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) return false
+            ?: return rejected("project_missing_or_terminal")
+        if (project.state == BuilderConstructionProjectState.RECOVERY_REQUIRED) return rejected("recovery_required")
         constructionPauseRequests.complete(projectId)
         constructionInstantRequests[projectId] = player.uniqueId
         val accepted = if (project.state == BuilderConstructionProjectState.PAUSED) {
@@ -3131,6 +3359,7 @@ internal class BuilderToolsRuntime(
         }
         if (!accepted) constructionInstantRequests -= projectId
         if (accepted) send(player, "construction.instant-started")
+        diagnostic.outcome(if (accepted) "accepted" else "rejected", if (accepted) "instant_requested" else "scheduling_unavailable")
         return accepted
     }
 
@@ -3196,23 +3425,30 @@ internal class BuilderToolsRuntime(
     private fun ensureMutable(player: Player, block: Block, placing: Material? = null) {
         ensureInRangeAndLoaded(player, block)
         ensureProtected(player, block, placing)
-        if (!block.world.worldBorder.isInside(block.location)) throw BuilderUserFailure("errors.protection")
+        if (!block.world.worldBorder.isInside(block.location)) throw blockRejection("errors.protection", "world_border", block)
     }
 
     private fun ensureInRangeAndLoaded(player: Player, block: Block) {
-        if (!block.world.isChunkLoaded(block.x shr 4, block.z shr 4)) throw BuilderUserFailure("errors.chunk-unloaded")
+        if (!block.world.isChunkLoaded(block.x shr 4, block.z shr 4)) throw blockRejection("errors.chunk-unloaded", "chunk_unloaded", block)
         if (player.world.uid != block.world.uid || player.location.distanceSquared(block.location.clone().add(0.5, 0.5, 0.5)) > capturedMaximumRange * capturedMaximumRange) {
-            throw BuilderUserFailure("errors.too-far")
+            throw blockRejection("errors.too-far", "out_of_range", block)
         }
     }
 
     private fun ensureProtected(player: Player, block: Block, placing: Material? = null) {
-        if (PaperBlockProtection.isProtected(block)) throw BuilderUserFailure("errors.protection")
+        if (PaperBlockProtection.isProtected(block)) throw blockRejection("errors.protection", "block_protection", block)
         val lands = HookRegistry.landsHook
-        if ((lands != null && !lands.canModify(player, block, placing)) || (lands == null && capturedRequireLands)) {
-            throw BuilderUserFailure("errors.protection")
+        if (lands != null && !lands.canModify(player, block, placing)) {
+            throw blockRejection("errors.protection", "lands_build_permission", block)
+        }
+        if (lands == null && capturedRequireLands) {
+            throw blockRejection("errors.protection", "lands_unavailable", block)
         }
     }
+
+    private fun blockRejection(path: String, reason: String, block: Block) = BuilderUserFailure(
+        path, diagnostic = BuilderActionRejection(reason, BuilderActionTarget.at(block.location)),
+    )
 
     private fun block(world: World, position: BuilderBlockPos): Block = world.getBlockAt(position.x, position.y, position.z)
 
@@ -3533,6 +3769,14 @@ internal class BuilderToolsRuntime(
         val player = event.player
         if (operationLocks.isPlayerLocked(player.uniqueId)) {
             event.isCancelled = true
+            val held = event.item
+            if (held != null && event.hand == EquipmentSlot.HAND) {
+                val data = BuildBookCodec.read(held)
+                if (data != null || isSelector(held)) {
+                    beginAction(player, if (data != null) "book_place" else "selection_click", event.clickedBlock?.location, data = data)
+                        .outcome("rejected", "player_lock")
+                }
+            }
             return
         }
         val item = event.item ?: return
@@ -3563,10 +3807,8 @@ internal class BuilderToolsRuntime(
             else -> return
         }
         event.isCancelled = true
-        try {
+        runBuilderAction(player, diagnostic = beginAction(player, if (first) "selection_first" else "selection_second", clicked.location, site = null)) {
             setPosition(player, clicked.location, first)
-        } catch (failure: BuilderUserFailure) {
-            send(player, failure.path, failure.values)
         }
     }
 
@@ -3575,14 +3817,18 @@ internal class BuilderToolsRuntime(
         source: BuilderLocatedBook,
         data: BuildBookData = source.data,
         failed: () -> Unit = {},
+        diagnostic: BuilderActionDiagnostics.Attempt = beginAction(player, "book_schematic", data = data),
         ready: (Building) -> Unit,
     ) {
         val definition = if (data.playerCreated) null else systemBuildBookResolver(data)
-        if (!data.playerCreated && definition == null) { send(player, "book.invalid"); failed(); return }
+        if (!data.playerCreated && definition == null) {
+            diagnostic.failed(BuilderUserFailure("book.invalid"))
+            send(player, "book.invalid"); failed(); return
+        }
         bookRequests.run(player, source,
             request = { loadBuilding(definition?.buildingId ?: data.buildingId, data.schematicSha256.takeIf { data.playerCreated }) },
             failed = { failure ->
-                if (failure != null) warn("Builder schematic request rejected: {}", failure.message)
+                diagnostic.failed(failure)
                 if (player.isOnline) send(player, if (failure == null) "book.source-changed" else "book.invalid")
                 failed()
             },
@@ -3591,12 +3837,14 @@ internal class BuilderToolsRuntime(
                     ensureAvailable(player)
                     if (building.volume > config.maxScanVolume) throw BuilderUserFailure("errors.selection-too-large")
                     if (data.playerCreated) books.verifySchematic(data, building)
+                    diagnostic.outcome("loaded", "schematic_loaded")
                     ready(building)
                 } catch (failure: BuilderUserFailure) {
+                    diagnostic.failed(failure)
                     send(player, failure.path, failure.values)
                     failed()
                 } catch (failure: Throwable) {
-                    error("Builder schematic continuation failed", failure)
+                    diagnostic.failed(failure)
                     send(player, "book.failed")
                     failed()
                 }
@@ -3612,13 +3860,16 @@ internal class BuilderToolsRuntime(
         loaded: Building? = null,
         requestedSneaking: Boolean = player.isSneaking,
         requestedRotation: Int = BuildingManager.rotationFromYaw(player.yaw),
+        diagnostic: BuilderActionDiagnostics.Attempt = beginAction(player, "book_place", clickedLocation, data = data),
     ) {
         try {
             ensureAvailable(player)
             if (loaded == null) {
                 val anchor = clickedLocation?.clone()
                 val source = BuilderLocatedBook(player.inventory.heldItemSlot, item.clone(), data)
-                requestBook(player, source) { building -> handleBookInteraction(player, source.item, data, anchor, building, requestedSneaking, requestedRotation) }
+                requestBook(player, source, diagnostic = diagnostic) { building ->
+                    handleBookInteraction(player, source.item, data, anchor, building, requestedSneaking, requestedRotation, diagnostic)
+                }
                 return
             }
             val (effectiveItem, effectiveData) = canonicalBook(player, item, data, loaded)
@@ -3629,6 +3880,7 @@ internal class BuilderToolsRuntime(
                 } else {
                     BuildBookEditorGui.open(player, ::prepareBookCopy)
                 }
+                diagnostic.outcome("opened", "book_selector_or_editor")
                 return
             }
             val current = BuildingManager.pending(player.uniqueId)
@@ -3655,6 +3907,7 @@ internal class BuilderToolsRuntime(
                         rotation = requestedRotation,
                     )
                     BuilderOnboardingProgressBridge.opened(player.uniqueId, opened.centerBlock)
+                    diagnostic.outcome("opened", "book_preview", "opened_preview" to "${opened.player.uniqueId}:${opened.expiresAtMillis}")
                     if (current?.isExactOpenPreview(player, effectiveData) != true) {
                         send(
                             player,
@@ -3672,9 +3925,10 @@ internal class BuilderToolsRuntime(
                 BuilderBookInteractionDecision.REQUIRE_PREVIEW -> throw BuilderUserFailure("book.preview-required")
             }
         } catch (failure: BuilderUserFailure) {
+            diagnostic.failed(failure)
             send(player, failure.path, failure.values)
         } catch (failure: Throwable) {
-            error("Builder-book interaction failed for ${player.name}", failure)
+            diagnostic.failed(failure)
             send(player, "book.failed")
         }
     }
@@ -3900,6 +4154,7 @@ internal class BuilderToolsRuntime(
         panelPlanSummaries.clear()
         selectionUndoAvailable.clear()
         selectionPanelPages.clear()
+        actionDiagnostics.clear()
         attempt { crown.close() }
         attempt { previews.close() }
         operationLocks.operations().forEach { operation -> attempt {

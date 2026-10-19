@@ -151,13 +151,14 @@ class BuilderWorldPlaqueTest : StringSpec({
             mockk<org.bukkit.block.Block> { every { collisionShape.boundingBoxes } returns boxes }
         }
         val origin = BuilderBlockPos(world.uid, 0, 64, 0)
-        val occupied = listOf(BuilderBlockPos(world.uid, -3, 64, -2), BuilderBlockPos(world.uid, 3, 70, 1))
+        val occupied = listOf(-2, 2).flatMap { x -> (65..69).map { y -> BuilderBlockPos(world.uid, x, y, 1) } }
         val columns = listOf(BoundingBox(-2.0, 65.0, 1.0, -1.0, 70.0, 2.0), BoundingBox(2.0, 65.0, 1.0, 3.0, 70.0, 2.0))
         val content = Component.text("Настроить постройку\nБерёзовый коттедж\nПКМ — открыть меню")
         fun location(panel: BuilderSitePanelPlacement) = Location(world, panel.x, panel.y, panel.z, panel.yaw, 0f)
         fun panel(blocks: List<BuilderBlockPos>) = BuilderConstructionSiteDisplayLayout.panelPlacement(
             listOf(origin), BuilderConstructionSitePanelFace.MAX_Z, 2.6, .4,
             occupiedPositions = blocks, panelWidth = BuilderWorldPlaque.visualWidth(180),
+            panelHeight = BuilderWorldPlaque.visualHeight(content, 180),
         )
         val old = location(panel(listOf(origin)))
         val before = BuilderWorldPlaque.visualFootprint(old, content, 180)
@@ -179,7 +180,7 @@ class BuilderWorldPlaqueTest : StringSpec({
                 plaque.controls(Unit).controls.size shouldBe 4
                 plaque.controls(Unit).controls.forEach { it.nativeTarget!!.width shouldBe 2.35f }
                 realWall = true
-                val expanded = occupied.dropLast(1) + occupied.last().copy(z = 3)
+                val expanded = occupied.map { it.copy(z = 3) }
                 plaque.update(location(panel(expanded)), content)
                 // The old safe real-world pose at Z2.4 is now inside the enlarged ghost house.
                 // Even when the new anchor is blocked, Core must not retain that previous pose.
@@ -204,6 +205,30 @@ class BuilderWorldPlaqueTest : StringSpec({
                 "columns" to columns.map(::box), "before" to box(before.bounds), "after" to box(after.bounds),
             )))
         }
+    }
+
+    "a changed authored pose recalculates the nearest real clearance instead of retaining a far old escape" {
+        val h = BuilderPlaqueDisplays()
+        val world = clearPlaqueWorld()
+        var wallDepth = 2
+        every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers {
+            val boxes = if (secondArg<Int>() == 64 && thirdArg<Int>() in 0 until wallDepth)
+                listOf(BoundingBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)) else emptyList()
+            mockk<org.bukkit.block.Block> { every { collisionShape.boundingBoxes } returns boxes }
+        }
+        mockkStatic(Bukkit::class)
+        try {
+            every { Bukkit.isPrimaryThread() } returns true
+            BuilderWorldPlaque(h.owner, PaperSpatialSpace(), plaqueStyle(), SceneAudience.Public()).use { plaque ->
+                plaque.update(Location(world, .5, 64.8, .8), Component.text("Дом"))
+                h.texts.first().location.z shouldBe (2.05 plusOrMinus 1e-8)
+                wallDepth = 1
+                plaque.update(Location(world, .5, 64.8, 1.0), Component.text("Дом"))
+                h.texts.first().location.z shouldBe (1.25 plusOrMinus 1e-8)
+                PaperSpatialSpace().clear(world, plaque.controls(Unit).clearanceFootprints.single()) shouldBe true
+                h.texts.size shouldBe 2
+            }
+        } finally { unmockkStatic(Bukkit::class) }
     }
 
     "native text is bottom anchored and a supplementary glyph counts as one conservative wrapped line" {

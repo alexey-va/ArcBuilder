@@ -23,11 +23,15 @@ import ru.arc.autobuild.BuildBookPreviewMove
 import ru.arc.autobuild.ConstructionSite
 import ru.arc.autobuild.ConstructionSiteSnapshot
 import ru.arc.autobuild.SystemBuildBookDefinition
+import ru.arc.autobuild.schematicTestSnapshot
 import ru.arc.config.ConfigManager
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.paper.scene.PaperSpatialSpace
+import ru.arc.paper.api.ArcSchematicBlock
+import ru.arc.paper.api.ArcSchematicPoint
+import ru.arc.paper.api.ArcSchematicSnapshot
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
 import java.time.Duration
 import java.util.function.Consumer
@@ -35,6 +39,108 @@ import java.util.Locale
 import java.util.UUID
 
 class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
+    test("plaque occupancy coalesces bursts and preserves one worker through cancellation and reopening") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val world = paper.addSimpleWorld("async-plaque")
+                val player = paper.addPlayer("AsyncPlaqueOwner")
+                player.teleport(world.getBlockAt(10, 64, 20).location)
+                val site = previewSite(player, player.location, BuildBookData("house.schem", "Дом"))
+                val mainThread = Thread.currentThread()
+                var reads = 0
+                val scanned = mutableListOf<Int>()
+                fun snapshot(x: Int, fail: Boolean = false) = mockk<ArcSchematicSnapshot> {
+                    every { blocks() } answers {
+                        check(Thread.currentThread() !== mainThread)
+                        reads++
+                        scanned += x
+                        if (fail) error("Obsolete schematic calculation failed")
+                        listOf(ArcSchematicBlock(ArcSchematicPoint(x, 2, 0), "minecraft:birch_log", false, false))
+                    }
+                }
+                var view = snapshot(-2)
+                every { site.view } answers { view }
+                val tasks = QueuedBuilderPlanningTasks()
+                val packet = BuilderPlaqueDisplays()
+                val host = PreviewHost(site, BuilderBookPreviewConfirmation(
+                    BuilderBookPreviewConfirmationKind.CONSTRUCTION, 1, "Дом", Duration.ZERO, emptyList(),
+                ))
+                previewPresentation(plugin, config, host, packet.owner, unblockedPlaqueSpace(), tasks).use { presentation ->
+                    presentation.retainConfirmation(site)
+                    presentation.refresh(site)
+                    packet.texts.size shouldBe 0
+                    reads shouldBe 0
+                    tasks.runComputations()
+                    tasks.tick()
+                    reads shouldBe 1
+                    packet.texts.map { it.location.x }.distinct() shouldBe listOf(7.6)
+                    presentation.refresh(site)
+                    tasks.runComputations()
+                    reads shouldBe 1
+
+                    view = snapshot(-5)
+                    presentation.refresh(site)
+                    repeat(20) { index ->
+                        view = snapshot(-6 - index)
+                        presentation.refresh(site)
+                    }
+                    view = snapshot(-3)
+                    presentation.refresh(site)
+                    // The old, complete scene remains until the latest model is ready.
+                    packet.texts.map { it.location.x }.distinct() shouldBe listOf(7.6)
+                    tasks.runComputations()
+                    scanned shouldBe listOf(-2, -5)
+                    tasks.tick()
+                    // Completing an obsolete pose starts only the newest queued source.
+                    packet.texts.map { it.location.x }.distinct() shouldBe listOf(7.6)
+                    tasks.runComputations()
+                    tasks.tick()
+                    scanned shouldBe listOf(-2, -5, -3)
+                    packet.texts.size shouldBe 2
+                    packet.texts.map { it.location.x }.distinct() shouldBe listOf(6.6)
+
+                    view = snapshot(-8, fail = true)
+                    presentation.refresh(site)
+                    presentation.clearPlayer(player.uniqueId)
+                    val reopened = previewSite(player, player.location, BuildBookData("house.schem", "Дом"))
+                    var reopenedView = snapshot(-4)
+                    every { reopened.view } answers { reopenedView }
+                    presentation.retainConfirmation(reopened)
+                    reopenedView = snapshot(-1)
+                    presentation.refresh(reopened)
+                    tasks.runComputations()
+                    scanned shouldBe listOf(-2, -5, -3, -8)
+                    tasks.tick()
+                    // Closing cannot free the old worker's slot or let its failure remove the new preview.
+                    packet.texts.size shouldBe 2
+                    packet.texts.forEach { io.mockk.verify(exactly = 1) { it.display.remove() } }
+                    tasks.runComputations()
+                    tasks.tick()
+                    scanned shouldBe listOf(-2, -5, -3, -8, -1)
+                    packet.texts.size shouldBe 4
+                    packet.texts.takeLast(2).map { it.location.x }.distinct() shouldBe listOf(8.6)
+
+                    reopenedView = snapshot(-9)
+                    presentation.refresh(reopened)
+                    reopenedView = snapshot(-10)
+                    presentation.refresh(reopened)
+                    presentation.close()
+                    tasks.runComputations()
+                    tasks.tick()
+                    tasks.runComputations()
+                    scanned shouldBe listOf(-2, -5, -3, -8, -1, -9)
+                    packet.texts.size shouldBe 4
+                    packet.texts.forEach { io.mockk.verify(exactly = 1) { it.display.remove() } }
+                }
+            } finally { ConfigManager.clear() }
+        }
+    }
+
     test("fixed plan retains a clickable world hologram until confirmation cleanup") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
@@ -47,9 +153,12 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 val player = paper.addPlayer("FixedPlanOwner").also { it.setLocale(Locale.forLanguageTag("ru-RU")) }
                 player.teleport(world.getBlockAt(10, 64, 20).location)
                 val site = previewSite(player, player.location, BuildBookData("house.schem", "Дом"))
-                every { site.corners } returns ConstructionSite.Corners(
-                    BlockVector3.at(-2, 0, -3), BlockVector3.at(3, 6, 5),
-                )
+                every { site.view } returns schematicTestSnapshot(listOf(
+                    ArcSchematicBlock(ArcSchematicPoint(-2, 2, 0), "minecraft:birch_log", false, false),
+                    ArcSchematicBlock(ArcSchematicPoint(3, 2, 5), "minecraft:birch_log", false, false),
+                    ArcSchematicBlock(ArcSchematicPoint(-6, 0, -3), "minecraft:dirt_path", false, false),
+                    ArcSchematicBlock(ArcSchematicPoint(-5, 8, 0), "minecraft:birch_stairs", false, false),
+                ))
                 val panelWorld = mockk<org.bukkit.World>(relaxed = true)
                 every { panelWorld.uid } returns world.uid
                 every { panelWorld.minHeight } returns -64
@@ -304,6 +413,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
                     viewRange = 64.0,
                     displays = mockk(relaxed = true),
+                    planningTasks = ImmediateBuilderPlanningTasks,
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     val placement = player.openInventory.topInventory
@@ -421,6 +531,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     panelGlowColor = Color.fromRGB(0xFF, 0xB1, 0x42),
                     viewRange = 64.0,
                     displays = mockk(relaxed = true),
+                    planningTasks = ImmediateBuilderPlanningTasks,
                 ).use { presentation ->
                     presentation.openPlacementForTest(player, site)
                     val originalMenu = player.openInventory.topInventory
@@ -578,6 +689,9 @@ private fun previewSite(
     every { site.player } returns player
     every { site.world } returns location.world!!
     every { site.adjustedCenter } returns location
+    every { site.view } returns schematicTestSnapshot(listOf(
+        ArcSchematicBlock(ArcSchematicPoint(0, 2, 0), "minecraft:birch_log", false, false),
+    ))
     every { site.corners } returns ConstructionSite.Corners(BlockVector3.ZERO, BlockVector3.ZERO)
     every { site.worldLocation(any()) } answers {
         val relative = firstArg<BlockVector3>()
@@ -598,6 +712,7 @@ private fun previewPresentation(
     host: BuilderBookPreviewPresentationHost,
     displays: PaperPacketDisplays = mockk(relaxed = true),
     space: PaperSpatialSpace = unblockedPlaqueSpace(),
+    planningTasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
 ): BuilderBookPreviewPresentation = BuilderBookPreviewPresentation(
     plugin = plugin,
     renderer = mockk(relaxed = true),
@@ -613,6 +728,7 @@ private fun previewPresentation(
     viewRange = 64.0,
     displays = displays,
     space = space,
+    planningTasks = planningTasks,
 )
 
 /** The mocked display owner has no tick; drive its Core participant's native capture explicitly. */

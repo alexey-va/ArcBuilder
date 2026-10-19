@@ -39,6 +39,13 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         )
 
         val model = BuilderConstructionSiteDisplayLayout.create(project, settings)
+        val clearing = project.steps.map { it.copy(change = it.change.copy(afterBlockData = "minecraft:air")) }
+        val clearedModel = BuilderConstructionSiteDisplayLayout.create(project.copy(
+            plan = project.plan.copy(changes = clearing.map { it.change }), steps = clearing,
+            siteAnchor = BuilderBlockPos(worldId, 0, 44, 0),
+        ), settings, 1.5)
+        clearedModel.panelZ shouldBe (1.75 plusOrMinus .00001)
+        clearedModel.edges shouldBe model.edges
         val anchored = project.copy(siteAnchor = BuilderBlockPos(worldId, 100, 64, 200))
         val restored = com.google.gson.Gson().fromJson(com.google.gson.Gson().toJson(anchored), BuilderConstructionProjectRecord::class.java).validated()
         restored.siteAnchor shouldBe anchored.siteAnchor
@@ -132,14 +139,15 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         panel.yaw shouldBe 180f
     }
 
-    "an offset origin places the full plaque outside wide ghost bounds for every rotated face" {
+    "an offset origin places the full plaque outside actual ghost walls for every rotated face" {
         val worldId = UUID.randomUUID()
         val world = mockk<World>(relaxed = true)
         val origin = BuilderBlockPos(worldId, 100, 64, 200)
         val width = BuilderWorldPlaque.visualWidth(180)
-        var relative = listOf(-9 to -4, -9 to 12, 17 to -4, 17 to 12)
+        var relative = (-9..17).flatMap { x -> listOf(x to -4, x to 12) } +
+            (-4..12).flatMap { z -> listOf(-9 to z, 17 to z) }
         repeat(4) {
-            val occupied = relative.map { (x, z) -> BuilderBlockPos(worldId, origin.x + x, 60, origin.z + z) }
+            val occupied = relative.map { (x, z) -> BuilderBlockPos(worldId, origin.x + x, 66, origin.z + z) }
             val ghost = BoundingBox(
                 occupied.minOf { it.x }.toDouble(), 60.0, occupied.minOf { it.z }.toDouble(),
                 occupied.maxOf { it.x } + 1.0, 75.0, occupied.maxOf { it.z } + 1.0,
@@ -147,6 +155,7 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
             for (face in BuilderConstructionSitePanelFace.entries) {
                 val panel = BuilderConstructionSiteDisplayLayout.panelPlacement(
                     listOf(origin), face, 2.6, .4, occupiedPositions = occupied, panelWidth = width,
+                    panelHeight = 1.5,
                 )
                 val volume = BuilderWorldPlaque.visualFootprint(
                     Location(world, panel.x, panel.y, panel.z, panel.yaw, 0f),
@@ -166,6 +175,47 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         }
     }
 
+    "the plaque stays by the wall when a path roof or distant side wing enlarges the schematic" {
+        val worldId = UUID.randomUUID()
+        val world = mockk<World>(relaxed = true)
+        val origin = BuilderBlockPos(worldId, 0, 64, 0)
+        val content = Component.text("Настроить постройку\nБерёзовый коттедж\nПКМ — открыть меню")
+        val width = BuilderWorldPlaque.visualWidth(180)
+        val height = BuilderWorldPlaque.visualHeight(content, 180)
+        var wall = (-2..2).flatMap { x -> (66..68).map { y -> BuilderBlockPos(worldId, x, y, 1) } }
+        var protrusions = listOf(
+            BuilderBlockPos(worldId, 0, 64, 9), // A front path below the plaque.
+            BuilderBlockPos(worldId, 0, 70, 8), // A roof above even its upward fallback.
+            BuilderBlockPos(worldId, 8, 67, 12), // A wing outside even its sideways fallback.
+        )
+        for (face in listOf(BuilderConstructionSitePanelFace.MAX_Z, BuilderConstructionSitePanelFace.MIN_X,
+            BuilderConstructionSitePanelFace.MIN_Z, BuilderConstructionSitePanelFace.MAX_X)) {
+            val occupied = wall + protrusions
+            val panel = BuilderConstructionSiteDisplayLayout.panelPlacement(
+                listOf(origin), face, 2.6, .4, occupied, width, height,
+            )
+            when (face) {
+                BuilderConstructionSitePanelFace.MAX_Z -> panel.z shouldBe (wall.maxOf { it.z } + 1.4 plusOrMinus 1e-8)
+                BuilderConstructionSitePanelFace.MIN_X -> panel.x shouldBe (wall.minOf { it.x } - .4 plusOrMinus 1e-8)
+                BuilderConstructionSitePanelFace.MIN_Z -> panel.z shouldBe (wall.minOf { it.z } - .4 plusOrMinus 1e-8)
+                BuilderConstructionSitePanelFace.MAX_X -> panel.x shouldBe (wall.maxOf { it.x } + 1.4 plusOrMinus 1e-8)
+            }
+            val volume = BuilderWorldPlaque.visualFootprint(Location(world, panel.x, panel.y, panel.z, panel.yaw, 0f), content, 180)
+            val angle = Math.toRadians(panel.yaw.toDouble())
+            for (up in listOf(0.0, .5)) for (side in listOf(-.5, 0.0, .5)) for (outward in listOf(0.0, 2.0)) {
+                val shifted = volume.translated(org.joml.Vector3d(
+                    kotlin.math.cos(angle) * side - kotlin.math.sin(angle) * outward, up,
+                    kotlin.math.sin(angle) * side + kotlin.math.cos(angle) * outward,
+                ))
+                occupied.any { block -> shifted.overlaps(BoundingBox(
+                    block.x.toDouble(), block.y.toDouble(), block.z.toDouble(), block.x + 1.0, block.y + 1.0, block.z + 1.0,
+                )) } shouldBe false
+            }
+            wall = wall.map { it.copy(x = -it.z, z = it.x) }
+            protrusions = protrusions.map { it.copy(x = -it.z, z = it.x) }
+        }
+    }
+
     "a plaque corner near the preview is cleared even when its origin lies beside the bounds" {
         val worldId = UUID.randomUUID()
         val occupied = listOf(BuilderBlockPos(worldId, 0, 64, 0), BuilderBlockPos(worldId, 6, 70, 9))
@@ -175,6 +225,66 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         )
         panel.x shouldBe 10.5
         panel.z shouldBe (10.4 plusOrMinus 1e-8)
+    }
+
+    "the reviewed birch cottage clears all four rotated faces without keeping schematic padding" {
+        val worldId = UUID.randomUUID()
+        val world = mockk<World>(relaxed = true)
+        val origin = BuilderBlockPos(worldId, 0, 64, 0)
+        val rows = checkNotNull(javaClass.getResourceAsStream("/fixtures/birch-cottage-plaque-occupancy.txt"))
+            .bufferedReader().use { it.readLines() }
+        var occupied = rows.filter { it.isNotBlank() && !it.startsWith('#') }.flatMap { row ->
+            val (firstX, lastX, y, z) = row.split(' ').map(String::toInt)
+            (firstX..lastX).map { x -> BuilderBlockPos(worldId, x, origin.y + y, z) }
+        }
+        occupied.size shouldBe 725
+        var corners = listOf(BuilderBlockPos(worldId, -9, 63, -14), BuilderBlockPos(worldId, 9, 78, 7))
+        val text = Component.text("🛠 Настроить постройку 🛠\nБерёзовый коттедж\nПКМ — открыть меню")
+        val width = BuilderWorldPlaque.visualWidth(180)
+        val height = BuilderWorldPlaque.visualHeight(text, 180)
+        val expected = listOf(
+            listOf(-5.4, 8.4, -10.4, 3.4),
+            listOf(-2.4, 11.4, -5.4, 8.4),
+            listOf(-7.4, 6.4, -2.4, 11.4),
+            listOf(-10.4, 3.4, -7.4, 6.4),
+        )
+        val original = occupied
+        val exported = mutableListOf<Map<String, Any>>()
+        repeat(4) { rotation ->
+            BuilderConstructionSitePanelFace.entries.forEachIndexed { index, face ->
+                val panel = BuilderConstructionSiteDisplayLayout.panelPlacement(
+                    listOf(origin), face, 2.6, .4, occupied, width, height,
+                )
+                val old = when (face) {
+                    BuilderConstructionSitePanelFace.MIN_X -> panel.copy(x = corners.minOf { it.x } - .4)
+                    BuilderConstructionSitePanelFace.MAX_X -> panel.copy(x = corners.maxOf { it.x } + 1.4)
+                    BuilderConstructionSitePanelFace.MIN_Z -> panel.copy(z = corners.minOf { it.z } - .4)
+                    BuilderConstructionSitePanelFace.MAX_Z -> panel.copy(z = corners.maxOf { it.z } + 1.4)
+                }
+                val horizontal = face == BuilderConstructionSitePanelFace.MIN_X || face == BuilderConstructionSitePanelFace.MAX_X
+                (if (horizontal) panel.x else panel.z) shouldBe (expected[rotation][index] plusOrMinus 1e-8)
+                val volume = BuilderWorldPlaque.visualFootprint(Location(world, panel.x, panel.y, panel.z, panel.yaw, 0f), text, 180)
+                val angle = Math.toRadians(panel.yaw.toDouble())
+                for (up in listOf(0.0, .5)) for (side in listOf(-.5, 0.0, .5)) {
+                    val shifted = volume.translated(org.joml.Vector3d(kotlin.math.cos(angle) * side, up, kotlin.math.sin(angle) * side))
+                    occupied.any { block -> shifted.overlaps(BoundingBox(
+                        block.x.toDouble(), block.y.toDouble(), block.z.toDouble(), block.x + 1.0, block.y + 1.0, block.z + 1.0,
+                    )) } shouldBe false
+                }
+                exported += mapOf("rotation" to rotation * 90, "face" to face.name, "before" to old, "after" to panel)
+            }
+            occupied = occupied.map { it.copy(x = -it.z, z = it.x) }
+            corners = corners.map { it.copy(x = -it.z, z = it.x) }
+        }
+        java.io.File("build/reports/builder-plaque/cottage-placement.json").apply {
+            parentFile.mkdirs()
+            writeText(com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(mapOf(
+                "evidence" to "Kotlin placement and full-voxel clearance from the reviewed cottage occupancy; not native client acceptance",
+                "sourceSha256" to "0b9303b7f791a20816b2fc5091013ba351449c298b06276cdddd2089cab0daad",
+                "width" to width, "height" to height,
+                "occupied" to original.map { listOf(it.x, it.y, it.z) }, "placements" to exported,
+            )))
+        }
     }
 
     "construction panel orientation is fixed and applies its persisted face yaw" {

@@ -675,7 +675,7 @@ internal interface BuilderConstructionProjectPort {
     fun appliedBlockCount(project: BuilderConstructionProjectRecord, step: BuilderConstructionStep): Int = 1
 }
 
-internal class BuilderConstructionTemporarilyUnavailableException : RuntimeException()
+internal class BuilderConstructionTemporarilyUnavailableException(val diagnosticReason: String? = null) : RuntimeException()
 
 internal object BuilderConstructionRecoveryPolicy {
     fun canResumeAppliedNoExchangeStep(record: BuilderConstructionProjectRecord): Boolean =

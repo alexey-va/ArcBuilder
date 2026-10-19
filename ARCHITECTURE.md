@@ -692,10 +692,11 @@ rule. Instant runs do not expose a misleading pause action.
 
 Construction and book-preview control panels sit beside the effective book
 origin, on the side nearest the player, at the configured height above that
-anchor. The outward coordinate is clamped beyond the full construction/preview
-bounds plus the configured front gap wherever the plaque's width can overlap
-them. Height and the coordinate along that face remain tied to the origin;
-the overlap check includes Core's bounded sideways escape. New projects persist
+anchor. The outward coordinate clears actual occupied blocks in the full plaque's
+horizontal and vertical band plus the configured front gap. Low paths, high roofs,
+side wings outside that band and empty schematic margins do not displace it.
+Height and the coordinate along that face remain tied to the origin;
+the overlap check includes Core's bounded sideways and upward escape. New projects persist
 `siteAnchor` together with `sitePanelFace`; those values and construction positions
 are unchanged. Legacy projects lacking an anchor retain bounds-based placement.
 The area outline still encloses the full plan.
@@ -790,12 +791,17 @@ domain teardown still remove it.
 `PaperSpatialSpace` first searches up to two blocks outward from the authored face,
 then permits the existing half-block upward/sideways fallback if no forward pose fits.
 That search reads real Bukkit collision shapes; it cannot see client-only schematic
-BlockDisplays. Book panels therefore derive their initial outer face from the current
-transformed schematic corners through `ConstructionSite.worldLocation`, including the
-whole maximum block (`max + 1`). Construction panels use their cached project bounds.
-This keeps the entire plaque plane in front of ghost columns and roofs before real-world
-obstacle search. An enlarged preview cannot reuse a previous pose behind its new face:
-Core validates previous offsets against the new anchor and permits only outward offsets.
+BlockDisplays. Book panels therefore scan the immutable transformed schematic's
+actual non-air blocks, excluding barrier and structure-void keep-world cells, on the
+existing planning worker. Each owner has one calculation in flight and one replaceable
+latest source; cancelling or reopening a preview keeps the old worker counted until it
+finishes. One result is retained per snapshot, anchor, face and label;
+source tokens reject replaced or closed calculations, and the previous complete scene
+stays visible until its replacement is ready. Construction panels use their immutable
+steps and reserve the largest progress-label height once per source. Both paths clear
+whole occupied voxels (`max + 1`) only where the full text band and its bounded fallback
+can overlap them. The authored pose discards an old real-world escape when it changes;
+Core then finds the nearest real clearance and permits only outward offsets.
 Only the text and its native target move: site outlines, persisted anchors,
 orientation and construction plans do not. When no pose fits, the plaque and
 target hide while the outline and domain entry points remain. An eligible nearby

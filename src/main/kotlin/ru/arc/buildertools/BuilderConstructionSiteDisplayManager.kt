@@ -32,6 +32,7 @@ import ru.arc.paper.scene.ScenePart
 import ru.arc.paper.scene.ScenePose
 import ru.arc.paper.scene.SpatialControlController
 import ru.arc.paper.scene.SpatialControlFrame
+import ru.arc.paper.scene.SpatialInputReason
 import ru.arc.paper.scene.SpatialSceneKey
 import ru.arc.text.LocalizedMiniMessage
 import ru.arc.util.Logging.warn
@@ -98,6 +99,7 @@ internal object BuilderConstructionSiteDisplayLayout {
     fun create(
         project: BuilderConstructionProjectRecord,
         settings: BuilderConstructionSiteDisplaySettings,
+        panelHeight: Double = Double.POSITIVE_INFINITY,
     ): BuilderConstructionSiteDisplayModel {
         val positions = project.steps.map { it.change.position }
         require(positions.isNotEmpty())
@@ -106,7 +108,15 @@ internal object BuilderConstructionSiteDisplayLayout {
         val face = project.sitePanelFace ?: settings.panelFace
         val panel = panelPlacement(
             project.siteAnchor?.let(::listOf) ?: positions, face, settings.panelHeightOffset, settings.panelFrontOffset,
-            occupiedPositions = positions, panelWidth = BuilderWorldPlaque.visualWidth(settings.panelLineWidth),
+            occupiedPositions = project.steps.asSequence().mapNotNull { step ->
+                when (step.change.afterBlockData) {
+                    "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
+                    "minecraft:barrier", "minecraft:structure_void" -> null
+                    else -> step.change.position
+                }
+            }.asIterable(),
+            panelWidth = BuilderWorldPlaque.visualWidth(settings.panelLineWidth),
+            panelHeight = panelHeight,
         )
         return BuilderConstructionSiteDisplayModel(
             worldId = worldId,
@@ -143,26 +153,33 @@ internal object BuilderConstructionSiteDisplayLayout {
         face: BuilderConstructionSitePanelFace,
         heightOffset: Double,
         frontOffset: Double,
-        occupiedPositions: List<BuilderBlockPos> = positions,
+        occupiedPositions: Iterable<BuilderBlockPos> = positions,
         panelWidth: Double = 0.0,
+        panelHeight: Double = Double.POSITIVE_INFINITY,
     ): BuilderSitePanelPlacement {
         val anchorBounds = bounds(positions)
-        val occupied = bounds(occupiedPositions)
         var (x, z) = panelCenter(anchorBounds, face, frontOffset)
-        // Packet preview blocks are absent from Bukkit collision shapes. Start outside their
-        // full envelope before Core searches real obstacles; include its half-block side escape.
-        val halfWidth = panelWidth / 2.0 + .5
-        when (face) {
-            BuilderConstructionSitePanelFace.MIN_X -> if (z + halfWidth >= occupied.minZ && z - halfWidth <= occupied.maxZ)
-                x = min(x, occupied.minX - frontOffset)
-            BuilderConstructionSitePanelFace.MAX_X -> if (z + halfWidth >= occupied.minZ && z - halfWidth <= occupied.maxZ)
-                x = max(x, occupied.maxX + frontOffset)
-            BuilderConstructionSitePanelFace.MIN_Z -> if (x + halfWidth >= occupied.minX && x - halfWidth <= occupied.maxX)
-                z = min(z, occupied.minZ - frontOffset)
-            BuilderConstructionSitePanelFace.MAX_Z -> if (x + halfWidth >= occupied.minX && x - halfWidth <= occupied.maxX)
-                z = max(z, occupied.maxZ + frontOffset)
+        val y = anchorBounds.minY + heightOffset
+        // Only actual blocks in the plaque's swept band can obstruct it. A low path, an
+        // overhanging roof or empty schematic margins must not move the label away from the wall.
+        // Include Core's bounded up/side fallback, so its later real-world escape stays ghost-safe.
+        val halfWidth = panelWidth / 2.0 + BuilderWorldPlaque.MAX_SIDE_SHIFT
+        val minY = y - BuilderWorldPlaque.VERTICAL_PADDING
+        val maxY = y + panelHeight + BuilderWorldPlaque.VERTICAL_PADDING + BuilderWorldPlaque.MAX_UPWARD_SHIFT
+        for (occupied in occupiedPositions) {
+            if (panelHeight.isFinite() && (occupied.y + 1.0 <= minY || occupied.y >= maxY)) continue
+            when (face) {
+                BuilderConstructionSitePanelFace.MIN_X -> if (z + halfWidth > occupied.z && z - halfWidth < occupied.z + 1.0)
+                    x = min(x, occupied.x - frontOffset)
+                BuilderConstructionSitePanelFace.MAX_X -> if (z + halfWidth > occupied.z && z - halfWidth < occupied.z + 1.0)
+                    x = max(x, occupied.x + 1.0 + frontOffset)
+                BuilderConstructionSitePanelFace.MIN_Z -> if (x + halfWidth > occupied.x && x - halfWidth < occupied.x + 1.0)
+                    z = min(z, occupied.z - frontOffset)
+                BuilderConstructionSitePanelFace.MAX_Z -> if (x + halfWidth > occupied.x && x - halfWidth < occupied.x + 1.0)
+                    z = max(z, occupied.z + 1.0 + frontOffset)
+            }
         }
-        return BuilderSitePanelPlacement(x, anchorBounds.minY + heightOffset, z, face.yaw)
+        return BuilderSitePanelPlacement(x, y, z, face.yaw)
     }
 
     private data class Bounds(
@@ -229,6 +246,7 @@ internal class BuilderConstructionSiteDisplayManager(
     private val reconciling = mutableSetOf<UUID>()
     private var closed = false
     private val audience = SceneAudience.Public()
+    private val actionDiagnostics = BuilderActionDiagnostics()
     private val outlineStyle = SceneDisplayStyle(
         brightness = Display.Brightness(15, 15),
         viewRange = (settings.viewRange / 64.0).toFloat(),
@@ -256,6 +274,15 @@ internal class BuilderConstructionSiteDisplayManager(
             val projectId = UUID.fromString(scene.value)
             if (scenes[projectId]?.context === context) remove(projectId)
         }
+
+        override fun inputObserved(player: Player, scene: SpatialSceneKey, context: SitePanelContext,
+            action: Unit?, accepted: Boolean, reason: SpatialInputReason) {
+            val shown = scenes[UUID.fromString(scene.value)] ?: return
+            val world = Bukkit.getWorld(shown.model.worldId) ?: return
+            actionDiagnostics.spatialInput(player, "construction_plaque", scene.value,
+                Location(world, shown.model.panelX, shown.model.panelY, shown.model.panelZ),
+                accepted, reason.name.lowercase(), operationId = shown.project.projectId)
+        }
     })
 
     init {
@@ -277,7 +304,12 @@ internal class BuilderConstructionSiteDisplayManager(
         if (pendingModels[project.projectId]?.let { sameSource(it.source, project) } == true) return
         val calculation = ModelCalculation(project)
         pendingModels[project.projectId] = calculation
-        planningTasks.compute { BuilderConstructionSiteDisplayLayout.create(project, settings) }.thenCompose { model ->
+        // Count/percent only grow in width; reserve their completed form once per immutable source.
+        val panelHeight = max(
+            BuilderWorldPlaque.visualHeight(panelText(project), settings.panelLineWidth),
+            BuilderWorldPlaque.visualHeight(panelText(project.copy(cursor = project.steps.size)), settings.panelLineWidth),
+        )
+        planningTasks.compute { BuilderConstructionSiteDisplayLayout.create(project, settings, panelHeight) }.thenCompose { model ->
             planningTasks.onMain {
                 if (!closed && pendingModels[project.projectId] === calculation) {
                     pendingModels.remove(project.projectId)
