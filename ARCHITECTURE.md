@@ -79,8 +79,11 @@ schematic order. Both plan and book previews capture eye coordinates every
 selects indices against copied coordinates off-thread, with one calculation in
 flight and only the latest pending position. Every positional change qualifies;
 there is no distance dead zone. Unchanged positions skip calculation, and an
-unchanged selected set skips scene work. Main-thread application reuses retained
-display specifications and prepares only newly selected blocks. World-surface
+unchanged selected set skips scene work. The runtime's shared `BuilderPlanningWork`
+queue captures stable display keys and allocates new packet records within its
+per-tick native budget; retained specifications and records are reused. Key diff
+and retained-map assembly run on a worker. A replacement publishes only after
+all records are ready, so large updates can span several ticks. World-surface
 checks and book guidance keep their separate, slower cadence. Closing, replacing
 or suspending a preview invalidates late calculations; lifecycle tokens also fence
 reload and shutdown. Selection, clipboard, pending plan, and active operation are distinct

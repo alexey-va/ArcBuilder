@@ -103,17 +103,7 @@ internal class BuilderToolsRuntime(
     private val plugin: JavaPlugin,
     private val config: BuilderToolsConfig,
     private val taskScope: LifecycleTaskScope = LifecycleTaskScope(),
-    private val displayRenderer: BuilderDisplayRenderer = BuilderBlockDisplayRenderer(
-        plugin,
-        config.previewMaxPlanDisplays,
-        config.previewBlockDisplayScale,
-        config.previewAntiZFighting,
-        config.previewPlanDisplayRange,
-        config.previewGuidancePeriodTicks,
-        config.messages(),
-        taskScope,
-        movementPeriodTicks = config.previewMovementPeriodTicks,
-    ),
+    displayRenderer: BuilderDisplayRenderer? = null,
     blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
     private val physicsUpdater: BuilderPhysicsUpdater = PaperBuilderPhysicsUpdater,
     draftStorage: BuilderDraftStorage? = null,
@@ -139,6 +129,18 @@ internal class BuilderToolsRuntime(
     private val loadBuilding = schematicLoader ?: schematics::load
     private val bookRequests = BuilderBookRequests(taskScope)
     private val planningTasks = BuilderPlanningWork(taskScope)
+    private val displayRenderer = displayRenderer ?: BuilderBlockDisplayRenderer(
+        plugin,
+        config.previewMaxPlanDisplays,
+        config.previewBlockDisplayScale,
+        config.previewAntiZFighting,
+        config.previewPlanDisplayRange,
+        config.previewGuidancePeriodTicks,
+        config.messages(),
+        taskScope,
+        movementPeriodTicks = config.previewMovementPeriodTicks,
+        planningTasks = planningTasks,
+    )
     internal val closeCompletion = CompletableFuture<Unit>()
     private val capturedMaximumRange = config.maximumRange
     private val capturedRequireLands = config.requireLands
@@ -577,7 +579,7 @@ internal class BuilderToolsRuntime(
             ).also { initializedConstructionSiteDisplays = it }
             bookPreviewPresentation = BuilderBookPreviewPresentation(
                 plugin = plugin,
-                renderer = displayRenderer,
+                renderer = this.displayRenderer,
                 messages = messages,
                 host = object : BuilderBookPreviewPresentationHost {
                     override fun adjust(player: Player, adjustment: ru.arc.autobuild.BuildBookPreviewAdjustment): ConstructionSite? =
@@ -645,15 +647,15 @@ internal class BuilderToolsRuntime(
                     BuilderGameModePolicy.allows(player.gameMode) && config.allowsWorld(player.world.name)
                 },
                 renderSelection = { player ->
-                    displayRenderer.selection(
+                    this.displayRenderer.selection(
                         player,
                         selections.points(player.uniqueId, player.world.uid),
                         selections.selection(player.uniqueId, player.world.uid),
                     )
                 },
-                renderPlan = displayRenderer::plan,
+                renderPlan = this.displayRenderer::plan,
                 clearPlan = { playerId ->
-                    displayRenderer.clearPlan(playerId)
+                    this.displayRenderer.clearPlan(playerId)
                     bookPreviewPresentation.clearConfirmation(playerId)
                 },
                 onExpired = { playerId ->
@@ -876,7 +878,7 @@ internal class BuilderToolsRuntime(
             )
             selectionActionPanel = BuilderSelectionActionPanel(
                 plugin, config.selectionPanelSettings(), messages, ::selectionPanelView, ::onSelectionPanelAction,
-                onSelectionGlowSuppression = displayRenderer::suppressSelectionGlow,
+                onSelectionGlowSuppression = this.displayRenderer::suppressSelectionGlow,
             )
             checkNotNull(taskScope.runTimer(1L, 1L) { selectionActionPanel?.tick() }) {
                 "Builder selection action panel task was not scheduled"
@@ -903,7 +905,7 @@ internal class BuilderToolsRuntime(
             val visualDrains = listOf(
                 runCatching { initializedBookPreviewPresentation?.closeAsync() ?: CompletableFuture.completedFuture(null) }
                     .getOrElse { CompletableFuture.failedFuture(it) },
-                runCatching { displayRenderer.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
+                runCatching { this.displayRenderer.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
             )
             attempt { bookRequests.close() }
             attempt { planningTasks.close() }

@@ -453,13 +453,13 @@ internal class BuilderOperationLocks(plugin: Plugin) : Listener, AutoCloseable {
         }
 
     private fun isResourceInventoryLocked(inventory: Inventory): Boolean =
-        recoveryBarrier || inventoryHolderBlocks(inventory).any { block ->
+        recoveryBarrier || resourceLockedBlocks.isNotEmpty() && inventoryHolderBlocks(inventory).any { block ->
             BuilderBlockPos(block.world.uid, block.x, block.y, block.z) in resourceLockedBlocks
         }
 
-    private fun inventoryHolderBlocks(inventory: Inventory): List<Block> = when (val holder = inventory.holder) {
+    private fun inventoryHolderBlocks(inventory: Inventory): List<Block> = when (val holder = inventory.getHolder(false)) {
         is Container -> listOf(holder.block)
-        is DoubleChest -> listOf(holder.leftSide, holder.rightSide)
+        is DoubleChest -> listOf(holder.getLeftSide(false), holder.getRightSide(false))
             .mapNotNull { (it as? Container)?.block }
         else -> emptyList()
     }

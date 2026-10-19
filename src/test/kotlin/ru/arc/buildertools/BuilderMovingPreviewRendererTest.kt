@@ -27,18 +27,20 @@ import java.util.UUID
 
 class BuilderMovingPreviewRendererTest : FunSpec({
     for (book in listOf(false, true)) {
-        test("${if (book) "book" else "plan"} window follows sub-block movement within two ticks without resending retained blocks") {
+        test("${if (book) "book" else "plan"} window follows sub-block movement without resending retained blocks") {
             withMovingPreview { fixture ->
                 fixture.open(book)
                 fixture.drain()
                 fixture.visibleBlocks() shouldBe (0..31).toList()
                 val first = fixture.active.toMap()
                 val sends = fixture.sent.size
+                val conversions = fixture.blockStateConversions.size
 
                 fixture.player.teleport(Location(fixture.world, 16.50, 64.0, 0.0))
                 fixture.scheduler.tick(2)
                 fixture.drain()
                 fixture.sent.size shouldBe sends // Equal-distance tie keeps the existing window.
+                fixture.blockStateConversions.size shouldBe conversions
 
                 fixture.player.teleport(Location(fixture.world, 16.51, 64.0, 0.0))
                 fixture.scheduler.tick(2)
@@ -46,6 +48,7 @@ class BuilderMovingPreviewRendererTest : FunSpec({
                 fixture.visibleBlocks() shouldBe (1..32).toList()
                 fixture.sent.last().first.size shouldBe 1
                 fixture.sent.last().second.size shouldBe 1
+                fixture.blockStateConversions.size shouldBe conversions + 1
                 fixture.active.values.filter { it.entityId in first }.forEach { display ->
                     display shouldBe first.getValue(display.entityId)
                 }
@@ -133,6 +136,58 @@ class BuilderMovingPreviewRendererTest : FunSpec({
             fixture.active shouldBe emptyMap()
         }
     }
+
+    test("a large replacement shares the native step budget and publishes only its complete scene") {
+        withMovingPreview(previewLimit = 1024) { fixture ->
+            fixture.open(book = false, changeCount = 32)
+            fixture.drain()
+            val previous = fixture.active.toMap()
+            val sends = fixture.sent.size
+            val conversions = fixture.blockStateConversions.size
+            fixture.open(book = false, changeCount = 2048)
+
+            var sawUnpublishedAllocation = false
+            fixture.advanceUntil({ fixture.sent.size > sends }) {
+                val beforeTick = fixture.blockStateConversions.size
+                fixture.scheduler.executeImmediate()
+                fixture.scheduler.tick()
+                (fixture.blockStateConversions.size - beforeTick in 0..512) shouldBe true
+                if (fixture.sent.size == sends && fixture.blockStateConversions.size > conversions) {
+                    sawUnpublishedAllocation = true
+                    fixture.active shouldBe previous
+                }
+            }
+            fixture.drain()
+
+            sawUnpublishedAllocation shouldBe true
+            fixture.sent.size shouldBe sends + 1
+            fixture.visibleBlocks() shouldBe (0..1023).toList()
+            previous.values.filter { it.scaleX == 1f && it.scaleY == 1f && it.scaleZ == 1f }.forEach {
+                fixture.active[it.entityId] shouldBe it
+            }
+        }
+    }
+
+    test("clearing a replacement during sliced allocation cannot publish it later") {
+        withMovingPreview(previewLimit = 1024) { fixture ->
+            fixture.open(book = false, changeCount = 32)
+            fixture.drain()
+            val previous = fixture.active.toMap()
+            val conversions = fixture.blockStateConversions.size
+            fixture.open(book = false, changeCount = 2048)
+            fixture.advanceUntil({ fixture.blockStateConversions.size > conversions }) {
+                fixture.scheduler.executeImmediate()
+                fixture.scheduler.tick()
+            }
+            fixture.active shouldBe previous
+
+            fixture.renderer.clearPlan(fixture.player.uniqueId)
+            val sends = fixture.sent.size
+            fixture.drain()
+            fixture.active shouldBe emptyMap()
+            fixture.sent.size shouldBe sends
+        }
+    }
 })
 
 private class MovingPreviewFixture(
@@ -143,23 +198,35 @@ private class MovingPreviewFixture(
     val renderer: BuilderBlockDisplayRenderer,
     val sent: MutableList<Pair<List<Int>, List<BuilderPacketDisplay>>>,
     val active: Map<Int, BuilderPacketDisplay>,
+    val blockStateConversions: List<BlockData>,
 ) {
     fun drain() {
-        // Geometry and nearest-window calculations each cross worker and main dispatch boundaries.
-        repeat(4) { scheduler.executeImmediate() }
+        // Worker completions and the shared native queue deliberately span scheduler ticks.
+        advanceUntil({ scheduler.pendingCount() == 0 }) {
+            scheduler.executeImmediate()
+            if (scheduler.pendingCount() > 0) scheduler.tick()
+        }
+    }
+
+    fun advanceUntil(done: () -> Boolean, step: () -> Unit) {
+        repeat(256) {
+            if (done()) return
+            step()
+        }
+        check(done()) { "Preview did not settle within 256 scheduler steps" }
     }
 
     fun visibleBlocks() = active.values.filter {
         it.scaleX == 1f && it.scaleY == 1f && it.scaleZ == 1f
     }.map { it.x.toInt() }.sorted()
 
-    fun open(book: Boolean, afterBlockData: String = "minecraft:stone") {
+    fun open(book: Boolean, afterBlockData: String = "minecraft:stone", changeCount: Int = 64) {
         if (!book) {
             renderer.plan(
                 player,
                 BuilderPlan(
                     UUID.randomUUID(), player.uniqueId, BuilderPlanKind.FILL,
-                    (0..63).map {
+                    (0 until changeCount).map {
                         BuilderBlockChange(BuilderBlockPos(world.uid, it, 64, 0), "minecraft:air", afterBlockData)
                     },
                     emptyList(), emptyList(), createdAtMillis = 0, expiresAtMillis = Long.MAX_VALUE,
@@ -184,7 +251,7 @@ private class MovingPreviewFixture(
     }
 }
 
-private fun withMovingPreview(test: (MovingPreviewFixture) -> Unit) {
+private fun withMovingPreview(previewLimit: Int = 32, test: (MovingPreviewFixture) -> Unit) {
     failOnUnsupportedMockBukkitOperation {
         MockBukkitTestRuntime.open().use { paper ->
             mockkStatic(BukkitAdapter::class)
@@ -197,6 +264,7 @@ private fun withMovingPreview(test: (MovingPreviewFixture) -> Unit) {
                 player.teleport(Location(world, 16.49, 64.0, 0.0))
                 val sent = mutableListOf<Pair<List<Int>, List<BuilderPacketDisplay>>>()
                 val active = linkedMapOf<Int, BuilderPacketDisplay>()
+                val conversions = mutableListOf<BlockData>()
                 val connection = object : BuilderPreviewConnection {
                     override val identity = Any()
                     override fun submit(desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int>) {
@@ -210,7 +278,10 @@ private fun withMovingPreview(test: (MovingPreviewFixture) -> Unit) {
                 }
                 val packets = object : BuilderPreviewPacketTransport {
                     var nextId = 100
-                    override fun blockStateId(blockData: BlockData) = 1
+                    override fun blockStateId(blockData: BlockData): Int {
+                        conversions += blockData
+                        return 1
+                    }
                     override fun nextEntityId() = nextId++
                     override fun connection(player: Player) = connection
                 }
@@ -219,10 +290,10 @@ private fun withMovingPreview(test: (MovingPreviewFixture) -> Unit) {
                 val scheduler = TestTaskScheduler()
                 LifecycleTaskScope(scheduler = scheduler).use { tasks ->
                     BuilderBlockDisplayRenderer(
-                        plugin, 32, 1f, false, 64.0, 20L, messages, tasks,
-                        packets = packets, sentChunks = { (0L..4L).toSet() },
+                        plugin, previewLimit, 1f, false, 64.0, 20L, messages, tasks,
+                        packets = packets, sentChunks = { (0L..128L).toSet() },
                     ).use { renderer ->
-                        test(MovingPreviewFixture(world, otherWorld, player, scheduler, renderer, sent, active))
+                        test(MovingPreviewFixture(world, otherWorld, player, scheduler, renderer, sent, active, conversions))
                     }
                 }
             } finally {

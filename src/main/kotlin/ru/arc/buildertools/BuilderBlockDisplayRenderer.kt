@@ -25,7 +25,9 @@ import ru.arc.autobuild.ConstructionSite
 import ru.arc.core.LifecycleTaskScope
 import ru.arc.core.ScheduledTask
 import ru.arc.text.LocalizedMiniMessage
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import java.util.UUID
 import java.util.PriorityQueue
 
@@ -99,6 +101,7 @@ internal class BuilderBlockDisplayRenderer(
     movementPeriodTicks: Long = 2L,
     private val packets: BuilderPreviewPacketTransport = PacketEventsBuilderPreviewTransport(plugin),
     private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
+    planningTasks: BuilderPlanningTasks? = null,
 ) : BuilderDisplayRenderer, Listener {
     private enum class Layer { SELECTION, PLAN, BOOK }
 
@@ -114,7 +117,12 @@ internal class BuilderBlockDisplayRenderer(
         val translateY: Float = 0f,
         val translateZ: Float = 0f,
         val glow: Color,
-    )
+        val blockState: String = blockData.asString,
+    ) {
+        // Captured once on the owning thread; retained specs never read Bukkit to rebuild a key.
+        val key = DisplayKey(x, y, z, blockState, scaleX, scaleY, scaleZ,
+            translateX, translateY, translateZ, glow.asRGB())
+    }
 
     private data class DisplayKey(
         val x: Double,
@@ -135,7 +143,9 @@ internal class BuilderBlockDisplayRenderer(
         val entities: Map<DisplayKey, BuilderPacketDisplay>,
         val audience: BuilderPacketScene,
     )
-    private data class BookBlock(val location: Location, val blockData: BlockData)
+    private data class BookBlock(val location: Location, val blockData: BlockData) {
+        val blockState: String by lazy(LazyThreadSafetyMode.NONE) { blockData.asString }
+    }
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private class PlanCalculation(val plan: BuilderPlan)
     private var scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
@@ -148,6 +158,8 @@ internal class BuilderBlockDisplayRenderer(
     private val movementTask: ScheduledTask
     private val guidanceTask: ScheduledTask
     private val blockTransform = BuilderDisplayGeometry.blockTransform(blockDisplayScale)
+    private val planningWork = planningTasks ?: BuilderPlanningWork(taskScope)
+    private val ownsPlanningWork = planningTasks == null
     private var closed = false
     private val terminal = CompletableFuture<Void>()
 
@@ -189,6 +201,10 @@ internal class BuilderBlockDisplayRenderer(
         private var suspended = false
         private var failed = false
         private var rendered = false
+        private var previewClosed = false
+        private var renderGeneration = 0L
+        private var rendering = false
+        private var pendingRefresh: Boolean? = null
         private val window = BuilderAsyncPreviewWindow(
             taskScope,
             points,
@@ -199,18 +215,10 @@ internal class BuilderBlockDisplayRenderer(
                     render(refresh = false)
                 } else suspend()
             },
-            onFailure = { failure ->
-                // Keep the old scene until its replacement is ready, but never
-                // leave a failed replacement displaying another plan indefinitely.
-                if (!rendered) remove(player.uniqueId, layer)
-                if (!failed) {
-                    failed = true
-                    plugin.logger.warning("Builder preview window failed for ${player.uniqueId}: ${failure.message}")
-                }
-            },
+            onFailure = ::renderFailed,
         )
 
-        private fun isVisible() = !closed && player.isOnline && player.world.uid == worldId
+        private fun isVisible() = !closed && !previewClosed && player.isOnline && player.world.uid == worldId
 
         fun update() {
             if (!isVisible()) {
@@ -231,6 +239,7 @@ internal class BuilderBlockDisplayRenderer(
             if (!suspended) {
                 suspended = true
                 window.invalidate()
+                invalidateRender()
                 selected = null
                 specs = emptyMap()
                 rendered = false
@@ -240,16 +249,113 @@ internal class BuilderBlockDisplayRenderer(
 
         private fun render(refresh: Boolean) {
             val indices = selected ?: return
-            val previous = specs
-            specs = indices.associateWith { index ->
-                if (!refresh && previous.containsKey(index)) previous[index] else createSpec(index)
+            if (rendering) {
+                pendingRefresh = pendingRefresh == true || refresh
+                return
             }
-            replace(player, layer, specs.values.filterNotNull() + decorations)
-            rendered = true
-            failed = false
+            rendering = true
+            val generation = renderGeneration
+            fun current() = generation == renderGeneration && !suspended && isVisible()
+            val key = player.uniqueId to layer
+            val previous = scenes[key]?.takeIf { it.worldId == worldId }
+            if (previous == null) remove(player.uniqueId, layer)
+            val previousSpecs = specs
+            val nextSpecs = LinkedHashMap<Int, DisplaySpec?>()
+            val byKey = LinkedHashMap<DisplayKey, DisplaySpec>()
+            val keys = ArrayList<DisplayKey>()
+            fun retain(spec: DisplaySpec?) {
+                if (spec != null) {
+                    byKey[spec.key] = spec
+                    keys += spec.key
+                }
+            }
+            var cursor = 0
+            planningWork.capture(::current) {
+                if (cursor < indices.size) {
+                    val index = indices[cursor++]
+                    val spec = if (!refresh && previousSpecs.containsKey(index)) previousSpecs[index] else createSpec(index)
+                    nextSpecs[index] = spec
+                    retain(spec)
+                    false
+                } else {
+                    decorations.forEach(::retain) // Fixed cuboid/origin edges, at most 24 specs.
+                    true
+                }
+            }.thenCompose {
+                // Only immutable keys and detached packet records cross to the worker.
+                val previousEntities = previous?.entities.orEmpty()
+                planningWork.compute {
+                    val delta = BuilderDisplaySceneDiff.between(previousEntities.keys, keys)
+                    val entities = LinkedHashMap<DisplayKey, BuilderPacketDisplay>(delta.retained.size + delta.added.size)
+                    delta.retained.forEach { entities[it] = previousEntities.getValue(it) }
+                    delta.added to entities
+                }
+            }.thenCompose { (added, entities) ->
+                planningWork.onMain {
+                    var addedIndex = 0
+                    planningWork.capture(::current) {
+                        if (addedIndex < added.size) {
+                            val displayKey = added[addedIndex++]
+                            entities[displayKey] = packetDisplay(byKey.getValue(displayKey))
+                            false
+                        } else {
+                            // Keep the old scene throughout preparation, then publish one complete delta.
+                            if (entities.isEmpty()) remove(player.uniqueId, layer)
+                            else {
+                                val scene = Scene(worldId, entities, previous?.audience ?: BuilderPacketScene())
+                                scenes[key] = scene
+                                syncScene(key, scene)
+                            }
+                            specs = nextSpecs
+                            true
+                        }
+                    }
+                }.thenCompose { it }
+            }.whenComplete { _, failure ->
+                planningWork.onMain {
+                    if (generation == renderGeneration && !previewClosed && !closed) {
+                        rendering = false
+                        if (!isVisible()) suspend()
+                        else {
+                            if (failure == null) {
+                                rendered = true
+                                failed = false
+                            } else {
+                                var cause: Throwable = failure
+                                while (cause is CompletionException && cause.cause != null) cause = requireNotNull(cause.cause)
+                                if (cause !is CancellationException) {
+                                    window.invalidate()
+                                    renderFailed(cause)
+                                }
+                            }
+                            val refreshAgain = pendingRefresh
+                            pendingRefresh = null
+                            if (refreshAgain != null) render(refreshAgain)
+                        }
+                    }
+                }
+            }
         }
 
-        override fun close() = window.close()
+        private fun renderFailed(failure: Throwable) {
+            if (!rendered) remove(player.uniqueId, layer)
+            if (!failed) {
+                failed = true
+                plugin.logger.warning("Builder preview window failed for ${player.uniqueId}: ${failure.message}")
+            }
+        }
+
+        private fun invalidateRender() {
+            renderGeneration++
+            rendering = false
+            pendingRefresh = null
+        }
+
+        override fun close() {
+            previewClosed = true
+            invalidateRender()
+            window.close()
+        }
     }
 
     override fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?) {
@@ -324,6 +430,7 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun installPlan(player: Player, plan: BuilderPlan, geometry: BuilderPlanPreviewGeometry) {
         val key = player.uniqueId to Layer.PLAN
+        val blockStates = mutableMapOf<String, String>()
         movingPreviews[key] = MovingPreview(
             player, player.world.uid, Layer.PLAN, plan.id, geometry.points,
             edgeSpecs(geometry.bounds, Material.MAGENTA_STAINED_GLASS, Color.fromRGB(197, 116, 255)),
@@ -342,6 +449,8 @@ internal class BuilderBlockDisplayRenderer(
                     scaleY = transform.scale,
                     scaleZ = transform.scale,
                     glow = if (removal) Color.RED else Color.fromRGB(197, 116, 255),
+                    blockState = if (removal) "minecraft:red_stained_glass"
+                        else blockStates.getOrPut(change.afterBlockData) { after.asString },
                 )
             }
         }.also(MovingPreview::update)
@@ -469,6 +578,7 @@ internal class BuilderBlockDisplayRenderer(
                     transform.scale,
                     transform.scale,
                     glow = Color.fromRGB(255, 177, 66),
+                    blockState = block.blockState,
                 )
             }
         }.also(MovingPreview::update)
@@ -556,28 +666,28 @@ internal class BuilderBlockDisplayRenderer(
             return
         }
         val previousEntities = previous?.entities.orEmpty()
-        val nextSpecs = specs.associateBy { it.key() }
+        val nextSpecs = specs.associateBy(DisplaySpec::key)
         val delta = BuilderDisplaySceneDiff.between(previousEntities.keys, nextSpecs.keys.toList())
         val nextEntities = LinkedHashMap<DisplayKey, BuilderPacketDisplay>(delta.retained.size + delta.added.size)
         delta.retained.forEach { displayKey -> nextEntities[displayKey] = previousEntities.getValue(displayKey) }
         delta.added.forEach { displayKey ->
             val spec = nextSpecs.getValue(displayKey)
-            nextEntities[displayKey] = BuilderPacketDisplay(
-                entityId = packets.nextEntityId(),
-                uuid = UUID.randomUUID(),
-                x = spec.x, y = spec.y, z = spec.z,
-                blockStateId = packets.blockStateId(spec.blockData),
-                scaleX = spec.scaleX, scaleY = spec.scaleY, scaleZ = spec.scaleZ,
-                translateX = spec.translateX, translateY = spec.translateY, translateZ = spec.translateZ,
-                glowRgb = spec.glow.asRGB(),
-                viewRange = (planDisplayRange / 64.0).toFloat(),
-            )
+            nextEntities[displayKey] = packetDisplay(spec)
         }
         val scene = Scene(player.world.uid, nextEntities, previous?.audience ?: BuilderPacketScene())
         // Publish before enqueueing so cleanup can remove even a partially sent scene.
         scenes[key] = scene
         syncScene(key, scene)
     }
+
+    private fun packetDisplay(spec: DisplaySpec) = BuilderPacketDisplay(
+        entityId = packets.nextEntityId(), uuid = UUID.randomUUID(),
+        x = spec.x, y = spec.y, z = spec.z,
+        blockStateId = packets.blockStateId(spec.blockData),
+        scaleX = spec.scaleX, scaleY = spec.scaleY, scaleZ = spec.scaleZ,
+        translateX = spec.translateX, translateY = spec.translateY, translateZ = spec.translateZ,
+        glowRgb = spec.glow.asRGB(), viewRange = (planDisplayRange / 64.0).toFloat(),
+    )
 
     override fun syncBookViewer(viewer: Player) {
         if (viewer.isOnline) refreshViewersNextTick()
@@ -641,20 +751,6 @@ internal class BuilderBlockDisplayRenderer(
         }
     }
 
-    private fun DisplaySpec.key() = DisplayKey(
-        x = x,
-        y = y,
-        z = z,
-        blockState = blockData.asString,
-        scaleX = scaleX,
-        scaleY = scaleY,
-        scaleZ = scaleZ,
-        translateX = translateX,
-        translateY = translateY,
-        translateZ = translateZ,
-        glowRgb = glow.asRGB(),
-    )
-
     private fun remove(playerId: UUID, layer: Layer) {
         scenes.remove(playerId to layer)?.audience?.close()
     }
@@ -690,6 +786,7 @@ internal class BuilderBlockDisplayRenderer(
             player?.sendActionBar(Component.empty())
         } }
         movingPreviews.values.forEach { attempt(it::close) }
+        if (ownsPlanningWork) attempt { (planningWork as AutoCloseable).close() }
         scenes.values.forEach { scene -> attempt { scene.audience.close() } }
         bookBossBars.clear()
         bookSites.clear()
