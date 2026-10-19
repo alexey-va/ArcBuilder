@@ -1134,14 +1134,14 @@ locales:
             lore:
               - "<#8c8c8c>Показать более старые проекты."
         teleport:
-          success: "<prefix><#2bba43>Вы рядом со стройкой: <#e6fff3><x> <y> <z>"
-          missing: "<prefix><#ff9f0f>Эта стройка уже завершена или недоступна."
-          world-unavailable: "<prefix><#ff9f0f>Мир этой стройки сейчас недоступен."
+          success: "<white></white> <#2bba43>Вы рядом со стройкой: <#e6fff3><x> <y> <z>"
+          missing: "<white></white> <#ff9f0f>Эта стройка уже завершена или недоступна."
+          world-unavailable: "<white></white> <#ff9f0f>Мир этой стройки сейчас недоступен."
           unsafe: |-
 
-            <prefix><#ff9f0f>Рядом со стройкой нет безопасного места.
+            <white></white> <#ff9f0f>Рядом со стройкой нет безопасного места.
             <#8c8c8c>   <#e6fff3>Подойдите сами и освободите место для телепорта.
-          failed: "<prefix><#c42323>Не удалось телепортироваться к стройке."
+          failed: "<white></white> <#c42323>Не удалось телепортироваться к стройке."
       site:
         unknown-name: "Строительный проект"
         panel: |-
@@ -2062,14 +2062,14 @@ locales:
             lore:
               - "<dark_gray>Show older projects."
         teleport:
-          success: "<prefix><green>You are near the construction site: <white><x> <y> <z>"
-          missing: "<prefix><yellow>This construction project is already finished or unavailable."
-          world-unavailable: "<prefix><yellow>This construction project's world is unavailable."
+          success: "<white></white> <green>You are near the construction site: <white><x> <y> <z>"
+          missing: "<white></white> <yellow>This construction project is already finished or unavailable."
+          world-unavailable: "<white></white> <yellow>This construction project's world is unavailable."
           unsafe: |-
 
-            <prefix><yellow>There is no safe destination beside this construction site.
+            <white></white> <yellow>There is no safe destination beside this construction site.
             <dark_gray>   <gray>Travel there normally and clear a landing spot.
-          failed: "<prefix><red>Could not teleport to the construction site."
+          failed: "<white></white> <red>Could not teleport to the construction site."
       site:
         unknown-name: "Construction project"
         panel: |-
