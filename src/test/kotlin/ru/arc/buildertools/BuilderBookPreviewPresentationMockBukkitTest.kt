@@ -224,6 +224,33 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     packet.audiencePredicates.single()(player) shouldBe true
                     packet.audiencePredicates.single()(admin) shouldBe true
                     packet.audiencePredicates.single()(stranger) shouldBe false
+                    val updatedBackground = Color.fromARGB(100, 10, 30, 50)
+                    presentation.updatePlaqueAppearance(config.plaqueAppearance().copy(background = updatedBackground,
+                        trail = config.plaqueAppearance().trail.copy(enabled = false))) shouldBe 1
+                    presentation.captureMockedPlaqueControls()
+                    packet.texts.size shouldBe 2
+                    panels.size shouldBe 4
+                    packet.texts.forEach { record ->
+                        io.mockk.verify { record.display.backgroundColor = updatedBackground }
+                        io.mockk.verify(exactly = 0) { record.display.remove() }
+                    }
+                    panels.forEach { panel -> io.mockk.verify(exactly = 0) { panel.remove() } }
+                    val glowing = config.plaqueAppearance().copy(glowEnabled = true)
+                    presentation.updatePlaqueAppearance(glowing) shouldBe 1
+                    presentation.captureMockedPlaqueControls()
+                    packet.blocks.size shouldBe 4
+                    packet.blocks.forEach { block ->
+                        io.mockk.verify { block.isGlowing = true }
+                        io.mockk.verify { block.glowColorOverride = glowing.glowColor }
+                    }
+                    presentation.updatePlaqueAppearance(glowing.copy(glowColor = Color.ORANGE)) shouldBe 1
+                    presentation.captureMockedPlaqueControls()
+                    packet.blocks.size shouldBe 4
+                    presentation.updatePlaqueAppearance(glowing.copy(glowEnabled = false)) shouldBe 1
+                    presentation.captureMockedPlaqueControls()
+                    packet.blocks.forEach { block -> io.mockk.verify(exactly = 1) { block.remove() } }
+                    packet.texts.size shouldBe 2
+                    panels.size shouldBe 4
                     presentation.openCurrentPlacement(player, null) shouldBe true
                     val chatMenu = player.openInventory.topInventory
                     val event = org.bukkit.event.player.PlayerInteractEntityEvent(

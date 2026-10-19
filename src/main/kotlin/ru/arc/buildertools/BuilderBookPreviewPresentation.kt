@@ -97,6 +97,7 @@ internal class BuilderBookPreviewPresentation(
     private val displays: PaperPacketDisplays = PaperPacketDisplays(plugin, "book-preview-plaque"),
     private val space: PaperSpatialSpace = PaperSpatialSpace(),
     private val planningTasks: BuilderPlanningTasks,
+    private var panelAppearance: BuilderPlaqueAppearance = BuilderPlaqueAppearance(panelBackgroundColor, glowColor = panelGlowColor),
 ) : BuildBookPreviewBridge, Listener, AutoCloseable {
     private class PanelSource(
         val site: ConstructionSite,
@@ -645,12 +646,14 @@ internal class BuilderBookPreviewPresentation(
         val site = source.site
         val ownerId = site.player.uniqueId
         val existing = panels[ownerId] ?: run {
-            val audience = displays.createAudienceGroup { viewer ->
+            val canView: (Player) -> Boolean = { viewer ->
                 viewer.uniqueId == ownerId || viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)
             }
+            val audience = displays.createAudienceGroup(canView)
             val plaque = BuilderWorldPlaque(displays, space, BuilderWorldPlaqueStyle(
                 panelInteractionWidth, panelInteractionHeight, panelLineWidth, panelBackgroundColor, panelGlowColor, viewRange,
-            ), SceneAudience.Public(audience))
+                panelAppearance,
+            ), SceneAudience.Public(audience), canView)
             PanelScene(site, SpatialSceneKey(ownerId.toString()), plaque, audience, source).also { created ->
                 panels[ownerId] = created
                 plaque.refreshWith {
@@ -692,6 +695,13 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun locale(player: Player): String = BuilderLocalePolicy.localeTag(player)
+
+    /** Retained confirmations, pending geometry and controls keep their identities across appearance reload. */
+    fun updatePlaqueAppearance(next: BuilderPlaqueAppearance): Int {
+        panelAppearance = next
+        panels.values.forEach { it.plaque.updateAppearance(next) }
+        return panels.size
+    }
 
     private fun loadMenuConfiguration(): PaperMenuConfiguration = PaperMenuConfigurationParser.require(
         BuilderToolsConfiguration.builder(plugin.dataPath),

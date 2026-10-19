@@ -554,8 +554,18 @@ it is not exposed to unauthorized senders. Console uses the default locale;
 players use their locale. The three reload messages are declared in both
 locale trees at `src/main/resources/modules/builder-tools.yml:225-234,840-849`.
 
-An accepted reload is a runtime-generation replacement, not an in-place field
-edit. The active-state barrier is checked first. A safe candidate is then
+An ordinary accepted reload is a runtime-generation replacement. The exact
+appearance leaves under `construction.site.panel` are the narrow exception:
+after strict validation, a semantic fingerprint of every other consumed YAML
+value must match the active prepared configuration. This includes auto-build,
+runtime overrides, system book definitions and unknown keys. Only that match
+allows an in-place plaque update while selections or confirmations remain open;
+starting/recovering still refuses reload. A mixed edit observes the normal busy
+barrier as one transaction. Duplicate mapping keys and malformed appearance
+parents are rejected before Core getters can normalize them; fingerprinting uses
+Core's canonical serialization in disposable staging, never the live files.
+
+For runtime-generation replacement, the active-state barrier is checked first. A safe candidate is then
 strictly parsed and validated while the old runtime is intact. The same
 maintenance call closes the old runtime, finishes its accepted I/O, publishes
 configuration, and installs the replacement. Consequently

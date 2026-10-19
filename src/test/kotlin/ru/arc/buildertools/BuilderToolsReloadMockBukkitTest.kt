@@ -17,6 +17,50 @@ import java.security.MessageDigest
 import java.util.Locale
 
 class BuilderToolsReloadMockBukkitTest : FunSpec({
+    test("the actual reload command applies only appearance in place while a player selection remains open") {
+        withReloadPlugin { paper, plugin ->
+            prepareEnabledReloadFixture(plugin)
+            val console = paper.server.consoleSender
+            val command = checkNotNull(plugin.getCommand("builder"))
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload"))
+            awaitConsoleMessage(paper)
+            awaitBuilderUp(paper)
+            val active = checkNotNull(activeRuntime())
+            val world = paper.addSimpleWorld("appearance-reload")
+            val player = paper.addPlayer("PlaqueReloadOwner")
+            val selections = BuilderToolsRuntime::class.java.getDeclaredField("selections").apply { isAccessible = true }
+                .get(active) as BuilderSelectionController
+            val corner = BuilderBlockPos(world.uid, 1, 64, 1)
+            selections.set(player.uniqueId, corner, true)
+            active.reloadBlocker() shouldBe BuilderToolsReloadBlocker.VOLATILE_PLAYER_STATE
+            val live = Config(plugin.dataPath, ConfigManager.moduleYamlRelative(plugin.dataPath, "builder-tools.yml"))
+            live.setDouble("construction.site.panel.background-opacity", .4)
+            live.setDouble("construction.site.panel.border-trail.speed", 3.0)
+            live.saveStrict()
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
+            plain(awaitConsoleMessage(paper)) shouldContain "применена без перезапуска"
+            (activeRuntime() === active) shouldBe true
+            selections.first(player.uniqueId, world.uid) shouldBe corner
+            BuilderToolsConfiguration.current().settings.plaqueAppearance().trail.speed shouldBe 3.0
+
+            // An unchanged retry is also a no-op on the open player state.
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
+            plain(awaitConsoleMessage(paper)) shouldContain "применена без перезапуска"
+            (activeRuntime() === active) shouldBe true
+            selections.first(player.uniqueId, world.uid) shouldBe corner
+
+            live.setDouble("construction.site.panel.border-trail.speed", 4.0)
+            live.setInt("limits.blocks-per-tick", 8)
+            live.saveStrict()
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
+            plain(awaitConsoleMessage(paper)) shouldBe plain(BuilderToolsConfiguration.current().messages.render("reload.busy", "ru"))
+            (activeRuntime() === active) shouldBe true
+            selections.first(player.uniqueId, world.uid) shouldBe corner
+            BuilderToolsConfiguration.current().settings.plaqueAppearance().trail.speed shouldBe 3.0
+            BuilderToolsConfiguration.current().settings.blocksPerTick shouldBe 16
+        }
+    }
+
     test("console can validate and reload a disabled generation without a player-only rejection") {
         withReloadPlugin { paper, plugin ->
             val console = paper.server.consoleSender

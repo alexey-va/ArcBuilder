@@ -38,6 +38,63 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         plain.serialize(candidate.messages().render("selection-panel.actions.next-page", "ru")) shouldBe ">"
     }
 
+    test("appearance-only classification includes all other YAML values and preserves old ARGB during merge") {
+        val root = configRoot()
+        val original = BuilderToolsReloadPreflight.prepare(root)
+        val config = Config(root, "modules/builder-tools.yml")
+        config.setString("construction.site.panel.background-color", "#B21C2328")
+        config.setDouble("construction.site.panel.background-opacity", .4)
+        config.setBoolean("construction.site.panel.glow.enabled", true)
+        config.setDouble("construction.site.panel.border-trail.speed", 3.0)
+        config.saveStrict()
+        val appearance = BuilderToolsReloadPreflight.prepare(root)
+        onlyPlaqueAppearanceChanged(original, appearance) shouldBe true
+        appearance.settings.plaqueAppearance().background.alpha shouldBe 71
+        config.setInt("limits.blocks-per-tick", 8)
+        config.saveStrict()
+        onlyPlaqueAppearanceChanged(appearance, BuilderToolsReloadPreflight.prepare(root)) shouldBe false
+        config.setInt("limits.blocks-per-tick", original.settings.blocksPerTick)
+        config.saveStrict()
+        val withoutUnknown = Files.readString(root.resolve("modules/builder-tools.yml"))
+        config.setString("operator-unknown-key", "must-not-be-silently-applied")
+        config.saveStrict()
+        onlyPlaqueAppearanceChanged(appearance, BuilderToolsReloadPreflight.prepare(root)) shouldBe false
+        Files.writeString(root.resolve("modules/builder-tools.yml"), withoutUnknown)
+        onlyPlaqueAppearanceChanged(appearance, BuilderToolsReloadPreflight.prepare(root)) shouldBe true
+        val auto = Config(root, "modules/auto-build.yml")
+        auto.setInt("confirm-time", 250)
+        auto.saveStrict()
+        onlyPlaqueAppearanceChanged(appearance, BuilderToolsReloadPreflight.prepare(root)) shouldBe false
+    }
+
+    test("malformed appearance parents and boolean types reject before defaults can repair them") {
+        for ((key, value) in listOf(
+            "construction.site.panel.glow" to "broken",
+            "construction.site.panel.border-trail" to emptyList<String>(),
+            "construction.site.panel" to "broken",
+            "construction.site.panel.glow.enabled" to "perhaps",
+        )) {
+            val root = configRoot()
+            val config = Config(root, "modules/builder-tools.yml")
+            config.setStructured(key, value)
+            config.saveStrict()
+            val before = Files.readString(root.resolve("modules/builder-tools.yml"))
+            shouldThrowAny { BuilderToolsReloadPreflight.prepare(root) }.message.orEmpty() shouldContain key
+            Files.readString(root.resolve("modules/builder-tools.yml")) shouldBe before
+        }
+    }
+
+    test("duplicate domain keys cannot conceal a mixed edit from appearance-only classification") {
+        val root = configRoot()
+        val path = root.resolve("modules/builder-tools.yml")
+        val original = Files.readString(path)
+        val duplicated = original.replace("blocks-per-tick: 16", "blocks-per-tick: 8\n  blocks-per-tick: 16")
+        check(duplicated != original)
+        Files.writeString(path, duplicated)
+        shouldThrowAny { BuilderToolsReloadPreflight.prepare(root) }.message.orEmpty() shouldContain "duplicate key 'blocks-per-tick'"
+        Files.readString(path) shouldBe duplicated
+    }
+
     test("reload validates the movement cadence and preserves operator overrides") {
         val root = configRoot()
         val config = Config(root, "modules/builder-tools.yml")

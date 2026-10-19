@@ -59,6 +59,7 @@ internal data class BuilderConstructionSiteDisplaySettings(
     val panelBackgroundColor: Color,
     val viewRange: Double,
     val defaultLocale: String,
+    val panelAppearance: BuilderPlaqueAppearance = BuilderPlaqueAppearance(panelBackgroundColor, glowColor = glowColor),
 )
 
 internal fun BuilderToolsConfig.constructionSiteDisplaySettings() = BuilderConstructionSiteDisplaySettings(
@@ -74,9 +75,10 @@ internal fun BuilderToolsConfig.constructionSiteDisplaySettings() = BuilderConst
     panelInteractionWidth = constructionSitePanelInteractionWidth,
     panelInteractionHeight = constructionSitePanelInteractionHeight,
     panelLineWidth = constructionSitePanelLineWidth,
-    panelBackgroundColor = Color.fromARGB(constructionSitePanelBackgroundColor.removePrefix("#").toLong(16).toInt()),
+    panelBackgroundColor = plaqueAppearance().background,
     viewRange = constructionSiteViewRange,
     defaultLocale = defaultLocaleTag,
+    panelAppearance = plaqueAppearance(),
 )
 
 internal data class BuilderConstructionSiteDisplayModel(
@@ -253,6 +255,12 @@ internal class BuilderConstructionSiteDisplayManager(
         glowing = true,
         glowColor = settings.glowColor,
     )
+    private var panelAppearance = settings.panelAppearance
+
+    fun updatePlaqueAppearance(next: BuilderPlaqueAppearance): Int {
+        panelAppearance = next
+        return scenes.values.count { scene -> scene.plaque?.let { it.updateAppearance(next); true } ?: false }
+    }
     private val controls = PaperSpatialControls(plugin, displays, object : SpatialControlController<SitePanelContext, Unit>() {
         override fun current(player: Player, scene: SpatialSceneKey): SpatialControlFrame<SitePanelContext, Unit>? {
             val projectId = UUID.fromString(scene.value)
@@ -385,6 +393,7 @@ internal class BuilderConstructionSiteDisplayManager(
             if (settings.panelEnabled) BuilderWorldPlaque(displays, space, BuilderWorldPlaqueStyle(
                 settings.panelInteractionWidth, settings.panelInteractionHeight, settings.panelLineWidth,
                 settings.panelBackgroundColor, settings.glowColor, settings.viewRange,
+                panelAppearance,
             ), audience) else null,
         ).also { created ->
             scenes[project.projectId] = created

@@ -1,10 +1,16 @@
 package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.TextComponent
+import net.kyori.adventure.text.format.Style
+import net.kyori.adventure.text.format.TextDecoration
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Color
+import org.bukkit.Bukkit
 import org.bukkit.Location
+import org.bukkit.Particle
 import org.bukkit.entity.Display
+import org.bukkit.entity.Player
 import org.bukkit.util.Transformation
 import org.joml.Quaternionf
 import org.joml.Vector3d
@@ -32,6 +38,8 @@ import ru.arc.paper.scene.SpatialReach
 import ru.arc.paper.scene.SpatialSceneScope
 import ru.arc.text.TextAlignment
 import ru.arc.text.TextLayoutResult
+import ru.arc.text.ComponentTextLayout
+import ru.arc.text.GlyphWidths
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
@@ -44,6 +52,7 @@ internal data class BuilderWorldPlaqueStyle(
     val backgroundColor: Color,
     val glowColor: Color,
     val viewRange: Double,
+    val appearance: BuilderPlaqueAppearance = BuilderPlaqueAppearance(backgroundColor, glowColor = glowColor),
 )
 
 /** Builder's authored plaque appearance; Core owns reconciliation, spatial search and input. */
@@ -52,32 +61,38 @@ internal class BuilderWorldPlaque(
     private val space: PaperSpatialSpace,
     private val style: BuilderWorldPlaqueStyle,
     private val audience: SceneAudience,
+    private val canView: (Player) -> Boolean = { true },
 ) : AutoCloseable {
     private val scene = PacketDisplayScene<Int>(displays)
     private var authored: Location? = null
     private var text: Component = Component.empty()
     private var footprint: DisplayOrientedVolume? = null
+    private var decoration = 0.0 to 0.0
     private var previous: Location? = null
     private var placed: Location? = null
     private var enabled = true
+    private var closed = false
+    private var appearance = style.appearance
+    private var rimBlock = if (appearance.glowEnabled) appearance.glowMaterial.createBlockData() else null
+    private var lastEmissionTick: Int? = null
     private var refreshController: SceneRefreshController? = null
     private val displayStyle = SceneDisplayStyle(
         brightness = Display.Brightness(15, 15),
         viewRange = (style.viewRange / 64.0).toFloat(),
         displayWidth = style.interactionWidth,
         displayHeight = style.interactionHeight,
-        glowing = true,
-        glowColor = style.glowColor,
+        // The vanilla TextDisplay renderer does not submit an outline. Optional glow uses the rim below.
+        glowing = false,
     )
     private val textStyle = SceneTextStyle(
         lineWidth = style.lineWidth,
-        background = style.backgroundColor,
+        background = appearance.background,
         shadowed = true,
     )
 
     /** The callback reapplies cached presentation and its controls, never a construction plan. */
     fun refreshWith(refresh: () -> Unit) {
-        refreshController = SceneRefreshController(refresh)
+        refreshController = SceneRefreshController { refresh(); emitTrail(Bukkit.getCurrentTick()) }
         authored?.let { scene.refreshWith(SceneRefreshRegion(it, audience, style.viewRange), checkNotNull(refreshController)) }
     }
 
@@ -90,11 +105,13 @@ internal class BuilderWorldPlaque(
             authored = location.clone()
             text = content
             footprint = visualFootprint(location, content, style.lineWidth)
+            decoration = decorationBounds(content, style.lineWidth)
         }
         refresh()
     }
 
     fun refresh(visible: Boolean = true) {
+        if (closed) return
         val anchor = authored ?: return
         enabled = visible
         val volumes = listOf(checkNotNull(footprint))
@@ -115,12 +132,69 @@ internal class BuilderWorldPlaque(
                     )),
                     displayStyle,
                     text,
-                    textStyle,
+                    textStyle.copy(background = appearance.background),
                     visible = placed != null,
                 )
-            },
+            } + rimParts(at),
             audience,
         ))
+    }
+
+    fun updateAppearance(next: BuilderPlaqueAppearance) {
+        check(!closed)
+        appearance = next
+        rimBlock = if (next.glowEnabled) next.glowMaterial.createBlockData() else null
+        lastEmissionTick = null
+        refresh(enabled)
+    }
+
+    private fun rimParts(at: Location): List<ScenePart<Int>> {
+        val block = rimBlock ?: return emptyList()
+        val padding = appearance.trail.padding
+        val width = decoration.first + padding * 2
+        val height = decoration.second + padding * 2
+        val thickness = appearance.glowThickness
+        val rimStyle = displayStyle.copy(glowing = true, glowColor = appearance.glowColor)
+        // Four bars meet at their ends; no coplanar overlapping faces or duplicate front/back rim.
+        return listOf(
+            floatArrayOf((-width / 2).toFloat(), -padding.toFloat(), width.toFloat(), thickness),
+            floatArrayOf((-width / 2).toFloat(), (height - padding - thickness).toFloat(), width.toFloat(), thickness),
+            floatArrayOf((-width / 2).toFloat(), (-padding + thickness).toFloat(), thickness, (height - thickness * 2).toFloat()),
+            floatArrayOf((width / 2 - thickness).toFloat(), (-padding + thickness).toFloat(), thickness, (height - thickness * 2).toFloat()),
+        ).mapIndexed { index, bar ->
+            ScenePart.Block(index + 2, ScenePose(at, Transformation(
+                Vector3f(bar[0], bar[1], -thickness / 2), Quaternionf(), Vector3f(bar[2], bar[3], thickness), Quaternionf(),
+            )), rimStyle, block, visible = placed != null)
+        }
+    }
+
+    /** Called only by the existing five-tick scene capture; no emitter/task survives its plaque. */
+    internal fun emitTrail(tick: Int) {
+        val at = placed ?: return
+        val trail = appearance.trail
+        if (closed || !enabled || !trail.enabled || lastEmissionTick?.let { tick - it < trail.intervalTicks } == true) return
+        lastEmissionTick = tick
+        val points = builderPlaqueTrail(decoration.first, decoration.second, tick.toLong(), trail)
+        val world = at.world ?: return
+        val range = minOf(style.viewRange, trail.viewRange)
+        val viewers = world.getNearbyPlayers(at, range).asSequence()
+            .filter { it.isOnline && !it.isDead && canView(it) &&
+                (audience !is SceneAudience.Private || it.uniqueId == audience.viewerId) &&
+                it.isChunkSent(org.bukkit.Chunk.getChunkKey(at.blockX shr 4, at.blockZ shr 4)) }
+            .take(trail.maxViewers).toList()
+        if (viewers.isEmpty()) return
+        val angle = Math.toRadians(at.yaw.toDouble())
+        for (viewer in viewers) {
+            if (!BuilderPlaqueParticleBudget.admit(viewer.uniqueId, tick, points.size)) continue
+            for (point in points) {
+                val data = if (trail.particle == Particle.DUST) Particle.DustOptions(
+                    Color.fromRGB((trail.color.red * point.strength).toInt(), (trail.color.green * point.strength).toInt(),
+                        (trail.color.blue * point.strength).toInt()), trail.size * point.strength,
+                ) else null
+                viewer.spawnParticle(trail.particle, at.x + cos(angle) * point.x, at.y + point.y,
+                    at.z + sin(angle) * point.x, 1, 0.0, 0.0, 0.0, 0.0, data)
+            }
+        }
     }
 
     fun <C : Any> controls(context: C): SpatialControlFrame<C, Unit> {
@@ -165,7 +239,12 @@ internal class BuilderWorldPlaque(
         )
     }
 
-    override fun close() = scene.close()
+    override fun close() {
+        if (closed) return
+        closed = true
+        placed = null
+        scene.close()
+    }
 
     companion object {
         const val SCALE = 2f
@@ -176,6 +255,43 @@ internal class BuilderWorldPlaque(
         internal const val MAX_UPWARD_SHIFT = .5
         internal const val MAX_SIDE_SHIFT = .5
         internal const val VERTICAL_PADDING = .02
+
+        private val decorationWidths = GlyphWidths { font, point, bold ->
+            if (font.asString() != "minecraft:default") null
+            else {
+                // Native 1.21.11 unifont advance for the bundled 🛠 prefix: 7px (8px bold).
+                // Core's snapshot covers ordinary glyphs but omits this supplementary code point.
+                val normal = if (point == 0x1F6E0) 7 else if (point <= Char.MAX_VALUE.code)
+                    runCatching { DialogTextLayout.glyphWidth(point.toChar()) }.getOrNull() else null
+                normal?.plus(if (bold) 1 else 0)
+            }
+        }
+        private val decorationLayout = ComponentTextLayout(decorationWidths, DialogTextLayout.spacing)
+
+        /** Tight decorative bounds use known glyph advances; collision keeps its conservative envelope. */
+        internal fun decorationBounds(text: Component, lineWidth: Int): Pair<Double, Double> {
+            val layout = if (lineWidth in 1..1023)
+                decorationLayout.layout(text, lineWidth, TextAlignment.LEFT) as? TextLayoutResult.Aligned else null
+            if (layout == null) return visualWidth(lineWidth) to visualHeight(text, lineWidth)
+            var line = 0
+            var widest = 0
+            fun measure(component: Component, inherited: Style) {
+                val effective = component.style().merge(inherited, Style.Merge.Strategy.IF_ABSENT_ON_TARGET)
+                val font = effective.font() ?: net.kyori.adventure.key.Key.key("minecraft:default")
+                val bold = effective.decoration(TextDecoration.BOLD) == TextDecoration.State.TRUE
+                if (component is TextComponent) component.content().codePoints().forEach { point ->
+                    when (point) {
+                        '\n'.code -> { widest = max(widest, line); line = 0 }
+                        in 0xF0F01..0xF0F0A -> Unit // Core's synthetic right-padding, never rendered by this plaque.
+                        else -> line += checkNotNull(decorationWidths.width(font, point, bold))
+                    }
+                }
+                component.children().forEach { measure(it, effective) }
+            }
+            measure(layout.component, Style.empty())
+            // Native backdrop spans [-width/2, width/2+1] px; cover both opposing text faces.
+            return (max(widest, line) + 2) * PIXEL_SIZE * SCALE to layout.lineCount * 10 * PIXEL_SIZE * SCALE
+        }
 
         internal fun visualWidth(lineWidth: Int) = (lineWidth + 4) * PIXEL_SIZE * SCALE
 
@@ -230,5 +346,18 @@ internal class BuilderWorldPlaque(
                 }
                 lines
             }
+    }
+}
+
+/** Decoration cannot multiply without bound when several nearby projects share an observer. */
+private object BuilderPlaqueParticleBudget {
+    private var currentTick: Int? = null
+    private val used = mutableMapOf<java.util.UUID, Int>()
+    fun admit(viewer: java.util.UUID, tick: Int, count: Int): Boolean {
+        if (currentTick != tick) { currentTick = tick; used.clear() }
+        val previous = used[viewer] ?: 0
+        if (previous + count > 96) return false
+        used[viewer] = previous + count
+        return true
     }
 }

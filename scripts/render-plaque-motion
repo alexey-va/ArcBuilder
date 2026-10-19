@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Render the focused production geometry export with the existing Minecraft font helper."""
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import importlib.util
+import io
+import json
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dump", type=Path, default=ROOT / "build/reports/builder-plaque/motion.json")
+    parser.add_argument("--ops-root", type=Path, default=ROOT.parent.parent / "mcserver")
+    parser.add_argument("--client-jar", type=Path, required=True)
+    parser.add_argument("--font-assets", type=Path, required=True)
+    args = parser.parse_args()
+    helper = args.ops_root / ".agents/skills/draw-pixel-art-icons/scripts/minecraft_surface_core.py"
+    spec = importlib.util.spec_from_file_location("minecraft_surface_core", helper)
+    core = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = core
+    spec.loader.exec_module(core)
+    from PIL import Image, ImageDraw
+
+    data = json.loads(args.dump.read_text())
+    glyphs, advances = core.load_font_glyphs(args.client_jar, faithful32=None, raster_scale=3, font_assets=args.font_assets)
+    stack = core.FontStack(glyphs, advances, None, None, 0, 3)
+    lines = data["text"].split("\n")
+    widths = [core.measured_width(line, advances) for line in lines]
+    # This deliberately renders one representative sample, not a second text-layout implementation.
+    assert max(widths) <= data["lineWidth"], "Use a representative sample without native wrapping"
+    assert abs((max(widths) + 2) * .05 - data["width"]) < 1e-6
+    assert abs(len(lines) * .5 - data["height"]) < 1e-6
+    bg = data["appearance"]["background"]
+    panel = Image.new("RGBA", ((max(widths) + 2) * 3, len(lines) * 30), tuple(bg[k] & 255 for k in ("red", "green", "blue", "alpha")))
+    for row, line in enumerate(lines):
+        core.ensure_renderable((line,), stack)
+        core.draw_text(panel, (round((max(widths) - widths[row]) * 1.5) + 3, row * 30), line, stack)
+    scene = core.synthetic_minecraft_scene((960, 540), 2, hud=False)
+    out = args.dump.parent
+    panel.save(out / "panel-native-font.png")
+    scene.save(out / "synthetic-scene.png")
+    trail = data["appearance"]["trail"]
+    particles = []
+    for frame_index, frame in enumerate(data["frames"]):
+        for index, point in enumerate(frame["points"]):
+            scale = trail["size"] * point["strength"]
+            random = ((frame_index * 97 + index * 173 + 19) % 997) / 997
+            particles.append((frame["tick"], point, scale, max(1, int(int(8 / (random * .8 + .2)) * scale))))
+
+    def render(tick, mode="after"):
+        image = scene.convert("RGBA")
+        draw = ImageDraw.Draw(image)
+        if tick < data["stopTick"]:
+            face = panel
+            if mode == "opacity-0.4":
+                face = panel.copy()
+                # Preserve opaque text: regenerate only the backdrop at the documented alpha multiplier.
+                face = Image.new("RGBA", panel.size, tuple(bg[k] & 255 for k in ("red", "green", "blue")) + (round((bg["alpha"] & 255) * .4),))
+                for row, line in enumerate(lines):
+                    core.draw_text(face, (round((max(widths) - widths[row]) * 1.5) + 3, row * 30), line, stack)
+            image.alpha_composite(face, (480 - panel.width // 2, 300 - panel.height))
+            if mode == "glow":
+                pad = trail["padding"] * 60
+                draw.rectangle((480 - panel.width / 2 - pad, 300 - panel.height - pad,
+                                480 + panel.width / 2 + pad, 300 + pad), outline="#66d9ff", width=2)
+        alive = 0
+        if mode != "before":
+            for birth, point, scale, life in particles:
+                age = tick - birth
+                if age < 0 or age >= life:
+                    continue
+                alive += 1
+                size = .15 * scale * 60 * min(1, age / life * 32)
+                x, y = 480 + point["x"] * 60, 300 - point["y"] * 60
+                color = tuple(int((trail["color"][k] & 255) * point["strength"]) for k in ("red", "green", "blue"))
+                draw.rectangle((x - size / 2, y - size / 2, x + size / 2, y + size / 2), fill=color)
+        draw.rectangle((18, 18, 942, 64), fill="#101820")
+        draw.text((30, 28), f"SOURCE-DRIVEN / {mode.upper()} / {tick / 20:.2f}s / {data['width']:.2f} x {data['height']:.2f} blocks / particles {alive}", fill="white")
+        draw.text((30, 45), "Native font + production positions. Synthetic scene; approximate dust physics and glow.", fill="#b2c5d3")
+        return image.convert("RGB")
+
+    render(60, "before").save(out / "before.png")
+    render(60).save(out / "after.png")
+    render(60, "glow").save(out / "glow.png")
+    render(60, "opacity-0.4").save(out / "opacity-0.4.png")
+    frames = [render(tick) for tick in range(0, data["endTick"] + 1, 2)]
+    frames[0].save(out / "motion.gif", save_all=True, append_images=frames[1:], duration=100, loop=0, optimize=False)
+    sample_ticks = [0, 60, 120, 180, round(data["cycleTicks"]), round(data["cycleTicks"] + 60), data["stopTick"], data["endTick"]]
+    sheet = Image.new("RGB", (960, 1080), "#10151b")
+    for index, tick in enumerate(sample_ticks):
+        sheet.paste(render(tick).resize((480, 270)), ((index % 2) * 480, (index // 2) * 270))
+    sheet.save(out / "motion-contact-sheet.png")
+
+    def image_uri(image):
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    provenance = {
+        "scope": "Source-driven planar preview, native 1.21.11 font. Synthetic background; no live client.",
+        "nativeGaps": "Dust random lifetime/physics/occlusion and glowing BlockDisplay outline are approximated; no client performance claim.",
+        "fontWidthsPx": widths,
+        "files": {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in (
+            args.dump, args.client_jar, args.font_assets, helper,
+            ROOT / "src/main/kotlin/ru/arc/buildertools/BuilderWorldPlaque.kt",
+            ROOT / "src/main/kotlin/ru/arc/buildertools/BuilderPlaqueAppearance.kt",
+            ROOT / "src/main/resources/modules/builder-tools.yml",
+        )},
+    }
+    (out / "preview-provenance.json").write_text(json.dumps(provenance, indent=2))
+    html = r'''<!doctype html><html lang="ru"><meta charset="utf-8"><title>Builder plaque · source-driven motion</title>
+<style>body{margin:0;background:#10151b;color:#e3edf4;font:15px system-ui}main{max-width:1000px;margin:24px auto;padding:0 20px}h1{font-size:22px;margin-bottom:8px}p{color:#a9bdcc;line-height:1.5}canvas{width:100%;border:1px solid #39444c;image-rendering:pixelated}button{font:inherit;color:#e3edf4;background:#263340;border:1px solid #577082;border-radius:5px;padding:7px 13px;cursor:pointer}button[aria-pressed=true]{border-color:#66d9ff;background:#254858}nav{display:flex;gap:8px;align-items:center;margin:16px 0}input{flex:1}small{color:#a9bdcc}output{font-variant-numeric:tabular-nums;min-width:92px}</style>
+<main><h1>Настройки постройки · движение по краю</h1>
+<p>Source-driven preview: реальные locale, размеры и точки эмиссии из Kotlin. Шрифт Minecraft 1.21.11; фронтальный вид детали, синтетическая сцена.</p>
+<nav><button data-mode="before">До</button><button data-mode="after" aria-pressed="true">По умолчанию</button><button data-mode="glow">Опциональный glow</button><button id="play">Пауза</button></nav>
+<canvas width="960" height="540"></canvas>
+<nav><input id="time" type="range" min="0" step="0.05"><output></output></nav>
+<small>20 TPS · две окружности, затем закрытие панели и затухание уже отправленных частиц. Dust lifetime/размер/движение и outline рамки приближены; это не native-client acceptance. Нажмите «До» для сравнения той же камеры.</small></main>
+<script>
+const d=__DATA__,canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d'),slider=document.querySelector('#time'),out=document.querySelector('output');
+const texture=new Image(),scene=new Image();texture.src='__PANEL__';scene.src='__SCENE__';
+const px=60,cx=480,bottom=300,trail=d.appearance.trail;let mode='after',tick=0,playing=true,last=0;
+slider.max=d.endTick/20;
+const particles=[];
+for(const [f,frame] of d.frames.entries())for(const [i,p] of frame.points.entries()){
+ const rand=((f*97+i*173+19)%997)/997,scale=trail.size*p.strength;
+ particles.push({...p,born:frame.tick,life:Math.max(1,Math.floor(Math.floor(8/(rand*.8+.2))*scale)),scale});
+}
+function draw(){
+ ctx.imageSmoothingEnabled=false;ctx.drawImage(scene,0,0,960,540);
+ if(tick<d.stopTick){
+  ctx.drawImage(texture,cx-texture.width/2,bottom-texture.height);
+  if(mode==='glow'){
+   // A schematic rim preview, not a claim about the native post-process outline.
+   const pad=trail.padding*px,x=cx-d.width*px/2-pad,y=bottom-d.height*px-pad;
+   ctx.strokeStyle='#66d9ff';ctx.lineWidth=d.appearance.glowThickness*px;ctx.strokeRect(x,y,d.width*px+pad*2,d.height*px+pad*2);
+  }
+ }
+ let alive=0;
+ if(mode!=='before')for(const p of particles){const age=tick-p.born;if(age<0||age>=p.life)continue;alive++;
+  const growth=Math.min(1,age/p.life*32),size=.15*p.scale*px*growth;
+  const col=trail.color;ctx.fillStyle=`rgb(${Math.floor((col.red&255)*p.strength)} ${Math.floor((col.green&255)*p.strength)} ${Math.floor((col.blue&255)*p.strength)})`;
+  ctx.fillRect(cx+p.x*px-size/2,bottom-p.y*px-size/2,size,size);
+ }
+ ctx.fillStyle='#101820d9';ctx.fillRect(18,18,924,55);ctx.fillStyle='#e3edf4';ctx.font='17px system-ui';
+ ctx.fillText(`${mode==='before'?'До: та же читаемая голограмма':mode==='glow'?'Glow: четыре тонких BlockDisplay-полосы (приближение)':'Default: один cyan-хвост по краю'} · ${(tick/20).toFixed(2)} с`,32,42);
+ ctx.font='13px system-ui';ctx.fillStyle='#a9bdcc';ctx.fillText(`${d.width.toFixed(2)} × ${d.height.toFixed(2)} блока · ${trail.speed} блока/с · обновление ${trail.intervalTicks} ticks · ${tick>=d.stopTick?'CLOSED, новых эмиссий нет':`цикл ${Math.floor(tick/d.cycleTicks)+1}`} · ${alive} частиц в модели`,32,63);
+ slider.value=tick/20;out.value=(tick/20).toFixed(2)+' / '+(d.endTick/20).toFixed(2)+' с';canvas.dataset.tick=tick.toFixed(2);canvas.dataset.alive=alive;
+}
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;document.querySelectorAll('[data-mode]').forEach(x=>x.setAttribute('aria-pressed',x===b));draw()});
+document.querySelector('#play').onclick=()=>{playing=!playing;document.querySelector('#play').textContent=playing?'Пауза':'Продолжить'};
+slider.oninput=()=>{tick=Number(slider.value)*20;playing=false;document.querySelector('#play').textContent='Продолжить';draw()};
+function frame(now){if(last&&playing)tick=(tick+Math.min(now-last,1000)*.02)%(d.endTick+20);last=now;draw();requestAnimationFrame(frame)}
+Promise.all([texture.decode(),scene.decode()]).then(()=>requestAnimationFrame(frame));
+</script></html>'''
+    html = html.replace("__DATA__", json.dumps(data)).replace("__PANEL__", image_uri(panel)).replace("__SCENE__", image_uri(scene))
+    (out / "motion.html").write_text(html)
+    print(out / "motion.html")
+
+
+if __name__ == "__main__":
+    main()

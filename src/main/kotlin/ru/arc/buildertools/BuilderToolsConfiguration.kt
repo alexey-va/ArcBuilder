@@ -15,7 +15,12 @@ internal data class BuilderToolsPreparedConfiguration(
     val schematicsRoot: Path? = null,
     val messages: LocalizedMiniMessage = settings.messages(),
     val sourceHashes: Map<Path, String?> = emptyMap(),
+    val nonPlaqueFingerprint: String? = null,
 )
+
+internal fun onlyPlaqueAppearanceChanged(previous: BuilderToolsPreparedConfiguration, next: BuilderToolsPreparedConfiguration): Boolean =
+    previous.dataRoot == next.dataRoot && previous.nonPlaqueFingerprint != null &&
+        previous.nonPlaqueFingerprint == next.nonPlaqueFingerprint
 
 /** Native consumers read one already-loaded generation without probing the filesystem. */
 internal object BuilderToolsConfiguration {

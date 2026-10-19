@@ -40,6 +40,54 @@ import java.util.UUID
 import java.util.function.Consumer
 
 class BuilderWorldPlaqueTest : StringSpec({
+    "trail emission follows the yaw and audience cadence and stops on hide disable and close" {
+        val h = BuilderPlaqueDisplays()
+        val world = mockk<World>(relaxed = true)
+        val owner = mockk<Player>(relaxed = true)
+        val stranger = mockk<Player>(relaxed = true)
+        every { owner.uniqueId } returns UUID.randomUUID()
+        every { stranger.uniqueId } returns UUID.randomUUID()
+        every { owner.isOnline } returns true
+        every { stranger.isOnline } returns true
+        every { owner.isChunkSent(any<Long>()) } returns true
+        every { stranger.isChunkSent(any<Long>()) } returns true
+        every { world.getNearbyPlayers(any<Location>(), any<Double>()) } returns listOf(owner, stranger)
+        val emitted = mutableListOf<org.joml.Vector3d>()
+        every { owner.spawnParticle(any<org.bukkit.Particle>(), any<Double>(), any<Double>(), any<Double>(), any<Int>(),
+            any<Double>(), any<Double>(), any<Double>(), any<Double>(), any<org.bukkit.Particle.DustOptions>()) } answers {
+            emitted += org.joml.Vector3d(secondArg<Double>(), thirdArg<Double>(), arg<Double>(3)); Unit
+        }
+        val style = plaqueStyle()
+        val plaque = BuilderWorldPlaque(h.owner, unblockedPlaqueSpace(), style, SceneAudience.Public()) { it.uniqueId == owner.uniqueId }
+        plaque.update(Location(world, 10.0, 64.0, 20.0, 90f, 0f), Component.text("Дом"))
+        plaque.emitTrail(0)
+        val bounds = BuilderWorldPlaque.decorationBounds(Component.text("Дом"), style.lineWidth)
+        val count = builderPlaqueTrail(bounds.first, bounds.second, 0, style.appearance.trail).size
+        emitted.size shouldBe count
+        emitted.forEach { it.x shouldBe (10.0 plusOrMinus 1e-8) }
+        emitted.first().y shouldBe (64.58 plusOrMinus 1e-8)
+        emitted.first().z shouldBe (20.0 - bounds.first / 2 - style.appearance.trail.padding plusOrMinus 1e-8)
+        plaque.emitTrail(4)
+        emitted.size shouldBe count
+        plaque.emitTrail(5)
+        emitted.size shouldBe count * 2
+        plaque.updateAppearance(style.appearance.copy(trail = style.appearance.trail.copy(enabled = false)))
+        plaque.emitTrail(10)
+        emitted.size shouldBe count * 2
+        plaque.updateAppearance(style.appearance)
+        plaque.refresh(false)
+        plaque.emitTrail(15)
+        emitted.size shouldBe count * 2
+        plaque.refresh()
+        plaque.emitTrail(20)
+        emitted.size shouldBe count * 3
+        plaque.close()
+        plaque.emitTrail(25)
+        emitted.size shouldBe count * 3
+        verify(exactly = 0) { stranger.spawnParticle(any<org.bukkit.Particle>(), any<Double>(), any<Double>(), any<Double>(), any<Int>(),
+            any<Double>(), any<Double>(), any<Double>(), any<Double>(), any<org.bukkit.Particle.DustOptions>()) }
+    }
+
     "a two-sided plaque covers its full scaled label with narrow native targets and stable visual identities" {
         val h = BuilderPlaqueDisplays()
         val world = mockk<World>(relaxed = true)

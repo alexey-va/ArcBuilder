@@ -56,7 +56,7 @@ The plugin uses arc-core 2.7.18 and requires ARC for its shared visual packet bu
 - Wilderness is buildable. Inside a Lands claim the normal place/break checks
   still apply. WorldGuard is not a dependency.
 - Construction books start as free drafts. Right click opens an owner-only world
-  preview for at most three minutes. Its fixed glowing plaque appears on the
+  preview for at most three minutes. Its fixed clickable plaque appears on the
   nearest face and opens session-only move/rotate controls plus the final build
   confirmation; these controls never rewrite the book. A chat button cancels the
   preview. Ordinary players may durably apply one construction book every 12
@@ -79,6 +79,34 @@ configured `../ARC/schematics` path. ArcCore supplies asynchronous lazy loading,
 verified file/content digests and native transforms with a bounded expiring cache.
 Nested IDs such as `civs/myschema` work alongside existing suffixed book IDs. ARC must not contain Builder classes,
 commands, listeners, permissions, or module configs after migration.
+
+Plaque appearance lives under `construction.site.panel` in `builder-tools.yml`:
+`background-color` accepts `#RRGGBB` or legacy `#AARRGGBB`; `background-opacity`
+is a 0–1 multiplier on that alpha (default `1.0` preserves existing backgrounds).
+`border-trail` controls the enabled particle, RGB color, size, speed in blocks per
+second at 20 TPS, tail length/spacing/padding in blocks, tick cadence, range and
+viewer cap. The bundled comments list supported types and validated bounds.
+`glow.enabled` optionally adds four thin glowing BlockDisplay bars; its color,
+material and thickness are configurable. It defaults off. Native 1.21.11
+TextDisplay text does not submit an outline; full brightness is separate from glow.
+The verified [client bytecode proof](../artifacts/world-panels-20261017/native-text-proof/README.md)
+uses renderer `hwe$c` (the `submitText` call passes zero outline color).
+
+Appearance-only `/builder reload` updates existing plaques in place, including
+retained confirmations, without closing their controls. Mixed appearance and
+gameplay edits still obey the normal busy barrier and are rejected together.
+Unknown or duplicate YAML keys cannot conceal such edits. Particles reuse scene
+capture, send only to eligible nearby viewers, and stop on hide/disable/close;
+already-sent native particles expire naturally. Hard limits are 32 samples per
+plaque emission and 96 particle births per viewer per tick across plaques.
+
+For the focused source-driven animation, run `BuilderPlaqueAppearanceTest`, then
+`python3 scripts/render-plaque-motion --client-jar <1.21.11-client.jar>
+--font-assets <1.21.11-font-assets.zip>` (the existing surface renderer's asset
+bundle). Outputs are `build/reports/builder-plaque/motion.html`, `motion.gif`,
+before/after/glow PNGs and provenance. Font metrics and positions come from the
+actual resources/source; synthetic scenery, dust physics and the glow outline
+remain approximations. Unknown custom fonts use conservative decoration bounds.
 
 For the complete operator key inventory and the safe `/builder reload` runbook
 (runtime overlays, transactional preflight, active-state drain, enabled/disabled

@@ -47,6 +47,11 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
             reloadBlocker = BuilderToolsRuntime::reloadBlocker,
             publishConfig = BuilderToolsConfigPublication::publish,
             validateCandidate = { it.settings.validateNativeMaterials() },
+            canRefreshInPlace = ::onlyPlaqueAppearanceChanged,
+            refreshInPlace = { active, candidate ->
+                active.updatePlaqueAppearance(candidate.settings)
+                BuilderToolsConfiguration.install(candidate)
+            },
         )
         if (initialRuntime == null) {
             info("Builder tools disabled by configuration")
@@ -146,7 +151,7 @@ object BuilderToolsModule : PluginModule, CommandExecutor, TabCompleter {
             is BuilderToolsReloadResult.Applied -> {
                 messages = result.config.messages
                 sender.sendMessage(result.config.messages.render("reload.success", locale))
-                info("Builder tools configuration reloaded")
+                info(if (result.inPlace) "Builder tools configuration reloaded: plaque appearance updated in place" else "Builder tools configuration reloaded")
             }
             is BuilderToolsReloadResult.Busy -> sender.sendMessage(catalog.render("reload.busy", locale))
             is BuilderToolsReloadResult.Rejected -> {

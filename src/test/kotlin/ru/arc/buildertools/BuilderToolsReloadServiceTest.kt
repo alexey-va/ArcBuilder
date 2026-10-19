@@ -5,6 +5,47 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 
 class BuilderToolsReloadServiceTest : FunSpec({
+    test("appearance reload preserves a busy runtime and mixed domain changes leave it entirely untouched") {
+        val active = FakeReloadRuntime(blocker = BuilderToolsReloadBlocker.PENDING_PREVIEW)
+        val events = mutableListOf<String>()
+        var candidate = "appearance"
+        val service = BuilderToolsReloadService(
+            initialConfig = "previous", initialRuntime = active,
+            loadCandidate = { candidate }, createRuntime = { error("must retain existing runtime") },
+            reloadBlocker = FakeReloadRuntime::blocker,
+            publishConfig = { events += "publish-$it"; {} },
+            canRefreshInPlace = { _, next -> next == "appearance" },
+            refreshInPlace = { runtime, next -> runtime shouldBe active; events += "refresh-$next" },
+        )
+        service.reload() shouldBe BuilderToolsReloadResult.Applied("appearance", inPlace = true)
+        active.closeCalls shouldBe 0
+        service.runtime shouldBe active
+        events shouldBe listOf("publish-appearance", "refresh-appearance")
+        candidate = "appearance-and-domain"
+        service.reload() shouldBe BuilderToolsReloadResult.Busy(BuilderToolsReloadBlocker.PENDING_PREVIEW)
+        service.config shouldBe "appearance"
+        service.runtime shouldBe active
+        events shouldBe listOf("publish-appearance", "refresh-appearance")
+    }
+
+    test("failed in-place refresh restores files and old visual settings without closing player state") {
+        val active = FakeReloadRuntime(blocker = BuilderToolsReloadBlocker.VOLATILE_PLAYER_STATE)
+        val events = mutableListOf<String>()
+        val service = BuilderToolsReloadService(
+            initialConfig = "previous", initialRuntime = active,
+            loadCandidate = { "candidate" }, createRuntime = { error("must not recreate") },
+            reloadBlocker = FakeReloadRuntime::blocker,
+            publishConfig = { { events += "restore-files"; Unit } },
+            canRefreshInPlace = { _, _ -> true },
+            refreshInPlace = { _, next -> events += next; if (next == "candidate") error("visual failure") },
+        )
+        service.reload().shouldBeInstanceOf<BuilderToolsReloadResult.Rejected>().rollbackFailure shouldBe null
+        events shouldBe listOf("candidate", "restore-files", "previous")
+        service.config shouldBe "previous"
+        service.runtime shouldBe active
+        active.closeCalls shouldBe 0
+    }
+
     test("durable construction reload refuses only in-flight work") {
         builderConstructionReloadBlocked(0, 0) shouldBe false
         builderConstructionReloadBlocked(1, 0) shouldBe true

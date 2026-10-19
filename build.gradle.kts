@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.86"
+version = "1.0.87"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {

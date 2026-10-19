@@ -679,12 +679,11 @@ internal class BuilderToolsRuntime(
                 panelInteractionWidth = config.constructionSitePanelInteractionWidth,
                 panelInteractionHeight = config.constructionSitePanelInteractionHeight,
                 panelLineWidth = config.constructionSitePanelLineWidth,
-                panelBackgroundColor = Color.fromARGB(
-                    config.constructionSitePanelBackgroundColor.removePrefix("#").toLong(16).toInt(),
-                ),
+                panelBackgroundColor = config.plaqueAppearance().background,
                 panelGlowColor = Color.fromRGB(config.constructionSiteGlowColor.removePrefix("#").toInt(16)),
                 viewRange = config.constructionSiteViewRange,
                 planningTasks = planningTasks,
+                panelAppearance = config.plaqueAppearance(),
             ).also { initializedBookPreviewPresentation = it }
             BuildingManager.installPreviewBridge(
                 bookPreviewPresentation,
@@ -4094,6 +4093,14 @@ internal class BuilderToolsRuntime(
                 BuilderToolsReloadBlocker.ACTIVE_CONSTRUCTION
             else -> null
         }
+    }
+
+    internal fun updatePlaqueAppearance(settings: BuilderToolsConfig) {
+        check(!closed)
+        val appearance = settings.plaqueAppearance()
+        val previews = bookPreviewPresentation.updatePlaqueAppearance(appearance)
+        val sites = constructionSiteDisplays.updatePlaqueAppearance(appearance)
+        info("Builder plaque appearance applied: previews={} construction-sites={}", previews, sites)
     }
 
     private fun publishRuntimeHealth() {

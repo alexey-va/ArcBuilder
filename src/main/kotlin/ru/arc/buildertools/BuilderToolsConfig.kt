@@ -89,6 +89,7 @@ class BuilderToolsConfig(
         get() = config.integer("construction.site.panel.max-material-lines", 8)
     val constructionSitePanelBackgroundColor: String
         get() = config.string("construction.site.panel.background-color", "#E6101418")
+    internal fun plaqueAppearance(): BuilderPlaqueAppearance = BuilderPlaqueAppearance.read(config)
     val constructionSiteMenuRows: Int get() = config.integer("construction.site.menu.rows", 3)
     val constructionSiteMenuRefreshPeriodTicks: Long
         get() = config.long("construction.site.menu.refresh-period-ticks", 10L)
@@ -272,9 +273,7 @@ class BuilderToolsConfig(
         require(constructionSiteMaxMaterialLines in 1..32) {
             "Builder construction site material line limit is invalid"
         }
-        require(ARGB_COLOR.matches(constructionSitePanelBackgroundColor)) {
-            "Builder construction site panel background color is invalid"
-        }
+        plaqueAppearance()
         require(constructionSiteMenuRows in 1..6) { "Builder construction site menu row count is invalid" }
         require(constructionSiteMenuRefreshPeriodTicks in 5L..100L) {
             "Builder construction site menu refresh period is invalid"
@@ -356,6 +355,9 @@ class BuilderToolsConfig(
 
     /** Paper 1.21.11 resolves these predicates through native registries; call on the server thread. */
     internal fun validateNativeMaterials() {
+        require(plaqueAppearance().glowMaterial.let { it.isBlock && !it.isAir }) {
+            "Builder plaque glow.material must be a non-air block"
+        }
         require(constructionSiteOutlineMaterial.isBlock && !constructionSiteOutlineMaterial.isAir) {
             "Builder construction site outline material is invalid"
         }

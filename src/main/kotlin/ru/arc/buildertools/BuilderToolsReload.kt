@@ -34,7 +34,7 @@ internal fun builderConstructionReloadBlocked(writesInFlight: Int, completionsIn
 }
 
 internal sealed interface BuilderToolsReloadResult<out C> {
-    data class Applied<C>(val config: C) : BuilderToolsReloadResult<C>
+    data class Applied<C>(val config: C, val inPlace: Boolean = false) : BuilderToolsReloadResult<C>
     data class Busy(val blocker: BuilderToolsReloadBlocker) : BuilderToolsReloadResult<Nothing>
     data class Rejected(val failure: Throwable, val rollbackFailure: Throwable? = null) : BuilderToolsReloadResult<Nothing>
 }
@@ -48,6 +48,8 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
     private val reloadBlocker: (R) -> BuilderToolsReloadBlocker?,
     private val publishConfig: (C) -> (() -> Unit),
     private val validateCandidate: (C) -> Unit = {},
+    private val canRefreshInPlace: (C, C) -> Boolean = { _, _ -> false },
+    private val refreshInPlace: ((R, C) -> Unit)? = null,
 ) : AutoCloseable {
     var config: C = initialConfig
         private set
@@ -57,13 +59,38 @@ internal class BuilderToolsReloadService<C, R : AutoCloseable>(
 
     fun reload(): BuilderToolsReloadResult<C> {
         if (closed) return BuilderToolsReloadResult.Busy(BuilderToolsReloadBlocker.STARTING_OR_RECOVERING)
-        runtime?.let(reloadBlocker)?.let { return BuilderToolsReloadResult.Busy(it) }
+        val blocker = runtime?.let(reloadBlocker)
+        if (blocker != null && (refreshInPlace == null || blocker == BuilderToolsReloadBlocker.STARTING_OR_RECOVERING)) {
+            return BuilderToolsReloadResult.Busy(blocker)
+        }
         val candidate = try {
             loadCandidate().also(validateCandidate)
         } catch (failure: Throwable) {
             return BuilderToolsReloadResult.Rejected(failure)
         }
         val previous = runtime
+        if (previous != null && refreshInPlace != null && canRefreshInPlace(config, candidate)) {
+            var rollback: (() -> Unit)? = null
+            var refreshStarted = false
+            return try {
+                rollback = publishConfig(candidate)
+                refreshStarted = true
+                refreshInPlace.invoke(previous, candidate)
+                config = candidate
+                BuilderToolsReloadResult.Applied(candidate, inPlace = true)
+            } catch (failure: Throwable) {
+                var restoreFailure = (failure as? BuilderToolsConfigPublicationException)?.rollbackFailure
+                fun restore(action: () -> Unit) {
+                    try { action() } catch (error: Throwable) {
+                        if (restoreFailure == null) restoreFailure = error else restoreFailure!!.addSuppressed(error)
+                    }
+                }
+                rollback?.let { restore(it) }
+                if (refreshStarted) restore { refreshInPlace.invoke(previous, config) }
+                BuilderToolsReloadResult.Rejected(failure, restoreFailure)
+            }
+        }
+        if (blocker != null) return BuilderToolsReloadResult.Busy(blocker)
         runtime = null
         try {
             // close seals native callbacks and finishes accepted I/O before returning.
@@ -156,18 +183,44 @@ internal object BuilderToolsReloadPreflight {
                 Config(stagingRoot, "modules/builder-tools-runtime.yml")
             } else null
             BuildBookSettings.validate(autoBuild, mergeForward = false)
+            // Use Core's actual parsed representation (including MiniMessage color normalization)
+            // for comparison. These writes affect only the disposable staging directory.
+            builder.saveStrict()
+            autoBuild.saveStrict()
+            runtimeOverride?.saveStrict()
             BuilderToolsPreparedConfiguration(
                 dataRoot = dataRoot,
                 settings = BuilderToolsConfig(builder, runtimeOverride).validated(validateNativeMaterials = false),
                 builder = builder,
                 autoBuild = autoBuild,
                 systemBooks = null,
+                nonPlaqueFingerprint = com.google.gson.Gson().toJson(listOf(
+                    semanticYaml(requireYamlMapping(modules.resolve("builder-tools.yml"), "builder-tools.yml"), ignorePlaque = true),
+                    semanticYaml(requireYamlMapping(modules.resolve("auto-build.yml"), "auto-build.yml")),
+                    if (runtimeOverride != null) semanticYaml(requireYamlMapping(modules.resolve("builder-tools-runtime.yml"), "builder-tools-runtime.yml")) else null,
+                    semanticYaml(requireYamlMapping(dataRoot.resolve("modules/system-build-books.yml"), "system-build-books.yml")),
+                )),
             )
         } finally {
             Files.walk(stagingRoot).use { paths ->
                 paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
             }
         }
+    }
+
+    /** Compare every non-appearance value, including unknown keys, independently of comments and mapping order. */
+    private fun semanticYaml(node: Node, path: String = "", ignorePlaque: Boolean = false): Any? = when (node) {
+        is MappingNode -> node.value.associate { tuple ->
+            val key = (tuple.keyNode as ScalarNode).value
+            key to tuple.valueNode
+        }.toSortedMap().mapNotNull { (key, value) ->
+            val child = if (path.isEmpty()) key else "$path.$key"
+            if (ignorePlaque && child in BuilderPlaqueAppearance.RELOAD_PATHS) null
+            else key to semanticYaml(value, child, ignorePlaque)
+        }.toMap()
+        is SequenceNode -> node.value.map { semanticYaml(it, path, ignorePlaque) }
+        is ScalarNode -> listOf(node.tag.value, node.value)
+        else -> error("Unsupported YAML value in $path")
     }
 
     private fun requireYamlMapping(path: Path, label: String): MappingNode {
@@ -177,6 +230,21 @@ internal object BuilderToolsReloadPreflight {
         val settings = LoadSettings.builder().setBufferSize(maxOf(1024, content.length + 1)).build()
         val document = Compose(settings).composeString(content).orElse(null)
         require(document is MappingNode) { "$label must contain a YAML mapping" }
+        fun validateKeys(node: Node, depth: Int = 0) {
+            require(depth <= 64) { "$label contains recursive or excessively nested YAML" }
+            when (node) {
+                is MappingNode -> {
+                    val keys = hashSetOf<String>()
+                    node.value.forEach { tuple ->
+                        val key = tuple.keyNode as? ScalarNode ?: error("$label must use scalar mapping keys")
+                        require(keys.add(key.value)) { "$label contains duplicate key '${key.value}'" }
+                        validateKeys(tuple.valueNode, depth + 1)
+                    }
+                }
+                is SequenceNode -> node.value.forEach { validateKeys(it, depth + 1) }
+            }
+        }
+        validateKeys(document)
         return document
     }
 
@@ -200,6 +268,9 @@ internal object BuilderToolsReloadPreflight {
     }
 
     private enum class YamlValueType(val description: String) {
+        MAPPING("a YAML mapping") {
+            override fun accepts(node: Node): Boolean = node is MappingNode
+        },
         BOOLEAN("a boolean") {
             override fun accepts(node: Node): Boolean = scalar(node)?.trim()?.lowercase() in BOOLEAN_VALUES
         },
@@ -239,6 +310,11 @@ internal object BuilderToolsReloadPreflight {
     }
 
     private val BUILDER_TYPES = mapOf(
+        "construction" to YamlValueType.MAPPING,
+        "construction.site" to YamlValueType.MAPPING,
+        "construction.site.panel" to YamlValueType.MAPPING,
+        "construction.site.panel.glow" to YamlValueType.MAPPING,
+        "construction.site.panel.border-trail" to YamlValueType.MAPPING,
         "enabled" to YamlValueType.BOOLEAN,
         "allowed-worlds" to YamlValueType.STRING_LIST,
         "default-locale" to YamlValueType.STRING,
@@ -277,6 +353,22 @@ internal object BuilderToolsReloadPreflight {
         "construction.site.panel.line-width" to YamlValueType.INT,
         "construction.site.panel.max-material-lines" to YamlValueType.INT,
         "construction.site.panel.background-color" to YamlValueType.STRING,
+        "construction.site.panel.background-opacity" to YamlValueType.DOUBLE,
+        "construction.site.panel.glow.enabled" to YamlValueType.BOOLEAN,
+        "construction.site.panel.glow.color" to YamlValueType.STRING,
+        "construction.site.panel.glow.material" to YamlValueType.STRING,
+        "construction.site.panel.glow.thickness" to YamlValueType.DOUBLE,
+        "construction.site.panel.border-trail.enabled" to YamlValueType.BOOLEAN,
+        "construction.site.panel.border-trail.particle" to YamlValueType.STRING,
+        "construction.site.panel.border-trail.color" to YamlValueType.STRING,
+        "construction.site.panel.border-trail.size" to YamlValueType.DOUBLE,
+        "construction.site.panel.border-trail.speed" to YamlValueType.DOUBLE,
+        "construction.site.panel.border-trail.tail-length" to YamlValueType.DOUBLE,
+        "construction.site.panel.border-trail.spacing" to YamlValueType.DOUBLE,
+        "construction.site.panel.border-trail.padding" to YamlValueType.DOUBLE,
+        "construction.site.panel.border-trail.update-interval-ticks" to YamlValueType.INT,
+        "construction.site.panel.border-trail.view-range" to YamlValueType.DOUBLE,
+        "construction.site.panel.border-trail.max-viewers" to YamlValueType.INT,
         "construction.site.menu.rows" to YamlValueType.INT,
         "construction.site.menu.refresh-period-ticks" to YamlValueType.LONG,
         "construction.site.menu.background-item" to YamlValueType.STRING,

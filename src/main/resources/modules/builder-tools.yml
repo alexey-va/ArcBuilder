@@ -60,8 +60,34 @@ construction:
       interaction-height: 1.5
       line-width: 180
       max-material-lines: 8
-      # ARGB: nearly opaque dark surface, readable against bright builds and sky.
+      # #RRGGBB or legacy #AARRGGBB. Opacity multiplies the color's alpha: 0=clear, 1=unchanged.
+      # Example: background-color '#101418' plus background-opacity 0.90 gives a 90% opaque dark surface.
+      # These appearance keys hot-reload even with an open preview/confirmation; geometry/domain edits still need a drained runtime.
       background-color: '#E6101418'
+      background-opacity: 1.0
+      glow:
+        # Vanilla TextDisplay has no visible native outline; this enables four thin glowing packet BlockDisplay bars.
+        enabled: false
+        color: '#66D9FF'
+        material: LIGHT_BLUE_STAINED_GLASS
+        thickness: 0.025
+      border-trail:
+        enabled: true
+        # DUST (tint/size below), END_ROD, ELECTRIC_SPARK, FLAME or SOUL_FIRE_FLAME.
+        particle: DUST
+        color: '#66D9FF'
+        size: 0.65
+        # Blocks per second at 20 TPS; distance-based spacing leaves a short tapered tail outside the text envelope.
+        speed: 2.0
+        tail-length: 2.4
+        spacing: 0.12
+        padding: 0.08
+        # Existing scene capture runs every 5 ticks. Supported values: 5,10,...,40.
+        update-interval-ticks: 5
+        view-range: 24.0
+        max-viewers: 16
+        # Hard safety bounds: 32 points/emission and 96 particles/viewer/tick across all Builder plaques.
+        # Disabling/closing stops births; already emitted native particles expire naturally on the client.
     menu:
       rows: 3
       refresh-period-ticks: 10
