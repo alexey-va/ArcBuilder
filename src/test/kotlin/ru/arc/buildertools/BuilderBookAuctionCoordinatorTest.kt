@@ -206,6 +206,135 @@ class BuilderBookAuctionCoordinatorTest : TestBase() {
         assertTrue(fixture.player.inventory.itemInMainHand.type.isAir)
     }
 
+    @Test
+    fun `confirmed native closure preserves the lease without delivering or rotating a book`() {
+        fixture.port.result = BuilderBookAuctionListingResult.Listed("42")
+        fixture.port.removeOnSuccess = true
+        fixture.sell()
+        val listed = fixture.registry.instance
+
+        fixture.port.closeStorage()
+        fixture.port.closeStorage()
+
+        assertEquals(listed.copy(status = BuilderBookInstanceStatus.AUCTION_CLOSED), fixture.registry.instance)
+        assertEquals(1, fixture.registry.closureTransitions)
+        assertTrue(fixture.registry.listedForServer("survival").join().isEmpty())
+        assertTrue(fixture.player.inventory.itemInMainHand.type.isAir)
+        assertEquals(listOf("book.auction-listed"), fixture.messages)
+    }
+
+    @Test
+    fun `physical delivery after native closure completes one ordinary ownership transfer`() {
+        val buyer = server.addPlayer("ClosedLotBuyer")
+        fixture.port.result = BuilderBookAuctionListingResult.Listed("42")
+        fixture.port.removeOnSuccess = true
+        fixture.sell()
+        val duplicate = fixture.port.submittedItem()
+        fixture.port.closeStorage()
+
+        fixture.port.deliver(buyer)
+        val transferred = fixture.registry.instance
+        fixture.port.closeStorage()
+
+        assertEquals(BuilderBookInstanceStatus.AVAILABLE, transferred.status)
+        assertEquals(buyer.uniqueId, transferred.ownerId)
+        assertEquals(2, transferred.generation)
+        assertEquals(transferred, fixture.registry.instance)
+        assertEquals(2, ru.arc.autobuild.BuildBookCodec.read(buyer.inventory.itemInMainHand)?.instanceGeneration)
+        assertNull(BuilderBookAuctionTokenCodec.read(buyer.inventory.itemInMainHand))
+
+        fixture.player.inventory.setItemInMainHand(duplicate)
+        fixture.coordinator.onPlayerAvailable(fixture.player)
+
+        assertEquals(transferred, fixture.registry.instance)
+        assertTrue(BuilderBookAuctionTokenCodec.read(fixture.player.inventory.itemInMainHand) != null)
+    }
+
+    @Test
+    fun `late closure does not overwrite a pending physical transfer`() {
+        val buyer = server.addPlayer("TransferringBuyer")
+        fixture.port.result = BuilderBookAuctionListingResult.Listed("42")
+        fixture.port.removeOnSuccess = true
+        fixture.registry.deferTransferStart = true
+        fixture.sell()
+        fixture.port.deliver(buyer)
+        val transferring = fixture.registry.instance
+
+        fixture.port.closeStorage()
+
+        assertEquals(BuilderBookInstanceStatus.TRANSFER_PENDING, transferring.status)
+        assertEquals(transferring, fixture.registry.instance)
+        fixture.registry.completeDeferredTransferStart()
+        assertEquals(BuilderBookInstanceStatus.AVAILABLE, fixture.registry.instance.status)
+        assertEquals(buyer.uniqueId, fixture.registry.instance.ownerId)
+    }
+
+    @Test
+    fun `closure rejects a different token or reservation server`() {
+        fixture.port.result = BuilderBookAuctionListingResult.Listed("42")
+        fixture.port.removeOnSuccess = true
+        fixture.sell()
+        val listed = fixture.registry.instance
+        val token = requireNotNull(BuilderBookAuctionTokenCodec.read(fixture.port.submittedItem()))
+
+        fixture.port.signalClosure(token.copy(instanceId = UUID.randomUUID()))
+        fixture.port.signalClosure(token.copy(leaseId = UUID.randomUUID()))
+        assertEquals(listed, fixture.registry.instance)
+
+        fixture.registry.instance = listed.copy(reservationServer = "spawn")
+        fixture.port.signalClosure(token)
+        assertEquals(listed.copy(reservationServer = "spawn"), fixture.registry.instance)
+        assertEquals(0, fixture.registry.closureTransitions)
+    }
+
+    @Test
+    fun `failed closure remains locked and can be retried without minting a book`() {
+        fixture.port.result = BuilderBookAuctionListingResult.Listed("42")
+        fixture.port.removeOnSuccess = true
+        fixture.sell()
+        val listed = fixture.registry.instance
+        fixture.registry.failClosure = true
+
+        fixture.port.closeStorage()
+
+        assertEquals(listed, fixture.registry.instance)
+        assertTrue(fixture.player.inventory.itemInMainHand.type.isAir)
+        fixture.registry.failClosure = false
+        fixture.port.closeStorage()
+        assertEquals(listed.copy(status = BuilderBookInstanceStatus.AUCTION_CLOSED), fixture.registry.instance)
+        assertEquals(1, fixture.registry.closureTransitions)
+    }
+
+    @Test
+    fun `unknown closure acknowledgement is idempotent and keeps the original reservation`() {
+        fixture.port.result = BuilderBookAuctionListingResult.Listed("42")
+        fixture.port.removeOnSuccess = true
+        fixture.sell()
+        val listed = fixture.registry.instance
+        fixture.registry.failClosureCallbackOnce = true
+
+        fixture.port.closeStorage()
+        fixture.port.closeStorage()
+
+        assertEquals(listed.copy(status = BuilderBookInstanceStatus.AUCTION_CLOSED), fixture.registry.instance)
+        assertEquals(1, fixture.registry.closureTransitions)
+        assertTrue(fixture.player.inventory.itemInMainHand.type.isAir)
+    }
+
+    @Test
+    fun `closing coordinator detaches native closure callbacks`() {
+        fixture.port.result = BuilderBookAuctionListingResult.Listed("42")
+        fixture.port.removeOnSuccess = true
+        fixture.sell()
+        val listed = fixture.registry.instance
+        fixture.coordinator.close()
+
+        fixture.port.closeStorage()
+
+        assertEquals(listed, fixture.registry.instance)
+        assertFalse(fixture.port.hasClosureHandler())
+    }
+
     private inner class AuctionFixture {
         val player = server.addPlayer("BookSeller")
         val blueprint = BuilderBookBlueprint(
@@ -277,6 +406,7 @@ private class AuctionPort : BuilderBookAuctionPort {
     private var submitted: ItemStack? = null
     private var stored = false
     private var handler: ((org.bukkit.entity.Player, ItemStack) -> Unit)? = null
+    private var closureHandler: ((BuilderBookAuctionToken) -> Unit)? = null
 
     override fun submit(
         player: org.bukkit.entity.Player,
@@ -297,6 +427,21 @@ private class AuctionPort : BuilderBookAuctionPort {
     override fun setDeliveryHandler(handler: ((org.bukkit.entity.Player, ItemStack) -> Unit)?) {
         this.handler = handler
     }
+
+    override fun setClosureHandler(handler: ((BuilderBookAuctionToken) -> Unit)?) {
+        closureHandler = handler
+    }
+
+    fun closeStorage() {
+        stored = false
+        signalClosure(requireNotNull(BuilderBookAuctionTokenCodec.read(requireNotNull(submitted))))
+    }
+
+    fun signalClosure(token: BuilderBookAuctionToken) {
+        closureHandler?.invoke(token)
+    }
+
+    fun hasClosureHandler(): Boolean = closureHandler != null
 
     fun deliver(player: org.bukkit.entity.Player) {
         val item = requireNotNull(submitted).clone()
@@ -323,6 +468,9 @@ private class AuctionRegistry(
     var failCompletedCallbackOnce = false
     var deferTransferStart = false
     var deferTransferCompletion = false
+    var failClosure = false
+    var failClosureCallbackOnce = false
+    var closureTransitions = 0
     private var deferredTransferStart: Pair<CompletableFuture<BuilderBookAuctionTransferResult>, BuilderBookAuctionTransferResult>? = null
     private var deferredTransferCompletion: Pair<CompletableFuture<Boolean>, Boolean>? = null
     var instance = BuilderBookInstance(
@@ -381,6 +529,23 @@ private class AuctionRegistry(
         return CompletableFuture.completedFuture(true)
     }
 
+    override fun closeAuctionLease(instanceId: UUID, leaseId: UUID, serverName: String): CompletableFuture<Boolean> {
+        if (failClosure) return CompletableFuture.failedFuture(IllegalStateException("fixture closure failure"))
+        if (
+            instance.instanceId != instanceId || instance.reservationOperationId != leaseId ||
+            instance.reservationServer != serverName
+        ) return CompletableFuture.completedFuture(false)
+        if (instance.status == BuilderBookInstanceStatus.AUCTION_CLOSED) return CompletableFuture.completedFuture(true)
+        if (instance.status != BuilderBookInstanceStatus.LISTED) return CompletableFuture.completedFuture(false)
+        instance = instance.copy(status = BuilderBookInstanceStatus.AUCTION_CLOSED).validated()
+        closureTransitions += 1
+        if (failClosureCallbackOnce) {
+            failClosureCallbackOnce = false
+            return CompletableFuture.failedFuture(IllegalStateException("unknown fixture closure outcome"))
+        }
+        return CompletableFuture.completedFuture(true)
+    }
+
     override fun beginAuctionTransfer(
         instanceId: UUID,
         leaseId: UUID,
@@ -401,7 +566,8 @@ private class AuctionRegistry(
             return CompletableFuture.completedFuture(BuilderBookAuctionTransferResult.Pending(instance.generation))
         }
         if (
-            instance.instanceId != instanceId || instance.status != BuilderBookInstanceStatus.LISTED ||
+            instance.instanceId != instanceId ||
+            instance.status !in setOf(BuilderBookInstanceStatus.LISTED, BuilderBookInstanceStatus.AUCTION_CLOSED) ||
             instance.reservationOperationId != leaseId || instance.reservationServer != serverName
         ) {
             return CompletableFuture.completedFuture(BuilderBookAuctionTransferResult.Rejected)

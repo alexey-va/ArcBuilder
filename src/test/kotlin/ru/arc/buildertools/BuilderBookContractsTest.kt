@@ -98,9 +98,9 @@ class BuilderBookContractsTest : StringSpec({
         }
     }
 
-    "auction listing is a distinct reservation state" {
+    "auction listing and confirmed native closure retain the complete reservation" {
         val leaseId = UUID.randomUUID()
-        BuilderBookInstance(
+        val listed = BuilderBookInstance(
             instanceId = UUID.randomUUID(),
             blueprintId = UUID.randomUUID(),
             transactionId = UUID.randomUUID(),
@@ -112,7 +112,18 @@ class BuilderBookContractsTest : StringSpec({
             reservationPlayerId = UUID.randomUUID(),
             reservationServer = "survival",
             reservedAtMillis = 2L,
-        ).validated().reservationOperationId shouldBe leaseId
+        ).validated()
+        listed.reservationOperationId shouldBe leaseId
+        val closed = listed.copy(status = BuilderBookInstanceStatus.AUCTION_CLOSED).validated()
+        closed.reservationOperationId shouldBe leaseId
+        shouldThrow<IllegalArgumentException> {
+            closed.copy(
+                reservationOperationId = null,
+                reservationPlayerId = null,
+                reservationServer = null,
+                reservedAtMillis = null,
+            ).validated()
+        }
     }
 
     "auction transfer requires matching durable lease evidence and a positive generation" {

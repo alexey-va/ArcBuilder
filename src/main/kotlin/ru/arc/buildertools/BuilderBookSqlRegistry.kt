@@ -53,6 +53,7 @@ internal interface BuilderBookRegistry : AutoCloseable {
         now: Long,
     ): CompletableFuture<BuilderBookAuctionReservationResult>
     fun releaseFromAuction(instanceId: UUID, leaseId: UUID): CompletableFuture<Boolean>
+    fun closeAuctionLease(instanceId: UUID, leaseId: UUID, serverName: String): CompletableFuture<Boolean>
     fun beginAuctionTransfer(
         instanceId: UUID,
         leaseId: UUID,
@@ -596,6 +597,29 @@ internal class BuilderBookSqlRegistry(
             }
         }
 
+    override fun closeAuctionLease(instanceId: UUID, leaseId: UUID, serverName: String): CompletableFuture<Boolean> =
+        runtime.executor.transaction { connection ->
+            require(serverName.matches(BuilderBookInstance.SERVER_NAME)) { "Builder-book server name is invalid" }
+            val current = loadInstance(connection, instanceId, true) ?: return@transaction false
+            if (
+                current.reservationOperationId != leaseId || current.reservationServer != serverName
+            ) {
+                return@transaction false
+            }
+            if (current.status == BuilderBookInstanceStatus.AUCTION_CLOSED) return@transaction true
+            if (current.status != BuilderBookInstanceStatus.LISTED) return@transaction false
+            connection.prepareStatement(
+                "UPDATE arc_builder_book_instances SET status = 'AUCTION_CLOSED' " +
+                    "WHERE instance_uuid = ? AND status = 'LISTED' AND reservation_operation_uuid = ? " +
+                    "AND reservation_server = ?",
+            ).use { statement ->
+                statement.setString(1, instanceId.toString())
+                statement.setString(2, leaseId.toString())
+                statement.setString(3, serverName)
+                statement.executeUpdate() == 1
+            }
+        }
+
     override fun beginAuctionTransfer(
         instanceId: UUID,
         leaseId: UUID,
@@ -620,7 +644,8 @@ internal class BuilderBookSqlRegistry(
             return@transaction BuilderBookAuctionTransferResult.Pending(current.generation)
         }
         if (
-            current.status != BuilderBookInstanceStatus.LISTED || current.reservationOperationId != leaseId ||
+            current.status !in setOf(BuilderBookInstanceStatus.LISTED, BuilderBookInstanceStatus.AUCTION_CLOSED) ||
+            current.reservationOperationId != leaseId ||
             current.reservationServer != serverName
         ) {
             return@transaction BuilderBookAuctionTransferResult.Rejected
@@ -629,7 +654,7 @@ internal class BuilderBookSqlRegistry(
         connection.prepareStatement(
             "UPDATE arc_builder_book_instances SET status = 'TRANSFER_PENDING', owner_uuid = ?, generation = ?, " +
                 "reservation_player_uuid = ?, reserved_at_ms = ?, last_auction_lease_uuid = ? " +
-                "WHERE instance_uuid = ? AND status = 'LISTED' AND reservation_operation_uuid = ?",
+                "WHERE instance_uuid = ? AND status IN ('LISTED', 'AUCTION_CLOSED') AND reservation_operation_uuid = ?",
         ).use { statement ->
             statement.setString(1, recipientId.toString())
             statement.setInt(2, nextGeneration)

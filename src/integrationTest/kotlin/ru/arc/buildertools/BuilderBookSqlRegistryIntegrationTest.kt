@@ -168,6 +168,18 @@ class BuilderBookSqlRegistryIntegrationTest : StringSpec({
                 registry.oneTimeUses.claim(bookUseRequest(sourceMint, UUID.randomUUID(), copyPlayer)).await() shouldBe
                     OneTimeUseClaimResult.Busy
                 registry.releaseFromAuction(sourceMint.instanceId, UUID.randomUUID()).await() shouldBe false
+                val listed = checkNotNull(registry.loadInstance(sourceMint.instanceId).await())
+                registry.closeAuctionLease(sourceMint.instanceId, UUID.randomUUID(), "survival").await() shouldBe false
+                registry.closeAuctionLease(sourceMint.instanceId, auctionLease, "spawn").await() shouldBe false
+                registry.loadInstance(sourceMint.instanceId).await() shouldBe listed
+                registry.closeAuctionLease(sourceMint.instanceId, auctionLease, "survival").await() shouldBe true
+                registry.closeAuctionLease(sourceMint.instanceId, auctionLease, "survival").await() shouldBe true
+                registry.loadInstance(sourceMint.instanceId).await() shouldBe
+                    listed.copy(status = BuilderBookInstanceStatus.AUCTION_CLOSED)
+                registry.listedForServer("survival").await() shouldBe emptyList()
+                registry.releaseFromAuction(sourceMint.instanceId, auctionLease).await() shouldBe false
+                registry.oneTimeUses.claim(bookUseRequest(sourceMint, UUID.randomUUID(), copyPlayer)).await() shouldBe
+                    OneTimeUseClaimResult.Busy
                 val auctionBuyer = UUID.randomUUID()
                 registry.beginAuctionTransfer(
                     sourceMint.instanceId,
@@ -187,6 +199,8 @@ class BuilderBookSqlRegistryIntegrationTest : StringSpec({
                 transferring.status shouldBe BuilderBookInstanceStatus.TRANSFER_PENDING
                 transferring.ownerId shouldBe auctionBuyer
                 transferring.generation shouldBe 2
+                registry.closeAuctionLease(sourceMint.instanceId, auctionLease, "survival").await() shouldBe false
+                registry.loadInstance(sourceMint.instanceId).await() shouldBe transferring
                 registry.completeAuctionTransfer(sourceMint.instanceId, auctionLease, auctionBuyer, 2).await() shouldBe true
                 registry.completeAuctionTransfer(sourceMint.instanceId, auctionLease, auctionBuyer, 2).await() shouldBe true
                 registry.beginAuctionTransfer(
@@ -200,6 +214,8 @@ class BuilderBookSqlRegistryIntegrationTest : StringSpec({
                 transferred.status shouldBe BuilderBookInstanceStatus.AVAILABLE
                 transferred.ownerId shouldBe auctionBuyer
                 transferred.generation shouldBe 2
+                registry.closeAuctionLease(sourceMint.instanceId, auctionLease, "survival").await() shouldBe false
+                registry.loadInstance(sourceMint.instanceId).await() shouldBe transferred
                 registry.oneTimeUses.claim(
                     bookUseRequest(
                         sourceMint,

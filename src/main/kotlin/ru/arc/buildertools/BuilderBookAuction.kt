@@ -87,6 +87,9 @@ internal interface BuilderBookAuctionPort {
     fun contains(token: BuilderBookAuctionToken): Boolean
 
     fun setDeliveryHandler(handler: ((Player, ItemStack) -> Unit)?)
+
+    /** Positive durable DELETED evidence for the exact token, never a cache miss or proof of delivery. */
+    fun setClosureHandler(handler: ((BuilderBookAuctionToken) -> Unit)?)
 }
 
 internal object BuilderBookAuctionPrice {
@@ -155,6 +158,7 @@ internal class BuilderBookAuctionCoordinator(
 ) : AutoCloseable {
     private var installedPort: BuilderBookAuctionPort? = null
     private val recoveryInFlight = mutableSetOf<BuilderBookAuctionToken>()
+    private val closureInFlight = mutableSetOf<BuilderBookAuctionToken>()
     private val reviewNotified = mutableSetOf<BuilderBookAuctionToken>()
     private val retryAfterMillis = mutableMapOf<BuilderBookAuctionToken, Long>()
     private var closed = false
@@ -163,6 +167,7 @@ internal class BuilderBookAuctionCoordinator(
         check(!closed) { "Builder-book auction coordinator is closed" }
         installedPort = portProvider()?.also { port ->
             port.setDeliveryHandler(::onDelivered)
+            port.setClosureHandler(::onAuctionClosed)
         }
         reconcile()
     }
@@ -370,6 +375,33 @@ internal class BuilderBookAuctionCoordinator(
             return
         }
         transferAndRestore(player, token, "book.auction-received")
+    }
+
+    private fun onAuctionClosed(token: BuilderBookAuctionToken) {
+        if (closed || !closureInFlight.add(token)) return
+        registry.closeAuctionLease(token.instanceId, token.leaseId, serverName).whenComplete { recorded, failure ->
+            runSync {
+                closureInFlight -= token
+                if (closed) return@runSync
+                when {
+                    failure != null -> error(
+                        "Builder-book auction storage closure could not be recorded: instance=${token.instanceId} " +
+                            "lease=${token.leaseId} server=$serverName",
+                        failure,
+                    )
+                    recorded != true -> info(
+                        "Builder-book auction storage closure ignored after its lease changed: " +
+                            "instance=${token.instanceId} lease=${token.leaseId} server=$serverName",
+                    )
+                    else -> {
+                        info(
+                            "Builder-book auction storage closure recorded: instance=${token.instanceId} " +
+                                "lease=${token.leaseId} server=$serverName status=AUCTION_CLOSED",
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun transferAndRestore(
@@ -617,8 +649,10 @@ internal class BuilderBookAuctionCoordinator(
         if (closed) return
         closed = true
         installedPort?.setDeliveryHandler(null)
+        installedPort?.setClosureHandler(null)
         installedPort = null
         recoveryInFlight.clear()
+        closureInFlight.clear()
         retryAfterMillis.clear()
         reviewNotified.clear()
     }

@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.87"
+version = "1.0.88"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -21,6 +21,7 @@ kotlin.target.compilations.getByName("integrationTest")
     .associateWith(kotlin.target.compilations.getByName("main"))
 
 repositories {
+    maven("https://repo.groupez.dev/releases")
     mavenCentral()
     maven("https://repo.rus-crafting.ru/grocermc/")
     maven("https://repo.papermc.io/repository/maven-public/")
@@ -66,6 +67,8 @@ dependencies {
     testImplementation("io.kotest:kotest-property:6.0.7")
     testImplementation("io.mockk:mockk:1.14.7")
     testImplementation("com.github.retrooper:packetevents-spigot:2.12.1")
+    testImplementation(files("libs/zauctionhouse-api-4.0.1.2.jar"))
+    testImplementation("fr.maxlego08.menu:zmenu-api:1.1.1.9")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.42")

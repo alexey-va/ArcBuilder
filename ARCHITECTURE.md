@@ -379,6 +379,25 @@ FIFO closes the registry and SQL lease; maintenance waits for that I/O-only
 terminal work before opening replacement journals. A failed close stops reload.
 Pool settings and financial behavior are unchanged.
 
+The auction adapter distinguishes a missing live-cache entry from a positively
+read native `DELETED` item carrying the exact instance and lease token. A native
+expiry event is only a trigger for that durable lookup: it precedes zAuctionHouse's
+storage update and can race a successful claim. Confirmed native closure changes
+only `LISTED` to `AUCTION_CLOSED`, retaining the reservation, owner, generation and
+mint history. This state proves neither destruction nor delivery and creates no
+book, transfer or refund. Startup no longer reports it as an unexplained missing
+listing. One exact physical token can still finish the existing ownership transfer
+from either state; ordinary building, copying and selling still require
+`AVAILABLE`.
+
+`AUCTION_CLOSED` uses the existing status column and needs no schema migration,
+but older ArcBuilder binaries cannot parse this enum value. Upgrade every backend
+sharing the book registry before recording it. Before an authorized rollback to
+older code, convert only `AUCTION_CLOSED` rows back to `LISTED` while retaining every
+reservation and identity field; stop newer writers first so they cannot recreate
+the value during rollback. This restores the older fail-closed recovery behavior
+without releasing or reissuing a book.
+
 Confirmed build books do not use the ordinary all-at-once mutation path.
 `BuilderConstructionProject.kt` owns a durable, restart-safe project that
 advances one exact step at a time. A validated door, bed, or other true

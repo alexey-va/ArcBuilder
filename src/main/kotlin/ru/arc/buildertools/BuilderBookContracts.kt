@@ -30,6 +30,7 @@ internal enum class BuilderBookInstanceStatus {
     AVAILABLE,
     RESERVED,
     LISTED,
+    AUCTION_CLOSED,
     TRANSFER_PENDING,
     CONSUMED,
     REVOKED,
@@ -152,6 +153,7 @@ internal data class BuilderBookInstance(
         val RESERVATION_STATUSES = setOf(
             BuilderBookInstanceStatus.RESERVED,
             BuilderBookInstanceStatus.LISTED,
+            BuilderBookInstanceStatus.AUCTION_CLOSED,
             BuilderBookInstanceStatus.TRANSFER_PENDING,
         )
     }

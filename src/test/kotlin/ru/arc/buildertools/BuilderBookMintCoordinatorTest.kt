@@ -298,6 +298,7 @@ private class FakeBookRegistry : BuilderBookRegistry {
         now: Long,
     ) = CompletableFuture.completedFuture<BuilderBookAuctionReservationResult>(BuilderBookAuctionReservationResult.Missing)
     override fun releaseFromAuction(instanceId: UUID, leaseId: UUID) = CompletableFuture.completedFuture(false)
+    override fun closeAuctionLease(instanceId: UUID, leaseId: UUID, serverName: String) = CompletableFuture.completedFuture(false)
     override fun beginAuctionTransfer(
         instanceId: UUID,
         leaseId: UUID,

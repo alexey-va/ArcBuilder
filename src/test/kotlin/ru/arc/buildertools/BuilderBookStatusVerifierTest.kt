@@ -101,6 +101,13 @@ class BuilderBookStatusVerifierTest : FunSpec({
             instance(generation = identity.generation + 1),
             instance(blueprint = UUID.fromString("60000000-0000-0000-0000-000000000006")),
             instance(status = BuilderBookInstanceStatus.REVOKED),
+            instance().copy(
+                status = BuilderBookInstanceStatus.AUCTION_CLOSED,
+                reservationOperationId = UUID.fromString("70000000-0000-0000-0000-000000000007"),
+                reservationPlayerId = playerId,
+                reservationServer = "survival",
+                reservedAtMillis = 2L,
+            ).validated(),
         )
 
         authoritative.forEach { row ->
