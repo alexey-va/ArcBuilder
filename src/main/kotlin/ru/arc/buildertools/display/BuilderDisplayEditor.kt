@@ -107,6 +107,7 @@ internal class BuilderDisplayEditor(
         var drag: Drag? = null
         var mode = DisplayEditorMode.MOVE
         var axis = DisplayEditorAxis.FREE
+        var pendingAxis: DisplayEditorAxis? = null
         var hoveredAxis: DisplayEditorAxis? = null
         val undo = ArrayDeque<Undo>()
         var revision = 0L
@@ -311,6 +312,10 @@ internal class BuilderDisplayEditor(
         if (!enable(player, session)) return
         cancelDraft(player, session)
         if (!centreAccessible(player, snapshot) || before?.let { !centreAccessible(player, it) } == true) { tell(player, "no-access"); return }
+        // A handle constrains only its own gesture. Explicit menu/command choices
+        // apply once; ordinary model grabs return to free XYZ afterwards.
+        session.axis = if (axisHandle) session.axis else session.pendingAxis ?: DisplayEditorAxis.FREE
+        session.pendingAxis = null
         val eye = player.eyeLocation
         val distance = (hitDistance ?: snapshot.pose.position().distance(eye.toVector().toVector3d())).coerceIn(.5, 10.0)
         val preview = spawn(snapshot, true) ?: run { tell(player, "failed"); return }
@@ -447,6 +452,7 @@ internal class BuilderDisplayEditor(
         deselect(player, session)
         session.mode = DisplayEditorMode.MOVE
         session.axis = DisplayEditorAxis.FREE
+        session.pendingAxis = null
         val eye = player.eyeLocation
         val point = eye.toVector().toVector3d().fma(3.0, eye.direction.toVector3d())
         var pose = DisplayEditorPose(point.x, point.y, point.z)
@@ -602,6 +608,8 @@ internal class BuilderDisplayEditor(
     private fun setMode(player: Player, session: Session, mode: DisplayEditorMode) {
         if (!enable(player, session)) return
         session.mode = mode
+        session.axis = DisplayEditorAxis.FREE
+        session.pendingAxis = null
         rebase(player, session)
         dialogs.close(player)
         hud(player, session)
@@ -610,6 +618,7 @@ internal class BuilderDisplayEditor(
     private fun setAxis(player: Player, session: Session, axis: DisplayEditorAxis) {
         if (!allowed(player)) return
         session.axis = axis
+        session.pendingAxis = axis.takeIf { session.drag == null && it != DisplayEditorAxis.FREE }
         session.lastAction = ticks
         rebase(player, session)
         hud(player, session)
@@ -843,6 +852,8 @@ internal class BuilderDisplayEditor(
     }
 
     private fun cancel(player: Player, session: Session) {
+        session.pendingAxis = null
+        session.axis = DisplayEditorAxis.FREE
         if (session.drag != null) { cancelDraft(player, session); tell(player, "cancelled") }
         else { deselect(player, session); tell(player, "deselected") }
         session.lastAction = ticks
@@ -851,6 +862,7 @@ internal class BuilderDisplayEditor(
     private fun cancelDraft(player: Player, session: Session) {
         val drag = session.drag ?: return
         session.drag = null
+        session.axis = DisplayEditorAxis.FREE
         drag.preview.remove()
         drag.sourceId?.let(::entity)?.let { player.showEntity(plugin, it) }
     }

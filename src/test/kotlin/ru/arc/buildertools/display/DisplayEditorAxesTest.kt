@@ -1,5 +1,14 @@
 package ru.arc.buildertools.display
 
+import com.github.retrooper.packetevents.protocol.entity.data.EntityData
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.PacketEventsAPI
+import com.github.retrooper.packetevents.injector.ChannelInjector
+import com.github.retrooper.packetevents.manager.player.PlayerManager
+import com.github.retrooper.packetevents.manager.protocol.ProtocolManager
+import com.github.retrooper.packetevents.manager.server.ServerManager
+import com.github.retrooper.packetevents.manager.server.ServerVersion
+import io.github.retrooper.packetevents.impl.netty.NettyManagerImpl
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -7,14 +16,21 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.bukkit.Location
+import org.bukkit.block.data.BlockData
 import org.joml.Matrix4f
 import org.joml.Vector3d
 import ru.arc.paper.display.PacketBlockDisplay
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.concurrent.CompletableFuture
+import java.lang.reflect.Proxy
+import java.util.logging.Logger
 
 class DisplayEditorAxesTest : FunSpec({
+    val previousPacketEventsApi = PacketEvents.getAPI()
+    beforeSpec { PacketEvents.setAPI(AxisPacketEventsApi()) }
+    afterSpec { PacketEvents.setAPI(previousPacketEventsApi) }
+
     test("canonical handle picking admits aim tolerance but rejects idle inner hidden and out-of-reach guides") {
         val pose = DisplayEditorPose(0.0, 0.0, 0.0)
         val mesh = DisplayEditorMesh(1.0, 1.0, 1.0)
@@ -103,4 +119,91 @@ class DisplayEditorAxesTest : FunSpec({
             handles shouldHaveSize 12
         }
     }
+
+    test("compiled Core encoder restarts one-tick interpolation on every changed axis transform") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.createSimplePlugin("AxisInterpolationTest")
+            val world = paper.addSimpleWorld("interpolation-world")
+            val player = paper.addPlayer("Decorator")
+            player.teleport(Location(world, .5, 64.0, .5))
+            val handles = mutableListOf<PacketBlockDisplay>()
+            val packets = mockk<PaperPacketDisplays>(relaxed = true)
+            // Real Core handles and immutable frames; only owner bookkeeping is mocked.
+            val constructor = PacketBlockDisplay::class.java.getConstructor(
+                PaperPacketDisplays::class.java, Int::class.javaPrimitiveType, Location::class.java, BlockData::class.java,
+            )
+            every { packets.spawnBlock(any(), any()) } answers {
+                constructor.newInstance(packets, 9000 + handles.size, firstArg<Location>(), secondArg<BlockData>()).also(handles::add)
+            }
+            val axes = DisplayEditorAxes(plugin, packets)
+            val codec = CompiledAxisMetadataEncoder()
+            val pose = DisplayEditorPose(.5, 65.0, 3.5)
+            val mesh = DisplayEditorMesh(1.0, 1.0, 1.0)
+            axes.update(player, DisplayEditorAxesGeometry.frame(pose, mesh, DisplayEditorAxis.FREE))
+            val first = codec.frame(handles.first())
+            val initial = codec.delta(null, first)
+            initial[8] shouldBe 0 // Interpolation starts now, not one tick later.
+            initial[9] shouldBe 1 // Transformation duration.
+            initial[10] shouldBe 1 // Position / rotation duration.
+
+            axes.update(player, DisplayEditorAxesGeometry.frame(pose.withMatrix(Matrix4f().scale(2f)), mesh, DisplayEditorAxis.FREE))
+            val resized = codec.frame(handles.first())
+            codec.delta(first, resized)[8] shouldBe 0
+            axes.update(player, DisplayEditorAxesGeometry.frame(pose.withMatrix(Matrix4f().scale(3f)), mesh, DisplayEditorAxis.FREE))
+            val resizedAgain = codec.frame(handles.first())
+            codec.delta(resized, resizedAgain)[8] shouldBe 0 // Constant delay still emits a new start trigger.
+
+            val movedFrame = DisplayEditorAxesGeometry.frame(pose.copy(x = 1.5).withMatrix(Matrix4f().scale(3f)), mesh, DisplayEditorAxis.FREE)
+            axes.update(player, movedFrame)
+            val translated = codec.frame(handles.first())
+            translated.javaClass.getMethod("getX").invoke(translated) shouldBe 1.5
+            handles.first().teleportDuration shouldBe 1
+            codec.delta(resizedAgain, translated).isEmpty() shouldBe true // Position travels through the teleport packet.
+            axes.update(player, movedFrame)
+            codec.delta(translated, codec.frame(handles.first())).isEmpty() shouldBe true
+            handles shouldHaveSize 6
+            handles.map { it.entityId } shouldBe (9000..9005).toList()
+            axes.clear(player.uniqueId)
+        }
+    }
 })
+
+/** Exercise the dependency's actual metadata encoder, not a duplicate of its pulse logic. */
+private class CompiledAxisMetadataEncoder {
+    private val viewerType = Class.forName("ru.arc.paper.display.PacketDisplayViewer")
+    private val frameType = Class.forName("ru.arc.paper.display.PacketDisplayFrame")
+    private val attachmentType = Class.forName("ru.arc.paper.display.PacketDisplayAttachment")
+    private val backendType = Class.forName("ru.arc.paper.display.PacketDisplayChannelBackend")
+    private val passengerType = Class.forName("ru.arc.paper.display.PacketDisplayPassengerState")
+    private val channel = Any()
+    private val attachment = attachmentType.getConstructor(Any::class.java, Logger::class.java, backendType, passengerType).newInstance(
+        channel, Logger.getAnonymousLogger(),
+        Proxy.newProxyInstance(backendType.classLoader, arrayOf(backendType)) { _, method, _ -> error("Unexpected channel call: $method") },
+        passengerType.getConstructor().newInstance(),
+    )
+    private val encode = attachmentType.getDeclaredMethod("metadataValues", frameType, frameType).apply { isAccessible = true }
+
+    fun frame(display: PacketBlockDisplay): Any = display.javaClass.getMethod("frame\$arc_core_paper", viewerType).invoke(display, null)
+
+    @Suppress("UNCHECKED_CAST")
+    fun delta(before: Any?, after: Any): Map<Int, Any?> =
+        (encode.invoke(attachment, before, after) as List<EntityData<*>>).associate { it.index to it.value }
+}
+
+/** Real PacketEvents mapping settings for metadata construction; no live connection. */
+private class AxisPacketEventsApi : PacketEventsAPI<Any>() {
+    private val server = ServerManager { ServerVersion.V_1_21_11 }
+    private val netty = NettyManagerImpl()
+    override fun getServerManager() = server
+    override fun getNettyManager() = netty
+    override fun getPlugin(): Any = this
+    override fun getProtocolManager(): ProtocolManager = error("No live protocol manager in axis metadata tests")
+    override fun getPlayerManager(): PlayerManager = error("No live players in axis metadata tests")
+    override fun getInjector(): ChannelInjector = error("No channel injection in axis metadata tests")
+    override fun load() = Unit
+    override fun init() = Unit
+    override fun terminate() = Unit
+    override fun isLoaded() = true
+    override fun isInitialized() = true
+    override fun isTerminated() = false
+}

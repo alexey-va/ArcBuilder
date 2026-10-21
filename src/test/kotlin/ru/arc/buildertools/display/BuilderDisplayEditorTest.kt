@@ -39,6 +39,7 @@ import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.util.RayTraceResult
 import org.bukkit.util.Vector
 import org.joml.Vector3d
+import org.joml.Matrix4f
 import org.mockbukkit.mockbukkit.entity.EntityMock
 import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.menu.PaperDialogScreen
@@ -48,6 +49,118 @@ import java.util.concurrent.CompletableFuture
 
 /** Native entity/session orchestration. Exact Paper ray collision and client rendering are separate checks. */
 class BuilderDisplayEditorTest : FunSpec({
+    for (mode in DisplayEditorMode.entries) test("model grab returns to free ${mode.name.lowercase()} after a committed axis gesture") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            f.command(mode.name.lowercase())
+            val tip = f.tip(saved, DisplayEditorAxis.X)
+            f.lookAt(tip)
+            f.rightClick()
+            if (mode == DisplayEditorMode.ROTATE) f.player.setRotation(f.player.yaw + 4f, f.player.pitch + 7f)
+            else f.lookAt(Vector3d(tip).add(.3, 0.0, 0.0))
+            f.editor.tick()
+            f.frames.last().parts.first().height shouldBe .055f
+            f.rightClick()
+
+            val before = f.editor.capture(saved)!!
+            f.lookAt(before.pose.position())
+            f.rightClick()
+            val yaw = f.player.yaw
+            val pitch = f.player.pitch
+            f.player.setRotation(yaw + 12f, pitch - 10f)
+            f.editor.tick()
+            f.assertFreeAxes()
+            when (mode) {
+                DisplayEditorMode.MOVE -> {
+                    val moved = f.previewPose()
+                    (kotlin.math.abs(moved.x - before.pose.x) > .1) shouldBe true
+                    (moved.y > before.pose.y + .1) shouldBe true
+                }
+                DisplayEditorMode.ROTATE -> {
+                    // Observe the real draft's render frame, avoiding MockBukkit's lossy SVD approximation.
+                    val expected = before.pose.withMatrix(Matrix4f()
+                        .rotateY(Math.toRadians(-DisplayEditorGeometry.yawDelta(yaw, f.player.yaw)).toFloat())
+                        .rotateX(Math.toRadians((f.player.pitch - pitch).toDouble()).toFloat())
+                        .mul(before.pose.matrix()))
+                    f.frames.last() shouldBe DisplayEditorAxesGeometry.frame(expected, before.content.mesh(), DisplayEditorAxis.FREE)
+                    (f.frames.last() != DisplayEditorAxesGeometry.frame(before.pose, before.content.mesh(), DisplayEditorAxis.FREE)) shouldBe true
+                }
+                DisplayEditorMode.SCALE -> {
+                    val initial = DisplayEditorGeometry.scale(before.pose)
+                    val resized = DisplayEditorGeometry.scale(f.previewPose())
+                    val factor = kotlin.math.exp(.25)
+                    (resized.x / initial.x).toDouble() shouldBe (factor plusOrMinus .00001)
+                    (resized.y / initial.y).toDouble() shouldBe (factor plusOrMinus .00001)
+                    (resized.z / initial.z).toDouble() shouldBe (factor plusOrMinus .00001)
+                }
+            }
+            f.editor.capture(saved) shouldBe before
+        }
+    }
+
+    test("F frees an active handle and rebases the new mode without moving the current draft") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val tip = f.tip(saved, DisplayEditorAxis.X)
+            f.lookAt(tip)
+            f.rightClick()
+            f.lookAt(Vector3d(tip).add(.4, 0.0, 0.0))
+            f.editor.tick()
+            val moved = f.previewPose()
+            f.swap()
+            f.editor.tick()
+            BuilderDisplayEditor.samePose(f.previewPose(), moved) shouldBe true
+            f.assertFreeAxes()
+            val yaw = f.player.yaw
+            val pitch = f.player.pitch
+            f.player.setRotation(yaw + 10f, pitch - 5f)
+            f.editor.tick()
+            val expected = moved.withMatrix(Matrix4f().rotateY(Math.toRadians(-10.0).toFloat()).rotateX(Math.toRadians(-5.0).toFloat()).mul(moved.matrix()))
+            f.frames.last() shouldBe DisplayEditorAxesGeometry.frame(expected, f.editor.capture(saved)!!.content.mesh(), DisplayEditorAxis.FREE)
+        }
+    }
+
+    test("menu axis applies to one body gesture and cancel exit and creation clear unused constraints") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)!!
+            f.command("axis")
+            f.click("axis_y")
+            f.command("tool")
+            f.lookAt(before.pose.position())
+            f.rightClick()
+            f.player.setRotation(12f, -10f)
+            f.editor.tick()
+            f.previewPose().x shouldBe (before.pose.x plusOrMinus .00001)
+            (f.previewPose().y > before.pose.y + .1) shouldBe true
+            f.previewPose().z shouldBe (before.pose.z plusOrMinus .00001)
+            f.command("cancel")
+            f.lookAt(before.pose.position())
+            f.rightClick()
+            f.player.setRotation(12f, -10f)
+            f.editor.tick()
+            f.assertFreeAxes()
+            (kotlin.math.abs(f.previewPose().x - before.pose.x) > .1) shouldBe true
+            (f.previewPose().y > before.pose.y + .1) shouldBe true
+            f.command("cancel")
+
+            for (abandon in listOf("cancel", "exit")) {
+                f.command("axis", "x")
+                f.command(abandon)
+                f.command("tool")
+                f.lookAt(before.pose.position())
+                f.rightClick()
+                f.editor.tick()
+                f.assertFreeAxes()
+                f.command("cancel")
+            }
+            f.command("axis", "x")
+            f.command("block")
+            f.editor.tick()
+            f.assertFreeAxes()
+        }
+    }
+
     test("hovered Display handle starts a constrained move and active right click commits instead of repicking") {
         displayFixture { f ->
             val saved = f.createBlock()
@@ -171,7 +284,7 @@ class BuilderDisplayEditorTest : FunSpec({
         }
     }
 
-    test("Shift F cancels the private gesture and opens axes with the current value while F still cycles mode") {
+    test("Shift F cancels the private gesture and opens free axes while F still cycles mode") {
         displayFixture { f ->
             val saved = f.createBlock()
             val before = f.editor.capture(saved)
@@ -183,7 +296,7 @@ class BuilderDisplayEditorTest : FunSpec({
             f.player.isSneaking = true
             f.swap().isCancelled shouldBe true
             f.screen().id shouldBe "builder.display-editor.axes"
-            f.screen().buttons.single { it.id.value == "axis_x" }.label shouldBe Component.text("display-editor.axis-selected-x").decoration(TextDecoration.ITALIC, false)
+            f.screen().buttons.single { it.id.value == "axis_free" }.label shouldBe Component.text("display-editor.axis-selected-free").decoration(TextDecoration.ITALIC, false)
             f.screen().numberInputs.map { it.initial } shouldBe listOf(100f, 100f, 100f)
             f.displays() shouldHaveSize 1
             f.editor.capture(saved) shouldBe before
@@ -596,6 +709,12 @@ private class DisplayFixture(paper: MockBukkitTestRuntime) : AutoCloseable {
         val at = player.eyeLocation
         at.direction = Vector(point.x - at.x, point.y - at.y, point.z - at.z)
         player.setRotation(at.yaw, at.pitch)
+    }
+    fun assertFreeAxes() {
+        frames.last().parts.filterIndexed { index, _ -> index % 2 == 0 }.forEach { rod ->
+            listOf(rod.width, rod.height, rod.depth).filterIndexed { index, _ -> index != rod.axis }
+                .all { it == .025f } shouldBe true
+        }
     }
     fun tip(display: Display, axis: DisplayEditorAxis): Vector3d {
         val state = editor.capture(display)!!

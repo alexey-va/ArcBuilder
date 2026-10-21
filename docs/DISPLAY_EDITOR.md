@@ -13,13 +13,13 @@ item stays in the inventory. Displays have no item collection or conversion path
 
 | Input | Result |
 | --- | --- |
-| Right-click an editor object | Select and start the current transform |
+| Right-click an editor object | Select and start the current transform freely in XYZ |
 | Aim at an exposed axis line / endpoint of the selection | Highlight that handle |
 | Right-click the highlighted axis | Grab that world X / Y / Z axis in the current mode |
 | Move the mouse | Move, rotate or resize the private draft |
 | Right-click again | Validate and save the draft |
 | Left-click | Cancel the gesture; a second click clears selection |
-| F | Cycle Move → Rotate → Scale |
+| F | Cycle Move → Rotate → Scale and return to free XYZ |
 | Shift+F | Cancel the current gesture and open axes / precise size |
 | Wheel while transforming | Adjust distance / 5-degree rotation / scale |
 | Shift while moving | Attach the transformed mesh to a collision surface |
@@ -27,8 +27,12 @@ item stays in the inventory. Displays have no item collection or conversion path
 | Q | Cancel the current gesture and reopen the menu |
 | Change hotbar slot while no gesture is active | End the editor session |
 
+Each handle constrains only the current gesture. Saving, cancelling or changing
+mode returns to free XYZ; the next model grab does not inherit the old handle.
+Changing mode during a gesture rebases from the current draft without a jump.
 In free Rotate, horizontal mouse movement controls yaw and vertical movement
-controls pitch. In ordinary Scale, looking upward enlarges and downward shrinks.
+controls pitch. In free Scale, looking upward enlarges and downward shrinks all
+three dimensions uniformly.
 When Scale starts from an axis handle, pull away from the centre to enlarge that
 world direction and back toward the centre to shrink it. A rotated or non-uniform
 model stretches along the displayed world axis; the other world coordinates and
@@ -45,7 +49,11 @@ active gesture always saves it; it never picks a different handle.
 
 The menu also changes axes, duplicates the selection, edits its text, confirms
 deletion and undoes up to 20 committed changes in the current session.
-The axes panel selects free / world X / Y / Z for mouse gestures. Its three
+The axes panel selects free / world X / Y / Z for mouse gestures. An explicit
+menu or `axis` command choice applies to the next model gesture once; during an
+active gesture the command changes only that gesture. A handle click overrides
+this pending choice. Cancel, exit, creating a new object and changing mode clear
+unused choices. The panel always exposes **Free · XYZ**. Its three
 size sliders use the **model's own axes**, which rotate with the object: 5–400%,
 one-percent steps, with 100% representing the original size. Choosing a mouse
 axis preserves pending slider values. **Apply size** saves the three values
@@ -159,6 +167,13 @@ a private draft. No native entity hitbox or additional world scan is used.
 One standard Core `PaperPacketDisplays` owner manages at most 96 handles across
 the 16 editor sessions. The existing editor tick produces geometry; Core owns
 coalesced asynchronous packets, viewer/chunk tracking and reconnect handling.
+Both transformation and position interpolation use one tick, matching the native
+draft. Delay stays zero: the exact Core 2.7.42 encoder includes metadata index 8
+again whenever a transform changes, so every transition restarts interpolation
+without a second scene or alternating delays. Position changes use Core's
+teleport path. Picking retains the same canonical target frame; active gestures
+do not repick axes, and the unselected cursor is never interactive. The short
+client transition does not add a separate server-side smoothing position.
 Unchanged frames do not rewrite poses. World changes and exit remove the old
 handles, and module close / failed initialization await the owner's terminal
 cleanup through the runtime's existing visual drains. These guides never create
@@ -177,7 +192,12 @@ stale source / callbacks, reset / undo and the metadata ownership lifecycle.
 Rotated non-uniform geometry tests verify that local resizing and each reset
 preserve the centre and the other transform property. Packet-handle tests check
 private audiences, stable identity, world-change cleanup and the actual drain
-future without claiming network delivery.
+future without claiming network delivery. The interpolation regression uses real
+Core handles and immutable frames against the dependency's actual metadata
+encoder: one-tick durations on spawn and a fresh start trigger on consecutive
+transform updates, with the same six IDs. Session tests cover free move, yaw /
+pitch rotation and uniform resizing after an axis gesture, active F rebasing,
+one-shot menu choices and cancellation / exit / creation clearing constraints.
 Handle regressions cover exposed / hidden / idle / distant targets, stable aim
 tolerance, constrained dragging, outward/inward scale, world-axis stretch of a
 rotated non-uniform model, commit / cancel / undo, changed source / obstruction /
@@ -193,7 +213,9 @@ mock registry, entity lifecycle and production initializer. Production uses
 Paper 1.21.11 APIs. The custom-model fallback test also preserves explicit model
 and component metadata that MockBukkit's `ItemMetaMock.clone/equals` omit.
 Controller tests inject a mocked axis renderer; the separate renderer test uses
-the real renderer with mocked Core packet handles. Production always constructs
+the real renderer with mocked Core packet handles. The interpolation contract
+test additionally uses real Core handles and encoder with owner bookkeeping
+mocked. Production always constructs
 the standard Core owner; no silent fallback renderer is installed.
 
 The dialog composition test checks both locale catalogs, action order, selected
