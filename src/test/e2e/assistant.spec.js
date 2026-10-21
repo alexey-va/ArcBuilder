@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { expect, test, waitUntil } from '@drownek/plugwright';
+import chatMessage from 'prismarine-chat';
 
 function position(player, x, y, z) {
   return player.bot.entity.position.clone().set(x, y, z);
@@ -38,6 +39,22 @@ function useAir(player, sequence) {
     sequence,
     rotation: { x: (Math.PI - yaw) * 180 / Math.PI, y: -pitch * 180 / Math.PI },
   });
+}
+
+async function aimAtReadyTarget(player, target, signal) {
+  const ChatMessage = chatMessage(player.bot.registry);
+  let actionBar = '';
+  const receive = packet => { actionBar = ChatMessage.fromNotch(packet.text).toString(); };
+  // Paper uses the dedicated action_bar packet, which Mineflayer's actionBar event does not handle.
+  player.bot._client.on('action_bar', receive);
+  try {
+    await player.bot.lookAt(target, false);
+    await waitUntil(() => actionBar.startsWith('Continue row'), {
+      signal, timeout: 10000, message: 'Server did not publish the placement assistant ready action bar',
+    });
+  } finally {
+    player.bot._client.removeListener('action_bar', receive);
+  }
 }
 
 test('placement assistant gives an ordinary survival player one native placement per fresh air use', async ({ player, server, signal }) => {
@@ -78,19 +95,18 @@ test('placement assistant gives an ordinary survival player one native placement
   }
 
   // The continuation cells have no floor or directly aimed support block.
-  await player.bot.lookAt(position(player, 2.5, 65.5, 0.5), false);
-  // Wait for the server tick to publish the same ready target shown to the player.
-  await player.bot.waitForTicks(3);
+  // Client physics ticks can outrun Paper's first cold block-mapping/render pass.
+  await aimAtReadyTarget(player, position(player, 2.5, 65.5, 0.5), signal);
   useAir(player, ++sequence);
   await assertBridge(server, player, signal, 3, 5);
 
-  await player.bot.lookAt(position(player, 3.5, 65.5, 0.5), false);
+  await aimAtReadyTarget(player, position(player, 3.5, 65.5, 0.5), signal);
   await player.bot.waitForTicks(20);
   await assertBridge(server, player, signal, 3, 5);
   useAir(player, ++sequence);
   await assertBridge(server, player, signal, 4, 4);
 
-  await player.bot.lookAt(position(player, 4.5, 65.5, 0.5), false);
+  await aimAtReadyTarget(player, position(player, 4.5, 65.5, 0.5), signal);
   await player.bot.waitForTicks(20);
   await assertBridge(server, player, signal, 4, 4);
   player.chat('/builder assist off');
