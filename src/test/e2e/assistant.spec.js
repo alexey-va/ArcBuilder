@@ -19,10 +19,18 @@ async function commands(server, player, entries) {
 }
 
 async function assertCells(server, player, signal, cells, remaining) {
-  await waitUntil(() => cells.every(({ x, y, z, material }) => player.bot.blockAt(position(player, x, y, z))?.name === material) &&
-    stoneCount(player) === remaining, {
-    signal, timeout: 10000, message: `Expected the exact construction cells and ${remaining} stone items`,
-  });
+  try {
+    await waitUntil(() => cells.every(({ x, y, z, material }) => player.bot.blockAt(position(player, x, y, z))?.name === material) &&
+      stoneCount(player) === remaining, {
+      signal, timeout: 10000, message: `Expected the exact construction cells and ${remaining} stone items`,
+    });
+  } catch (failure) {
+    failure.message += `; observed=${JSON.stringify({
+      cells: cells.map(({ x, y, z }) => ({ x, y, z, material: player.bot.blockAt(position(player, x, y, z))?.name })),
+      stone: stoneCount(player), crouching: player.bot.entity.crouching, eyeHeight: player.bot.entity.eyeHeight,
+    })}`;
+    throw failure;
+  }
   const marker = `assist-world-${randomUUID()}`;
   const checks = cells.map(({ x, y, z, material }) => `if block ${x} ${y} ${z} ${material}`).join(' ');
   server.execute(`minecraft:execute ${checks} run tellraw ${player.username} {"text":"${marker}"}`);
@@ -102,7 +110,14 @@ test('locked row assists imprecise background and air clicks while crouching wit
   // The ordinary ray hits a background block beside the locked row. Vanilla would
   // place at x=3 and leave a gap at x=2; the assistant must keep the earned direction.
   player.bot.setControlState('sneak', true);
+  // Mineflayer lookAt uses eyeHeight, which changes only after entityCrouch metadata.
+  // Wait for the server pose before computing a ray from the crouched eye.
+  await waitUntil(() => player.bot.entity.crouching === true && player.bot.entity.eyeHeight === 1.27, { signal });
   await aimAtReadyTarget(player, position(player, 3.5, 65.5, 0.5), signal);
+  const { yaw, pitch, eyeHeight } = player.bot.entity;
+  const ray = position(player, -Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+  const background = player.bot.world.raycast(player.bot.entity.position.offset(0, eyeHeight, 0), ray, 4.5);
+  assert.deepEqual(background?.position, position(player, 3, 65, -1), 'The crouched eye ray must hit the background block');
   player.bot._client.write('block_place', {
     hand: 0, location: position(player, 3, 65, -1), direction: 3,
     cursorX: 0.5, cursorY: 0.5, cursorZ: 1,
@@ -113,6 +128,7 @@ test('locked row assists imprecise background and air clicks while crouching wit
   await assertBridge(server, player, signal, 3, 5);
 
   player.bot.setControlState('sneak', false);
+  await waitUntil(() => player.bot.entity.crouching === false && player.bot.entity.eyeHeight === 1.62, { signal });
   // This ray passes above the actual next-cell cube. It deliberately failed the
   // old exact-cell targeting even though the locked row is plainly in front of us.
   await aimAtReadyTarget(player, position(player, 3.5, 67, 0.5), signal);
