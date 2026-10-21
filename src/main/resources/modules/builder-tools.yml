@@ -341,16 +341,17 @@ locales:
   ru:
     assist:
       enabled: "<prefix><#72ebc5>Помощник строительства включён. <click:run_command:'/builder assist off'><underlined>Выключить</underlined></click>"
-      disabled: "<prefix><#e8dfd2>Помощник строительства выключен."
-      controls: "<prefix><#e8dfd2>/builder assist line — ряд; plane — плоскость; reset — новая опора; on / off — включить / выключить."
-      line-hint: "<#e8dfd2>Режим «Ряд»: поставь два обычных цельных блока рядом. Дальше смотри в сторону мятной клетки и нажимай ПКМ — направление сохранится. Можно присесть для моста. <click:run_command:'/builder assist reset'><underlined>Новая опора</underlined></click> · <click:run_command:'/builder assist plane'><underlined>Плоскость</underlined></click>. Ступени, плиты и особые предметы ставятся как обычно."
-      plane-hint: "<#e8dfd2>Режим «Плоскость»: поставь обычный цельный блок сверху опоры для пола или сбоку для стены. Смотри вдоль выбранной плоскости и нажимай ПКМ: мятная клетка примыкает к существующему блоку. Можно присесть. <click:run_command:'/builder assist reset'><underlined>Новая опора</underlined></click> · <click:run_command:'/builder assist line'><underlined>Ряд</underlined></click>. Ступени, плиты и особые предметы ставятся как обычно."
+      disabled-v2: "<prefix><#e8dfd2>Помощник строительства выключен. <click:run_command:'/builder assist on'><underlined>Включить</underlined></click>"
+      auto-hint: "<#e8dfd2>Строй обычными цельными блоками: помощник продолжает ряд или плоскость под прицелом. <#72ebc5>Мятная рамка <#e8dfd2>показывает следующий блок — нажми ПКМ. Новая обычная установка задаёт новую опору. Можно присесть."
+      controls-v3: "<prefix><#e8dfd2>/builder assist on — включить; off — выключить. Ряд и плоскость определяются по твоим блокам."
+      line-hint-v2: "<#e8dfd2>Поставь два обычных цельных блока рядом, затем направляй прицел в следующую клетку ряда и нажимай ПКМ. Обычная установка в другом месте начинает новый ряд. Можно присесть."
+      plane-hint-v2: "<#e8dfd2>Поставь обычный цельный блок сверху опоры для пола или сбоку для стены. Направляй прицел в свободную клетку этой плоскости рядом с опорой и нажимай ПКМ. Можно присесть."
+      row-ready-v2: "<#72ebc5>Продолжить ряд · <orientation> <#e8dfd2>· ПКМ"
+      plane-ready-v2: "<#72ebc5>Плоскость · <orientation> <coordinate> <#e8dfd2>· ПКМ"
+      occupied-v2: "<#ffae64>Клетка занята · выбери свободную клетку"
+      protected-v2: "<#ffae64>Здесь нельзя строить · выбери другое место"
+      collision-v2: "<#ffae64>Отойди от выбранной клетки"
       reset: "<prefix><#e8dfd2>Фиксация сброшена. Следующая обычная установка выберет новую опору."
-      line-ready: "<#72ebc5>Продолжить ряд · <orientation> <#e8dfd2>· ПКМ"
-      plane-ready: "<#72ebc5>Плоскость · <orientation> <coordinate> <#e8dfd2>· ПКМ"
-      occupied: "<#ffae64>Клетка занята <#8c8c8c>· /builder assist reset — новая опора"
-      protected: "<#ffae64>Здесь строительство недоступно <#8c8c8c>· /builder assist reset"
-      collision: "<#ffae64>Отойди от выбранной клетки <#8c8c8c>· /builder assist reset"
       direction:
         north: "север"
         south: "юг"
@@ -508,6 +509,8 @@ locales:
         cancel: '<#ff9f0f>Отменить'
         rotate-left: '<#92bed8>↶ Повернуть'
         rotate-right: '<#92bed8>Повернуть ↷'
+        assist-on: '<#e8dfd2>Помощь: выкл.'
+        assist-off: '<#72ebc5>Помощь: вкл.'
     crown-selection:
       title: '<#d48763>Настроить крону'
       body: '<#e8dfd2>Область <x> × <y> × <z> · толщина кроны <thickness> блока. Занятые блоки сохраняются.'
@@ -522,7 +525,7 @@ locales:
       cancel: '<#e8dfd2>Назад'
     help:
       - "<prefix><#e6fff3>Инструменты строителя"
-      - "<#d48763>/builder assist line|plane <#e6fff3>— зафиксировать ряд или плоскость; reset — новая опора; off — выключить"
+      - "<click:run_command:'/builder assist on'><#72ebc5><underlined>Включить помощника строительства</underlined></click> <#e6fff3>— ряд и плоскость выбираются по твоим блокам"
       - "<#d48763>/builder display <#e6fff3>— редактор декораций (отдельное право)"
       - "<#8c8c8c>   <#d48763>/builder wand <#e6fff3>— выделить область"
       - "<#8c8c8c>   <#d48763>/builder fill [блок] <#e6fff3>— заполнить пустоты"
@@ -1459,16 +1462,17 @@ locales:
   en:
     assist:
       enabled: "<prefix><#72ebc5>Placement assistant enabled. <click:run_command:'/builder assist off'><underlined>Disable</underlined></click>"
-      disabled: "<prefix><#e8dfd2>Placement assistant disabled."
-      controls: "<prefix><#e8dfd2>/builder assist line — row; plane — floor or wall; reset — new anchor; on / off — enable / disable."
-      line-hint: "<#e8dfd2>Line mode: place two adjacent ordinary full blocks. Then look towards the mint cell and right-click: the direction stays locked. Sneaking for bridges keeps the lock. <click:run_command:'/builder assist reset'><underlined>New anchor</underlined></click> · <click:run_command:'/builder assist plane'><underlined>Plane mode</underlined></click>. Stairs, slabs and special items keep their usual placement."
-      plane-hint: "<#e8dfd2>Plane mode: place an ordinary full block above a support for a floor, or on its side for a wall. Look along the chosen plane and right-click: the mint cell joins an existing block. Sneaking keeps the lock. <click:run_command:'/builder assist reset'><underlined>New anchor</underlined></click> · <click:run_command:'/builder assist line'><underlined>Line mode</underlined></click>. Stairs, slabs and special items keep their usual placement."
+      disabled-v2: "<prefix><#e8dfd2>Placement assistant disabled. <click:run_command:'/builder assist on'><underlined>Enable</underlined></click>"
+      auto-hint: "<#e8dfd2>Build with ordinary full blocks: the assistant continues a row or plane under your crosshair. The <#72ebc5>mint frame <#e8dfd2>shows your next block — right-click to place it. A new ordinary placement establishes a new anchor. Sneaking is supported."
+      controls-v3: "<prefix><#e8dfd2>/builder assist on — enable; off — disable. Your placed blocks establish the row and plane."
+      line-hint-v2: "<#e8dfd2>Place two adjacent ordinary full blocks, then aim into the next row cell and right-click. An ordinary placement elsewhere starts a new row. Sneaking is supported."
+      plane-hint-v2: "<#e8dfd2>Place an ordinary full block above a support for a floor, or on its side for a wall. Aim into an empty cell on that plane beside a support and right-click. Sneaking is supported."
+      row-ready-v2: "<#72ebc5>Continue row · <orientation> <#e8dfd2>· Right-click"
+      plane-ready-v2: "<#72ebc5>Plane · <orientation> <coordinate> <#e8dfd2>· Right-click"
+      occupied-v2: "<#ffae64>Cell occupied · aim at an empty cell"
+      protected-v2: "<#ffae64>Building is unavailable here · choose another position"
+      collision-v2: "<#ffae64>Move out of the selected cell"
       reset: "<prefix><#e8dfd2>Lock cleared. Your next ordinary placement will choose a new anchor."
-      line-ready: "<#72ebc5>Continue row · <orientation> <#e8dfd2>· Right-click"
-      plane-ready: "<#72ebc5>Plane · <orientation> <coordinate> <#e8dfd2>· Right-click"
-      occupied: "<#ffae64>Cell occupied <#8c8c8c>· /builder assist reset — new anchor"
-      protected: "<#ffae64>Building is unavailable here <#8c8c8c>· /builder assist reset"
-      collision: "<#ffae64>Move out of the selected cell <#8c8c8c>· /builder assist reset"
       direction:
         north: "north"
         south: "south"
@@ -1626,6 +1630,8 @@ locales:
         cancel: '<#ff9f0f>Cancel'
         rotate-left: '<#92bed8>↶ Rotate'
         rotate-right: '<#92bed8>Rotate ↷'
+        assist-on: '<#e8dfd2>Assistant: off'
+        assist-off: '<#72ebc5>Assistant: on'
     crown-selection:
       title: '<#d48763>Set up crown'
       body: '<#e8dfd2>Selection <x> × <y> × <z> · foliage thickness <thickness>. Existing blocks are preserved.'
@@ -1640,7 +1646,7 @@ locales:
       cancel: '<#e8dfd2>Back'
     help:
       - "<prefix><white>Builder tools"
-      - "<white>/builder assist line|plane <#e8dfd2>— lock a row or plane; reset — new anchor; off — disable"
+      - "<click:run_command:'/builder assist on'><#72ebc5><underlined>Enable placement assistant</underlined></click> <#e8dfd2>— your blocks establish the row and plane"
       - "<white>/builder display <#e8dfd2>— decoration editor (separate permission)"
       - "<dark_gray>   <white>/builder wand <gray>— prepare the selector"
       - "<dark_gray>   <white>/builder fill [block] <gray>— fill using your materials"

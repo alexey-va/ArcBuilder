@@ -1242,6 +1242,7 @@ internal class BuilderToolsRuntime(
             add(BuilderPanelAction.CLEAR)
             offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
             offer(BuilderPanelAction.CROWN, BuilderRootCommand.CROWN)
+            add(if (placementAssist?.isEnabled(player) == true) BuilderPanelAction.ASSIST_OFF else BuilderPanelAction.ASSIST_ON)
         }
         val pageCount = (available.size + 5) / 6
         val page = (selectionPanelPages[id] ?: 0).mod(pageCount)
@@ -1301,6 +1302,8 @@ internal class BuilderToolsRuntime(
                 BuilderPanelAction.CANCEL -> if (materialScans.remove(player.uniqueId) == null) handleBuilder(player, arrayOf("cancel")) else Unit
                 BuilderPanelAction.ROTATE_LEFT -> handleBuilder(player, arrayOf("paste", "left"))
                 BuilderPanelAction.ROTATE_RIGHT -> handleBuilder(player, arrayOf("paste", "right"))
+                BuilderPanelAction.ASSIST_ON -> handleBuilder(player, arrayOf("assist", "on"))
+                BuilderPanelAction.ASSIST_OFF -> handleBuilder(player, arrayOf("assist", "off"))
             }
         }
     }
@@ -1527,7 +1530,7 @@ internal class BuilderToolsRuntime(
         if (root != BuilderRootCommand.ASSIST && !hasUsePermission(sender)) return emptyList()
         if (!rootCommandAvailable(sender, root)) return emptyList()
         if (root == BuilderRootCommand.ASSIST) {
-            return if (args.size == 2) filterPrefix(listOf("on", "off", "line", "plane", "reset"), args[1]) else emptyList()
+            return if (args.size == 2) filterPrefix(listOf("on", "off"), args[1]) else emptyList()
         }
         if (root == BuilderRootCommand.DISPLAY) return entityEditor?.tabComplete(args.drop(1)).orEmpty()
         if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)

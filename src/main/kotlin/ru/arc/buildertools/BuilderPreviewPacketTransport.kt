@@ -11,6 +11,7 @@ import com.github.retrooper.packetevents.util.Vector3f
 import com.github.retrooper.packetevents.wrapper.PacketWrapper
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityTeleport
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity
 import io.github.retrooper.packetevents.util.SpigotConversionUtil
 import org.bukkit.Bukkit
@@ -59,7 +60,7 @@ internal interface BuilderPreviewPacketTransport : AutoCloseable {
     /** Captures the current player channel; all later calls use only that channel snapshot. */
     fun connection(player: Player): BuilderPreviewConnection?
 
-    /** Independent twelve-edge cursor stream on the same channel and packet budget. */
+    /** Independent TARGET + ASSIST stream: at most two twelve-edge frames share one budget admission. */
     fun targetConnection(player: Player): BuilderPreviewConnection?
 
     fun forget(player: Player) = Unit
@@ -74,6 +75,9 @@ internal interface BuilderPreviewConnection {
 
     /** Replaces the queued target state; intermediate snapshots are intentionally discarded. */
     fun submit(desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int> = emptySet())
+
+    /** Exact current compact frame was admitted and flushed to Netty; never a client acknowledgement. */
+    fun isAdmitted(desired: List<BuilderPacketDisplay>): Boolean = false
 }
 
 /** Narrow event-loop seam for exercising coalescing and retries without a live Netty connection. */
@@ -82,6 +86,9 @@ internal interface BuilderPreviewPacketGateway {
     fun execute(channel: Any, task: () -> Unit)
     fun retry(channel: Any, task: () -> Unit)
     fun display(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission
+    fun update(channel: Any, previous: BuilderPacketDisplay, display: BuilderPacketDisplay): VisualPacketAdmission
+    fun frame(channel: Any, previous: List<BuilderPacketDisplay>, desired: List<BuilderPacketDisplay>,
+        forceResetIds: Set<Int>): VisualPacketAdmission
     fun glow(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission
     fun destroy(channel: Any, entityIds: List<Int>): VisualPacketAdmission
     fun flush(channel: Any)
@@ -105,6 +112,17 @@ internal class PaperBuilderPreviewPacketGateway(
 
     override fun display(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission =
         packets.write(channel, builderDisplayPacketTransaction(display))
+
+    override fun update(channel: Any, previous: BuilderPacketDisplay, display: BuilderPacketDisplay): VisualPacketAdmission =
+        packets.write(channel, builderDisplayUpdatePacketTransaction(previous, display))
+
+    override fun frame(channel: Any, previous: List<BuilderPacketDisplay>, desired: List<BuilderPacketDisplay>,
+        forceResetIds: Set<Int>): VisualPacketAdmission {
+        val transaction = builderDisplayFramePacketTransaction(previous, desired, forceResetIds)
+        if (transaction.isEmpty()) return VisualPacketAdmission.ALLOWED
+        // A mixed removal/replacement must pay the ordinary budget for the whole transaction.
+        return packets.write(channel, transaction, cleanup = builderDisplayFrameIsCleanup(transaction))
+    }
 
     override fun glow(channel: Any, display: BuilderPacketDisplay): VisualPacketAdmission =
         packets.write(channel, builderDisplayGlowTransaction(display))
@@ -133,23 +151,88 @@ internal fun builderDisplayPacketTransaction(display: BuilderPacketDisplay): Lis
     ),
     WrapperPlayServerEntityMetadata(
         display.entityId,
-        listOf(
-            // Entity metadata index 0: GLOWING flag (0x40).
-            EntityData(0, EntityDataTypes.BYTE, if (display.glowing) GLOWING_FLAG else 0.toByte()),
-            // Display metadata starts at 8; transformation is 11..14.
-            EntityData(11, EntityDataTypes.VECTOR3F, Vector3f(display.translateX, display.translateY, display.translateZ)),
-            EntityData(12, EntityDataTypes.VECTOR3F, Vector3f(display.scaleX, display.scaleY, display.scaleZ)),
-            EntityData(13, EntityDataTypes.QUATERNION, Quaternion4f(0f, 0f, 0f, 1f)),
-            EntityData(14, EntityDataTypes.QUATERNION, Quaternion4f(0f, 0f, 0f, 1f)),
-            // Native preview uses Display.Brightness(15, 15): (15 << 4) | (15 << 20).
-            EntityData(16, EntityDataTypes.INT, FULL_BRIGHTNESS),
-            EntityData(17, EntityDataTypes.FLOAT, display.viewRange),
-            EntityData(22, EntityDataTypes.INT, display.glowRgb),
-            // BlockDisplay-specific metadata follows the Display fields.
-            EntityData(23, EntityDataTypes.BLOCK_STATE, display.blockStateId),
-        ),
+        builderDisplayMetadata(display),
     ),
 )
+
+/** PE 2.12.1 / MC 1.21.11: an admitted move updates the existing entity without a cleanup gap. */
+internal fun builderDisplayUpdatePacketTransaction(
+    previous: BuilderPacketDisplay,
+    display: BuilderPacketDisplay,
+): List<PacketWrapper<*>> {
+    require(previous.entityId == display.entityId && previous.uuid == display.uuid) { "Display identity changed" }
+    return buildList {
+        val metadata = builderDisplayMetadata(display, previous)
+        if (metadata.isNotEmpty()) add(WrapperPlayServerEntityMetadata(display.entityId, metadata))
+        if (previous.x != display.x || previous.y != display.y || previous.z != display.z) {
+            // The pinned wrapper encodes absolute position, zero velocity and RelativeFlag.NONE.
+            add(WrapperPlayServerEntityTeleport(display.entityId, Vector3d(display.x, display.y, display.z), 0f, 0f, false))
+        }
+    }
+}
+
+internal const val MAX_COMPACT_PREVIEW_DISPLAYS = 24
+
+internal fun builderDisplayFrameIsCleanup(transaction: List<PacketWrapper<*>>): Boolean =
+    transaction.all { it is WrapperPlayServerDestroyEntities }
+
+/** One bounded budget admission for TARGET + ASSIST; ordinary bulk previews never use this path. */
+internal fun builderDisplayFramePacketTransaction(
+    previous: List<BuilderPacketDisplay>,
+    desired: List<BuilderPacketDisplay>,
+    forceResetIds: Set<Int>,
+): List<PacketWrapper<*>> {
+    require(previous.size <= MAX_COMPACT_PREVIEW_DISPLAYS && desired.size <= MAX_COMPACT_PREVIEW_DISPLAYS)
+    require(forceResetIds.size <= MAX_COMPACT_PREVIEW_DISPLAYS * 2)
+    val before = previous.associateBy(BuilderPacketDisplay::entityId)
+    val after = desired.associateBy(BuilderPacketDisplay::entityId)
+    require(before.size == previous.size && after.size == desired.size) { "Duplicate compact display IDs" }
+    val reset = forceResetIds.toMutableSet()
+    before.forEach { (id, display) ->
+        if (after[id]?.uuid != display.uuid) reset += id
+    }
+    return buildList {
+        if (reset.isNotEmpty()) add(WrapperPlayServerDestroyEntities(*reset.toIntArray()))
+        desired.forEach { display ->
+            val old = before[display.entityId]
+            if (old == null || display.entityId in reset) addAll(builderDisplayPacketTransaction(display))
+            else addAll(builderDisplayUpdatePacketTransaction(old, display))
+        }
+    }
+}
+
+private fun builderDisplayMetadata(
+    display: BuilderPacketDisplay,
+    previous: BuilderPacketDisplay? = null,
+): List<EntityData<*>> = buildList {
+    if (previous == null || previous.glowing != display.glowing) {
+        add(EntityData(0, EntityDataTypes.BYTE, if (display.glowing) GLOWING_FLAG else 0.toByte()))
+    }
+    val translationChanged = previous == null || previous.translateX != display.translateX ||
+        previous.translateY != display.translateY || previous.translateZ != display.translateZ
+    val scaleChanged = previous == null || previous.scaleX != display.scaleX ||
+        previous.scaleY != display.scaleY || previous.scaleZ != display.scaleZ
+    // Native cells snap to their exact voxel. Reset the transform start when a transform changes.
+    if (translationChanged || scaleChanged) add(EntityData(8, EntityDataTypes.INT, 0))
+    if (previous == null) {
+        add(EntityData(9, EntityDataTypes.INT, 0))
+        add(EntityData(10, EntityDataTypes.INT, 0))
+    }
+    if (translationChanged) {
+        add(EntityData(11, EntityDataTypes.VECTOR3F, Vector3f(display.translateX, display.translateY, display.translateZ)))
+    }
+    if (scaleChanged) add(EntityData(12, EntityDataTypes.VECTOR3F, Vector3f(display.scaleX, display.scaleY, display.scaleZ)))
+    if (previous == null) {
+        add(EntityData(13, EntityDataTypes.QUATERNION, Quaternion4f(0f, 0f, 0f, 1f)))
+        add(EntityData(14, EntityDataTypes.QUATERNION, Quaternion4f(0f, 0f, 0f, 1f)))
+        add(EntityData(16, EntityDataTypes.INT, FULL_BRIGHTNESS))
+    }
+    if (previous == null || previous.viewRange != display.viewRange) add(EntityData(17, EntityDataTypes.FLOAT, display.viewRange))
+    if (previous == null || previous.glowRgb != display.glowRgb) add(EntityData(22, EntityDataTypes.INT, display.glowRgb))
+    if (previous == null || previous.blockStateId != display.blockStateId) {
+        add(EntityData(23, EntityDataTypes.BLOCK_STATE, display.blockStateId))
+    }
+}
 
 private const val FULL_BRIGHTNESS = 0xF000F0
 private val GLOWING_FLAG = 0x40.toByte()
@@ -171,6 +254,7 @@ internal class BuilderPacketAttachment(
     channel: Any,
     private val gateway: BuilderPreviewPacketGateway,
     private val logger: Logger,
+    private val compactFrames: Boolean = false,
 ) : BuilderPreviewConnection {
     private val channelRef = WeakReference(channel)
     private val lock = Any()
@@ -181,6 +265,7 @@ internal class BuilderPacketAttachment(
     @Volatile private var closed = false
     @Volatile private var terminated = false
     @Volatile private var retained = 0
+    @Volatile private var frameReceipt: FrameReceipt? = null
     private val terminal = CompletableFuture<Void>()
     private val admitted = linkedMapOf<Int, BuilderPacketDisplay>()
     private val uncertain = linkedSetOf<Int>()
@@ -190,16 +275,35 @@ internal class BuilderPacketAttachment(
 
     override val identity: Any = Any()
 
+    private data class FrameReceipt(val revision: Long, val displays: List<BuilderPacketDisplay>)
+
     fun accepts(channel: Any): Boolean = !closed && !terminated && channelRef.get() === channel
 
     internal fun retainedEntityCount(): Int = if (terminated) 0 else retained
 
+    override fun isAdmitted(desired: List<BuilderPacketDisplay>): Boolean {
+        if (!compactFrames || desired.isEmpty() || desired.size > MAX_COMPACT_PREVIEW_DISPLAYS) return false
+        val channel = channelRef.get() ?: return false
+        if (!isOpen(channel)) {
+            frameReceipt = null
+            return false
+        }
+        val receipt = frameReceipt ?: return false
+        if (receipt.displays != desired) return false
+        return synchronized(lock) {
+            !closed && !terminated && frameReceipt === receipt && receipt.revision == desiredRevision && pendingResets.isEmpty()
+        }
+    }
+
     override fun submit(desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int>) {
         synchronized(lock) {
             if (closed || terminated) return
+            require(!compactFrames || desired.size <= MAX_COMPACT_PREVIEW_DISPLAYS) { "Compact preview exceeds 24 displays" }
+            if (compactFrames && forceResetIds.isEmpty() && latestDesired == desired) return
             // Callers hand off detached collections and never mutate them afterwards.
             // The lock owns admission only; map/set aggregation belongs to Netty.
-            latestDesired = desired
+            latestDesired = if (compactFrames) java.util.List.copyOf(desired) else desired
+            frameReceipt = null
             if (forceResetIds.isNotEmpty()) pendingResets.add(forceResetIds)
             desiredRevision++
             if (!scheduled) scheduled = true else return
@@ -215,6 +319,7 @@ internal class BuilderPacketAttachment(
             if (closed || terminated) false
             else {
                 closed = true
+                frameReceipt = null
                 latestDesired = emptyList()
                 desiredRevision++
                 if (scheduled) false else { scheduled = true; true }
@@ -261,13 +366,17 @@ internal class BuilderPacketAttachment(
         }
         val desired = snapshot.associateBy(BuilderPacketDisplay::entityId)
         resets.forEach(forcedResetIds::addAll)
+        if (compactFrames) {
+            drainCompact(channel, desired, revision)
+            return
+        }
         var shouldRetry = false
         var terminalAdmission = false
 
         val staleIds = (admitted.keys + uncertain + forcedResetIds).filter { id ->
                 val shown = admitted[id]
                 id in forcedResetIds || id in uncertain ||
-                    (shown != desired[id] && !shown.isGlowOnlyUpdate(desired[id]))
+                    (shown != desired[id] && !shown.hasSameIdentity(desired[id]))
             }.distinct()
         if (staleIds.isNotEmpty()) {
             try {
@@ -308,9 +417,12 @@ internal class BuilderPacketAttachment(
                 var nextCursor: Int? = null
                 rotated.forEachIndexed { index, display ->
                     try {
-                        val isGlowUpdate = admitted[display.entityId].isGlowOnlyUpdate(display)
-                        val admission = if (isGlowUpdate) gateway.glow(channel, display)
-                        else gateway.display(channel, display)
+                        val shown = admitted[display.entityId]
+                        val admission = when {
+                            shown.isGlowOnlyUpdate(display) -> gateway.glow(channel, display)
+                            shown != null && shown.hasSameIdentity(display) -> gateway.update(channel, shown, display)
+                            else -> gateway.display(channel, display)
+                        }
                         when (admission) {
                             VisualPacketAdmission.ALLOWED -> {
                                 gateway.flush(channel)
@@ -341,6 +453,52 @@ internal class BuilderPacketAttachment(
             shouldRetry = true
         }
 
+        finishDrain(desired, revision, shouldRetry, terminalAdmission)
+    }
+
+    private fun drainCompact(channel: Any, desired: Map<Int, BuilderPacketDisplay>, revision: Long) {
+        // After a write exception, first retire every possibly transferred ID. Retrying cleanup alone
+        // bounds uncertain IDs to the preceding frame plus its one attempted replacement (at most 48).
+        val recovering = uncertain.isNotEmpty()
+        val target = if (recovering) emptyMap() else desired
+        forcedResetIds.retainAll(admitted.keys + uncertain)
+        val resets = forcedResetIds.toMutableSet()
+        resets += uncertain
+        var shouldRetry = recovering && desired.isNotEmpty()
+        var terminalAdmission = false
+        if (admitted != target || resets.isNotEmpty() ||
+            (!recovering && target.isNotEmpty() && frameReceipt?.revision != revision)) {
+            try {
+                when (gateway.frame(channel, admitted.values.toList(), target.values.toList(), resets)) {
+                    VisualPacketAdmission.ALLOWED -> {
+                        gateway.flush(channel)
+                        admitted.clear()
+                        admitted.putAll(target)
+                        uncertain.clear()
+                        forcedResetIds.clear()
+                        if (!recovering) synchronized(lock) {
+                            if (!closed && !terminated && desiredRevision == revision && pendingResets.isEmpty()) {
+                                frameReceipt = FrameReceipt(revision, java.util.List.copyOf(target.values))
+                            }
+                        }
+                    }
+                    VisualPacketAdmission.CLOSED -> terminalAdmission = true
+                    else -> shouldRetry = true
+                }
+            } catch (failure: Exception) {
+                frameReceipt = null
+                uncertain += admitted.keys
+                uncertain += target.keys
+                logFailure(failure)
+                if (!isOpen(channel)) { terminate(); return }
+                shouldRetry = true
+            }
+        } else forcedResetIds.clear()
+        finishDrain(desired, revision, shouldRetry, terminalAdmission)
+    }
+
+    private fun finishDrain(desired: Map<Int, BuilderPacketDisplay>, revision: Long,
+        shouldRetry: Boolean, terminalAdmission: Boolean) {
         if (terminalAdmission) { terminate(); return }
         retained = (admitted.keys + uncertain + forcedResetIds + desired.keys).toSet().size
         var complete = false
@@ -373,6 +531,7 @@ internal class BuilderPacketAttachment(
     private fun terminate(failure: Throwable = IllegalStateException("Preview channel closed before cleanup was flushed")) {
         // No worker-held monitor or bulk clear on the calling/native thread.
         terminated = true
+        frameReceipt = null
         terminal.completeExceptionally(failure)
     }
 
@@ -385,6 +544,9 @@ internal class BuilderPacketAttachment(
     }
 
     private enum class QueueAction { NOW, LATER, STOP }
+
+    private fun BuilderPacketDisplay?.hasSameIdentity(desired: BuilderPacketDisplay?): Boolean =
+        this != null && desired != null && entityId == desired.entityId && uuid == desired.uuid
 
     private fun BuilderPacketDisplay?.isGlowOnlyUpdate(desired: BuilderPacketDisplay?): Boolean {
         val shown = this ?: return false
@@ -432,11 +594,12 @@ internal class PacketEventsBuilderPreviewTransport(
 
     override fun connection(player: Player): BuilderPreviewConnection? = capture(player, attachments)
 
-    override fun targetConnection(player: Player): BuilderPreviewConnection? = capture(player, targetAttachments)
+    override fun targetConnection(player: Player): BuilderPreviewConnection? = capture(player, targetAttachments, compactFrames = true)
 
     private fun capture(
         player: Player,
         owners: MutableMap<Player, BuilderPacketAttachment>,
+        compactFrames: Boolean = false,
     ): BuilderPreviewConnection? {
         if (closed) return null
         val channel = PacketEvents.getAPI().playerManager.getChannel(player) ?: return null
@@ -445,7 +608,7 @@ internal class PacketEventsBuilderPreviewTransport(
         val current = owners[player]
         if (current != null && current.accepts(channel)) return current
         current?.let(::retire)
-        return BuilderPacketAttachment(channel, gateway, logger).also { owners[player] = it }
+        return BuilderPacketAttachment(channel, gateway, logger, compactFrames).also { owners[player] = it }
     }
 
     override fun forget(player: Player) {

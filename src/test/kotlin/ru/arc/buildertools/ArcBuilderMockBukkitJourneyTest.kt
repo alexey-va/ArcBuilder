@@ -1328,6 +1328,28 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("selection panel toggles the personal assistant without commands or changing the selection") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("PanelAssistBuilder", GameMode.SURVIVAL)
+            player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
+            val selected = checkNotNull(journey.selectionPanel(player)).selection
+            journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.ASSIST_ON) shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.ASSIST_ON)
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.ASSIST_OFF) shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.ASSIST_ON) // A stale toggle cannot invert the new state.
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.ASSIST_OFF) shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.ASSIST_OFF)
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.ASSIST_ON) shouldBe true
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
+            player.inventory.itemInMainHand.type shouldBe Material.ECHO_SHARD
+            journey.world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
+        }
+    }
+
     test("selection panel confirmation preserves the durable fill and held-tool boundary") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("PanelBuilder", GameMode.SURVIVAL)
@@ -1355,7 +1377,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             secondPage.contains(BuilderPanelAction.DISCONNECT) shouldBe true
             secondPage.indexOf(BuilderPanelAction.CROWN) shouldBe secondPage.indexOf(BuilderPanelAction.DISCONNECT) + 1
             secondPage.last { it !in setOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE) } shouldBe
-                BuilderPanelAction.CROWN
+                BuilderPanelAction.ASSIST_ON
             secondPage.contains(BuilderPanelAction.FILL) shouldBe false
             journey.selectionPanelAction(player, BuilderPanelAction.PREVIOUS_PAGE)
             checkNotNull(journey.selectionPanel(player)).actions shouldBe firstPage

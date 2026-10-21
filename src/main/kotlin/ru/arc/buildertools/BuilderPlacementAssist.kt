@@ -47,6 +47,7 @@ internal data class BuilderPlacementAssistTarget(
     val support: BuilderBlockPos?,
     val face: BlockFace?,
     val blocked: String? = null,
+    val row: Boolean = false,
 )
 
 internal data class BuilderPlacementAssistOffer(
@@ -78,7 +79,7 @@ internal class BuilderPlacementAssist(
     private class NativeAttempt(val playerId: UUID, val target: BuilderBlockPos) { var placed: Placement? = null }
     private data class Hud(val key: String, val tick: Long)
     private val preferenceKey = NamespacedKey(plugin, "placement_assist")
-    private val modeKey = NamespacedKey(plugin, "placement_assist_mode")
+    private val modeKey = NamespacedKey(plugin, "placement_assist_mode_v2")
     private val states = mutableMapOf<UUID, State>()
     private val offers = ConcurrentHashMap<UUID, BuilderPlacementAssistOffer>()
     private val pendingInputs = ConcurrentHashMap<UUID, BuilderPlacementAssistInput>()
@@ -94,11 +95,14 @@ internal class BuilderPlacementAssist(
     init { plugin.server.pluginManager.registerEvents(this, plugin) }
 
     fun isEnabled(player: Player) = player.persistentDataContainer.get(preferenceKey, PersistentDataType.BYTE) == 1.toByte()
-    internal fun mode(player: Player) = if (player.persistentDataContainer.get(modeKey, PersistentDataType.STRING) == "plane")
-        BuilderPlacementAssistMode.PLANE else BuilderPlacementAssistMode.LINE
+    internal fun mode(player: Player) = when (player.persistentDataContainer.get(modeKey, PersistentDataType.STRING)) {
+        "line" -> BuilderPlacementAssistMode.LINE
+        "plane" -> BuilderPlacementAssistMode.PLANE
+        else -> BuilderPlacementAssistMode.AUTO
+    }
 
     fun command(player: Player, args: List<String>) {
-        if (args.size > 1) { send(player, "assist.controls"); return }
+        if (args.size > 1) { send(player, "assist.controls-v3"); return }
         val action = args.firstOrNull()?.lowercase()
         if (action == "reset") {
             clearPlayer(player.uniqueId)
@@ -110,16 +114,21 @@ internal class BuilderPlacementAssist(
             null -> !isEnabled(player)
             "on", "line", "plane" -> true
             "off" -> false
-            else -> { send(player, "assist.controls"); return }
+            else -> { send(player, "assist.controls-v3"); return }
         }
-        if (action == "line" || action == "plane") player.persistentDataContainer.set(modeKey, PersistentDataType.STRING, action)
+        if (enabled) player.persistentDataContainer.set(modeKey, PersistentDataType.STRING,
+            if (action == "line" || action == "plane") action else "auto")
         player.persistentDataContainer.set(preferenceKey, PersistentDataType.BYTE, if (enabled) 1.toByte() else 0.toByte())
         clearPlayer(player.uniqueId)
-        send(player, if (enabled) "assist.enabled" else "assist.disabled")
+        send(player, if (enabled) "assist.enabled" else "assist.disabled-v2")
         if (enabled) send(player, hint(player))
     }
 
-    private fun hint(player: Player) = if (mode(player) == BuilderPlacementAssistMode.PLANE) "assist.plane-hint" else "assist.line-hint"
+    private fun hint(player: Player) = when (mode(player)) {
+        BuilderPlacementAssistMode.AUTO -> "assist.auto-hint"
+        BuilderPlacementAssistMode.LINE -> "assist.line-hint-v2"
+        BuilderPlacementAssistMode.PLANE -> "assist.plane-hint-v2"
+    }
 
     fun tick() {
         if (closed) return
@@ -150,10 +159,14 @@ internal class BuilderPlacementAssist(
         }
         val target = resolved.target
         renderer.placementAssist(player, target.position, target.blocked != null)
-        if (target.blocked == null && id !in attemptedThisTick && !pendingInputs.containsKey(id))
+        // An orange cell owns the same aimed gesture: consuming it must not build
+        // an unhighlighted vanilla background block or a layer above this plane.
+        if (id !in attemptedThisTick && !pendingInputs.containsKey(id))
             offers[id] = BuilderPlacementAssistOffer(state.lock, state.slot, state.item, target, resolved.vanillaHit)
         else offers.remove(id)
-        showHud(player, state, target.blocked ?: if (state.lock.planeNormal == null) "assist.line-ready" else "assist.plane-ready")
+        if (renderer.placementAssistReady(player, target.position, target.blocked != null))
+            showHud(player, state, target.row, target.blocked ?: if (target.row) "assist.row-ready-v2" else "assist.plane-ready-v2")
+        else clearHud(id)
     }
 
     private fun resolve(player: Player, state: State, eye: Location): Resolved? {
@@ -172,41 +185,44 @@ internal class BuilderPlacementAssist(
             BuilderPlacementAssistHit(hitBlock.x, hitBlock.y, hitBlock.z, vanilla.hitBlockFace!!) else null
 
         val normal = state.lock.planeNormal
-        val candidates: List<BuilderBlockPos>
-        if (normal == null) {
-            candidates = listOf(state.lock.next ?: return null)
-        } else {
-            val projected = BuilderPlacementAssistGeometry.projectPlane(eyeVector, direction, state.lock, range) ?: return null
-            val cell = BuilderPlacementAssistGeometry.projectedCell(projected, state.lock)
-            val block = block(player, cell) ?: return null
-            // Filling an already occupied projected cell stops, rather than selecting an unrelated hole.
-            if (!block.type.isAir) {
-                if (!visible(eye, cell, range)) return null
-                return Resolved(BuilderPlacementAssistTarget(cell, null, null, "assist.occupied"), vanillaHit)
+        val mode = mode(player)
+        val candidates = buildList {
+            if (mode != BuilderPlacementAssistMode.PLANE) state.lock.next?.let { add(it to true) }
+            if (mode != BuilderPlacementAssistMode.LINE && normal != null) {
+                BuilderPlacementAssistGeometry.projectPlane(eyeVector, direction, state.lock, range)?.let {
+                    add(BuilderPlacementAssistGeometry.projectedCell(it, state.lock) to false)
+                }
             }
-            candidates = BuilderPlacementAssistGeometry.planeCandidates(projected, state.lock)
         }
-        for (position in candidates) {
-            if (!BuilderPlacementAssistGeometry.inView(eyeVector, direction, position) || !visible(eye, position, range)) continue
+        for ((position, row) in candidates) {
+            val entry = BuilderPlacementAssistGeometry.aimDistance(eyeVector, direction, position, range) ?: continue
+            // The real gaze must enter this exact cell before any foreground shape.
+            // A solid target itself is allowed here so it can show a truthful blocked frame.
+            if (vanilla != null && eyeVector.distanceSquared(vanilla.hitPosition) + 1e-6 < entry * entry) continue
             val targetBlock = block(player, position) ?: continue
-            if (normal != null && !targetBlock.type.isAir) continue
-            val supportFaces = if (normal == null) listOf(checkNotNull(state.lock.direction)) else
-                BuilderPlacementAssistGeometry.cardinalFaces.filter { it.modX * normal.modX + it.modY * normal.modY + it.modZ * normal.modZ == 0 }
+            // In automatic mode a deliberate click on an existing block must remain
+            // ordinary placement, so the player can start another layer without a command.
+            if (mode == BuilderPlacementAssistMode.AUTO && !targetBlock.type.isAir && hitBlock != null &&
+                hitBlock.x == position.x && hitBlock.y == position.y && hitBlock.z == position.z) return null
+            val supportFaces = if (row) listOf(checkNotNull(state.lock.direction)) else {
+                val planeNormal = checkNotNull(normal)
+                BuilderPlacementAssistGeometry.cardinalFaces.filter { it.modX * planeNormal.modX + it.modY * planeNormal.modY + it.modZ * planeNormal.modZ == 0 }
+            }
             val face = supportFaces.firstOrNull { candidate ->
                 val supportPosition = position.relative(candidate.oppositeFace)
                 val source = block(player, supportPosition)
-                source != null && (normal != null || source.type == state.item.type) && supportAllowed(source) &&
-                    visibleSupport(eye, supportPosition, candidate, range)
+                source != null && supportAllowed(source) &&
+                    (!targetBlock.type.isAir || visibleSupport(eye, supportPosition, candidate, range))
             } ?: continue
             val reason = when {
-                !targetBlock.type.isAir -> "assist.occupied"
-                !canBuild(player, targetBlock, state.item.type) -> "assist.protected"
+                !targetBlock.type.isAir -> "assist.occupied-v2"
+                !canBuild(player, targetBlock, state.item.type) -> "assist.protected-v2"
                 player.boundingBox.overlaps(BoundingBox(position.x.toDouble(), position.y.toDouble(), position.z.toDouble(),
-                    position.x + 1.0, position.y + 1.0, position.z + 1.0)) -> "assist.collision"
+                    position.x + 1.0, position.y + 1.0, position.z + 1.0)) -> "assist.collision-v2"
                 tickNumber < state.refusedUntil -> "assist.refused"
                 else -> null
             }
-            return Resolved(BuilderPlacementAssistTarget(position, position.relative(face.oppositeFace), face, reason), vanillaHit)
+            return Resolved(BuilderPlacementAssistTarget(position, position.relative(face.oppositeFace), face, reason, row), vanillaHit)
         }
         return null
     }
@@ -227,18 +243,6 @@ internal class BuilderPlacementAssist(
             }
         }
         return true
-    }
-
-    private fun visible(eye: Location, position: BuilderBlockPos, range: Double): Boolean {
-        return BuilderPlacementAssistGeometry.visiblePoints(eye.toVector(), position).any { point ->
-            val delta = point.clone().subtract(eye.toVector())
-            val distance = delta.length()
-            if (distance < 1e-6 || distance > range || !loadedPath(eye, point)) return@any false
-            val direction = delta.multiply(1.0 / distance)
-            val entry = BuilderPlacementAssistGeometry.aimDistance(eye.toVector(), direction, position, range) ?: return@any false
-            val hit = eye.world!!.rayTraceBlocks(eye, direction, distance, FluidCollisionMode.NEVER, false) ?: return@any true
-            eye.toVector().distanceSquared(hit.hitPosition) + 1e-6 >= entry * entry
-        }
     }
 
     private fun visibleSupport(eye: Location, position: BuilderBlockPos, face: BlockFace, range: Double): Boolean {
@@ -282,7 +286,7 @@ internal class BuilderPlacementAssist(
             if (state.lock !== input.offer.lock || !eligible(player, state) || input.playerId in attemptedThisTick ||
                 state.slot != input.offer.slot || !state.item.isSimilar(input.offer.item)) return
             val current = resolve(player, state, player.eyeLocation) ?: return
-            if (current.target.blocked != null || current.target != input.offer.target) return
+            if (current.target != input.offer.target) return
             val eyeAtInput = player.eyeLocation
             if (input.click != null) {
                 if (current.vanillaHit != input.click.hit) return
@@ -294,6 +298,11 @@ internal class BuilderPlacementAssist(
             if (resolve(player, state, eyeAtInput)?.target != current.target) return
             attemptedThisTick += input.playerId
             offers.remove(input.playerId)
+            if (current.target.blocked != null) return
+            if (!renderer.placementAssistReady(player, current.target.position, false)) {
+                clearHud(input.playerId)
+                return
+            }
             try {
                 val attempt = NativeAttempt(player.uniqueId, current.target.position)
                 nativeAttempt = attempt
@@ -368,13 +377,9 @@ internal class BuilderPlacementAssist(
         val id = player.uniqueId
         val position = BuilderBlockPos(block.world.uid, block.x, block.y, block.z)
         val previous = states[id]?.takeIf { it.slot == placement.slot && it.item.isSimilar(placement.item) }
-        val lock = if (previous != null) previous.lock.placed(position) else {
-            val against = event.blockAgainst
-            val normal = if (mode(player) == BuilderPlacementAssistMode.PLANE)
-                BuilderPlacementAssistGeometry.faceBetween(BuilderBlockPos(against.world.uid, against.x, against.y, against.z), position) ?: return true
-                else null
-            BuilderPlacementAssistLock(position, planeNormal = normal)
-        }
+        val against = event.blockAgainst
+        val normal = BuilderPlacementAssistGeometry.faceBetween(BuilderBlockPos(against.world.uid, against.x, against.y, against.z), position)
+        val lock = previous?.lock?.placed(position, normal) ?: BuilderPlacementAssistLock(position, planeNormal = normal)
         if (previous != null && lock === previous.lock) return true
         states[id] = State(lock, placement.slot, placement.item)
         offers.remove(id)
@@ -424,10 +429,10 @@ internal class BuilderPlacementAssist(
         if (hud.remove(playerId) != null) Bukkit.getPlayer(playerId)?.sendActionBar(Component.empty())
     }
 
-    private fun showHud(player: Player, state: State, key: String) {
-        val normal = state.lock.planeNormal
-        val orientation = if (normal == null) "assist.direction.${state.lock.direction!!.name.lowercase()}" else
-            "assist.plane.${if (normal.modY != 0) "floor" else if (normal.modX != 0) "x" else "z"}"
+    private fun showHud(player: Player, state: State, row: Boolean, key: String) {
+        val normal = if (row) null else state.lock.planeNormal
+        val orientation = if (row) "assist.direction.${state.lock.direction!!.name.lowercase()}" else
+            "assist.plane.${if (normal!!.modY != 0) "floor" else if (normal.modX != 0) "x" else "z"}"
         val coordinate = when {
             normal == null -> 0
             normal.modX != 0 -> state.lock.anchor.x

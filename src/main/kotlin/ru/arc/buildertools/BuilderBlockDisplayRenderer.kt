@@ -42,6 +42,7 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
     fun selectionTarget(player: Player, position: BuilderBlockPos?) = Unit
     fun clearSelectionTarget(playerId: UUID) = Unit
     fun placementAssist(player: Player, position: BuilderBlockPos, blocked: Boolean) = Unit
+    fun placementAssistReady(player: Player, position: BuilderBlockPos, blocked: Boolean): Boolean = false
     fun clearPlacementAssist(playerId: UUID) = Unit
     fun paste(player: Player, model: BuilderPastePreviewModel, anchor: BuilderBlockPos, displayed: (BuilderBlockPos) -> Unit) = Unit
     fun freezePaste(playerId: UUID) = Unit
@@ -127,25 +128,29 @@ internal class BuilderBlockDisplayRenderer(
         val translateZ: Float = 0f,
         val glow: Color,
         val blockState: String = blockData.asString,
+        val part: Int? = null,
     ) {
         // Captured once on the owning thread; retained specs never read Bukkit to rebuild a key.
-        val key = DisplayKey(x, y, z, blockState, scaleX, scaleY, scaleZ,
+        val key: DisplayKey = part?.let { DisplayKey.Part(it) } ?: DisplayKey.Geometry(x, y, z, blockState, scaleX, scaleY, scaleZ,
             translateX, translateY, translateZ, glow.asRGB())
     }
 
-    private data class DisplayKey(
-        val x: Double,
-        val y: Double,
-        val z: Double,
-        val blockState: String,
-        val scaleX: Float,
-        val scaleY: Float,
-        val scaleZ: Float,
-        val translateX: Float,
-        val translateY: Float,
-        val translateZ: Float,
-        val glowRgb: Int,
-    )
+    private sealed interface DisplayKey {
+        data class Part(val index: Int) : DisplayKey
+        data class Geometry(
+            val x: Double,
+            val y: Double,
+            val z: Double,
+            val blockState: String,
+            val scaleX: Float,
+            val scaleY: Float,
+            val scaleZ: Float,
+            val translateX: Float,
+            val translateY: Float,
+            val translateZ: Float,
+            val glowRgb: Int,
+        ) : DisplayKey
+    }
 
     private data class Scene(
         val worldId: UUID,
@@ -157,6 +162,7 @@ internal class BuilderBlockDisplayRenderer(
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private class PlanCalculation(val plan: BuilderPlan)
     private var scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
+    private val assistTargets = mutableMapOf<UUID, Pair<BuilderBlockPos, Boolean>>()
     // The packet transport replaces one viewer's complete desired set. Keep its
     // chunk/reconnect lifecycle at that same boundary, across every visible layer.
     private val audiences = mutableMapOf<UUID, BuilderPacketScene>()
@@ -288,10 +294,11 @@ internal class BuilderBlockDisplayRenderer(
             val nextSpecs = LinkedHashMap<Int, DisplaySpec?>()
             val byKey = LinkedHashMap<DisplayKey, DisplaySpec>()
             val keys = ArrayList<DisplayKey>()
-            fun retain(spec: DisplaySpec?) {
+            fun retain(spec: DisplaySpec?, part: Int) {
                 if (spec != null) {
-                    byKey[spec.key] = spec
-                    keys += spec.key
+                    val keyed = if (layer == Layer.PASTE) spec.copy(part = part) else spec
+                    byKey[keyed.key] = keyed
+                    keys += keyed.key
                 }
             }
             var cursor = 0
@@ -301,10 +308,10 @@ internal class BuilderBlockDisplayRenderer(
                     val spec = if (!refresh && specOrigin == renderOrigin && previousSpecs.containsKey(index)) previousSpecs[index]
                         else createSpec(index, renderOrigin)
                     nextSpecs[index] = spec
-                    retain(spec)
+                    retain(spec, index)
                     false
                 } else {
-                    decorations(renderOrigin).forEach(::retain) // Cuboid/origin edges, at most 24 specs.
+                    decorations(renderOrigin).forEachIndexed { index, spec -> retain(spec, -1 - index) }
                     true
                 }
             }.thenCompose {
@@ -313,8 +320,8 @@ internal class BuilderBlockDisplayRenderer(
                 planningWork.compute {
                     val delta = BuilderDisplaySceneDiff.between(previousEntities.keys, keys)
                     val entities = LinkedHashMap<DisplayKey, BuilderPacketDisplay>(delta.retained.size + delta.added.size)
-                    delta.retained.forEach { entities[it] = previousEntities.getValue(it) }
-                    delta.added to entities
+                    delta.retained.filterNot { it is DisplayKey.Part }.forEach { entities[it] = previousEntities.getValue(it) }
+                    (delta.added + delta.retained.filterIsInstance<DisplayKey.Part>()) to entities
                 }
             }.thenCompose { (added, entities) ->
                 planningWork.onMain {
@@ -322,7 +329,7 @@ internal class BuilderBlockDisplayRenderer(
                     planningWork.capture(::current) {
                         if (addedIndex < added.size) {
                             val displayKey = added[addedIndex++]
-                            entities[displayKey] = packetDisplay(byKey.getValue(displayKey))
+                            entities[displayKey] = packetDisplay(byKey.getValue(displayKey), previous?.entities?.get(displayKey))
                             false
                         } else {
                             // Keep the old scene throughout preparation, then publish one complete delta.
@@ -420,6 +427,14 @@ internal class BuilderBlockDisplayRenderer(
         replace(player, Layer.ASSIST, edgeSpecs(
             BuilderPlacementAssistAppearance.edges(position), appearance.material, Color.fromRGB(appearance.glowRgb),
         ))
+        assistTargets[player.uniqueId] = position to blocked
+    }
+
+    override fun placementAssistReady(player: Player, position: BuilderBlockPos, blocked: Boolean): Boolean {
+        if (closed || !player.isOnline || position.worldId != player.world.uid ||
+            assistTargets[player.uniqueId] != (position to blocked) || scenes[player.uniqueId to Layer.ASSIST] == null) return false
+        val connection = packets.targetConnection(player) ?: return false
+        return connection.isAdmitted(targetDisplays(player))
     }
 
     override fun clearPlacementAssist(playerId: UUID) = remove(playerId, Layer.ASSIST)
@@ -788,10 +803,16 @@ internal class BuilderBlockDisplayRenderer(
             return
         }
         val previousEntities = previous?.entities.orEmpty()
-        val nextSpecs = specs.associateBy(DisplaySpec::key)
+        val keyedSpecs = if (layer == Layer.TARGET || layer == Layer.ASSIST)
+            specs.mapIndexed { index, spec -> spec.copy(part = index) } else specs
+        val nextSpecs = keyedSpecs.associateBy(DisplaySpec::key)
         val delta = BuilderDisplaySceneDiff.between(previousEntities.keys, nextSpecs.keys.toList())
         val nextEntities = LinkedHashMap<DisplayKey, BuilderPacketDisplay>(delta.retained.size + delta.added.size)
-        delta.retained.forEach { displayKey -> nextEntities[displayKey] = previousEntities.getValue(displayKey) }
+        delta.retained.forEach { displayKey ->
+            val previousDisplay = previousEntities.getValue(displayKey)
+            nextEntities[displayKey] = if (displayKey is DisplayKey.Part)
+                packetDisplay(nextSpecs.getValue(displayKey), previousDisplay) else previousDisplay
+        }
         delta.added.forEach { displayKey ->
             val spec = nextSpecs.getValue(displayKey)
             nextEntities[displayKey] = packetDisplay(spec)
@@ -802,8 +823,8 @@ internal class BuilderBlockDisplayRenderer(
         syncScene(key)
     }
 
-    private fun packetDisplay(spec: DisplaySpec) = BuilderPacketDisplay(
-        entityId = packets.nextEntityId(), uuid = UUID.randomUUID(),
+    private fun packetDisplay(spec: DisplaySpec, previous: BuilderPacketDisplay? = null) = BuilderPacketDisplay(
+        entityId = previous?.entityId ?: packets.nextEntityId(), uuid = previous?.uuid ?: UUID.randomUUID(),
         x = spec.x, y = spec.y, z = spec.z,
         blockStateId = packets.blockStateId(spec.blockData),
         scaleX = spec.scaleX, scaleY = spec.scaleY, scaleZ = spec.scaleZ,
@@ -829,9 +850,7 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun syncTarget(viewer: Player) {
         val id = viewer.uniqueId
-        val displays = listOf(Layer.TARGET, Layer.ASSIST).flatMap { layer ->
-            scenes[id to layer]?.takeIf { viewer.isOnline && viewer.world.uid == it.worldId }?.entities?.values.orEmpty()
-        }
+        val displays = targetDisplays(viewer)
         val connection = if (displays.isNotEmpty()) packets.targetConnection(viewer) else null
         if (connection == null) {
             targetAudiences.remove(id)?.close()
@@ -839,6 +858,10 @@ internal class BuilderBlockDisplayRenderer(
         }
         targetAudiences.getOrPut(id, ::BuilderPacketScene)
             .update(displays, mapOf(id to BuilderPacketViewer(connection, sentChunks(viewer))))
+    }
+
+    private fun targetDisplays(viewer: Player) = listOf(Layer.TARGET, Layer.ASSIST).flatMap { layer ->
+        scenes[viewer.uniqueId to layer]?.takeIf { viewer.isOnline && viewer.world.uid == it.worldId }?.entities?.values.orEmpty()
     }
 
     private fun syncViewer(viewer: Player) {
@@ -909,6 +932,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     private fun remove(playerId: UUID, layer: Layer) {
+        if (layer == Layer.ASSIST) assistTargets.remove(playerId)
         val key = playerId to layer
         if (scenes.remove(key) != null) syncScene(key)
     }
@@ -954,6 +978,7 @@ internal class BuilderBlockDisplayRenderer(
         bookBossBars.clear()
         bookSites.clear()
         scenes.clear()
+        assistTargets.clear()
         movingPreviews.clear()
         pendingPlans.clear()
         pasteModels.clear()

@@ -40,7 +40,7 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 | `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
 | `crown` | `BuilderCrownController` | `CROWN` | `arcbuild.crown` |
 | `display` | `display/BuilderDisplayEditor` | separate decorative entity edits | explicit `arcbuild.display` |
-| `assist [on\|off\|line\|plane\|reset]` | `BuilderPlacementAssist` | native single-block placement | personal preference; no builder permission |
+| `assist [on\|off]` | `BuilderPlacementAssist` | native single-block placement | personal preference; no builder permission |
 | `book` | `BuilderBookLifecycle` and its coordinators | `BUILD_BOOK` when building | book permissions |
 | `confirm`, `cancel`, `undo`, `status` | `BuilderToolsRuntime` | `UNDO` for undo | existing operation context |
 
@@ -66,60 +66,47 @@ the fill, replace, and fence-disconnect controllers.
 
 ## Personal placement assistant
 
-`BuilderPlacementAssist` owns persistent opt-in and mode preferences plus a
-transient geometric constraint. `assist [on|off|line|plane|reset]` is available
-without builder permissions. `line` and `plane` enable their mode; `on` retains
-it; `reset` discards only the constraint. Existing recovery and durable
-player-lease input isolation remains authoritative. Actual targeting and use
-require the ordinary game mode, world, recovery, operation-lock, range,
-loaded-chunk, border and protection checks. Display-editor and moving paste
-input take priority and clear transient assistance.
+`BuilderPlacementAssist` owns persistent opt-in plus a transient geometric
+constraint. The normal public flow is `assist on|off`; all players can choose
+it without builder permissions. Clickable state messages expose the same actions;
+the bundled help also links to enabling it, without replacing existing help lists.
+The existing selection panel adds one current-state toggle to
+its ordinary action pages, preserving pending-plan and operation controls.
+Enabled players default to AUTO through the
+versioned mode key, including players who selected an older manual mode.
+Explicit `line`, `plane` and `reset` remain compatibility commands. Ordinary
+world, recovery, lease, game-mode and operation-lock gates remain authoritative;
+display editing and paste placement own input while their sessions are active.
 
-In line mode, two adjacent successful normal placements earn a cardinal
-direction. Thereafter only the next cell advances `last + direction`;
-incidental placements never reorient it. A 40-degree view sector keeps that cell
-selected without requiring its exact face under the crosshair. Plane mode
-records the first normal placement's support face: vertical normals fix Y for
-a floor, horizontal normals fix X or Z for a wall. The eye ray projects onto the
-plane through that cell's centre. At most nine local cells within 1.25 blocks
-of the projection are considered in nearest-first, coordinate-stable order.
-An occupied projected cell stops instead of searching unrelated holes. Each
-offered cell needs an adjacent native support face in the same plane.
+AUTO learns the support plane from an ordinary placement and the cardinal row
+from two adjacent successful placements. The next row cell is `last + direction`
+only when the actual eye ray intersects that cell before a nearer obstacle.
+Otherwise AUTO considers exactly the first cell where that ray enters the
+fixed one-block-thick floor/wall layer. It never substitutes a nearby supported
+cell. No support disengages assistance; a supported protected or colliding cell
+keeps its blocked guidance and consumes the engaged input without native
+placement. In AUTO an existing cell directly hit by the ordinary ray restores
+vanilla placement, allowing a new layer to establish its anchor. An already
+claimed air offer that becomes occupied remains rejected without fallback.
+Interactive or custom blocks retain ordinary input.
+A fresh ordinary placement outside the constraint starts a new anchor. Looking
+away or sneaking alone does not select a new mode or require a reset command.
 
-The shared resolver produces both preview and input targets. Current and
-packet-derived aim must resolve the same target, support and face. Separate
-loaded-chunk-safe sight checks trace to the real target volume; actual native
-support-face reach, world borders and player collision remain bounded. Arbitrary
-plane supports pass the existing custom-block safety policy, full-cube shape and
-non-interactable checks. Normal gaze at an interactive or integrated custom block
-does not publish an offer. Partial shapes, containers and custom item stacks
-retain ordinary vanilla behavior.
+The shared resolver supplies both the shown cell and immutable input offer.
+`USE_ITEM` and matching `PLAYER_BLOCK_PLACEMENT` inputs claim at most one offer
+atomically; main-thread revalidation checks connection, lock, world, item, slot,
+current/input aim and target. At most one native attempt is admitted per player
+per runtime tick. The pinned Paper 1.21.11 native adapter remains the sole block
+and item mutation path. Cancelled sequences are acknowledged on the captured
+connection; redirected use-on inputs also receive authoritative original
+clicked/adjacent block and inventory correction. Close/reset drains pending
+corrections without placing blocks. No inferred mouse-hold timer places blocks.
 
-Only fresh main-hand `USE_ITEM` or matching `PLAYER_BLOCK_PLACEMENT` input may
-claim an immutable offer. Admission removes it atomically; there is at most one
-cancelled pending input and one assisted native attempt per player per runtime
-tick. Success does not publish a successor until the next tick, so a vanilla
-use-on/air fallback burst cannot place twice. Ticks only refresh the private
-twelve-edge display and localized direction/plane HUD. Sneaking preserves the
-constraint; slot/item changes, inventory opening, teleport, world/context exits,
-death, disconnect, disable and close clear it while retaining preferences.
-
-The cached Paper 1.21.11 native adapter invokes `handleUseItemOn` synchronously
-on the owning thread with the native timestamp. Placement events, cancellation,
-debit, collision and physics remain native; the helper never manually changes
-blocks or inventory and does not create bulk undo records. Connection, item,
-slot, world and lock identity are checked again before dispatch. Every cancelled
-sequence is acknowledged on its captured connection; redirected use-on inputs
-also receive authoritative inventory and original clicked/adjacent block state
-from the owning thread, with connection/world/loaded-coordinate fences. Packet
-capture is serialized with close so pending corrections drain without native
-placement or a future scheduled callback.
-
-The earned line and `last + direction` principle is grounded in
+The row progression and exact ray criterion follow
 [Pro Placer 1.21.11, commit cc3bfe5](https://github.com/Fuzss/pro-placer/blob/cc3bfe5680d1200f41600b6d5ea1213b7b4add0b/Common/src/main/java/fuzs/proplacer/client/handler/AbstractFastBlockHandler.java).
-The plane mode and forgiving view sector are ArcBuilder behavior. The upstream
-client's key-release detection, per-tick native calls and repeat-delay override
-are not available to a server-only plugin.
+AUTO plane extension is ArcBuilder behavior. The original client mod observes
+key release and invokes native interaction every active client tick; a
+server-only implementation cannot reproduce those unavailable client signals.
 
 ## Selection and preview
 
@@ -132,13 +119,15 @@ buttons, including air clicks, use this same resolver after private action-panel
 controls have first refusal. Repeating the same corner is a no-op.
 An independent private `TARGET` layer in `BuilderBlockDisplayRenderer` draws a
 white twelve-edge cell outline. It reuses selection bounds and packet lifecycle;
-unchanged targets retain their IDs. Tool/context exits clear that layer without
+moving targets retain their logical part IDs. Tool/context exits clear that layer without
 discarding saved selection corners. The existing one-tick panel task owns cursor
 refresh, including aim, movement and sneak changes.
 The renderer combines selection, plan and book layers into one desired set per
 viewer, including only permitted scenes in the current world. The twelve-edge
 cursor has a separate logical attachment on the same captured channel and shared
-packet budget, so aim changes never copy or reconcile large static previews.
+packet budget, so aim changes never copy or reconcile large static previews. Compact cursor
+frames admit all their changed parts in one budget transaction; a deferred frame
+retains its complete previous pose and retries only the latest desired pose.
 Removing either stream preserves the other; book observers never receive the
 owner's private selection or cursor. Chunk eviction, replay, disconnect and close
 drain both streams through the existing packet lifecycle.

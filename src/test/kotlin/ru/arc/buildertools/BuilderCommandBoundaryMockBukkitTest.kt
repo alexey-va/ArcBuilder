@@ -170,7 +170,7 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
         withCommandFixture { fixture ->
             val player = fixture.player("PlacementHelper")
             fixture.tab(player, "ass") shouldBe listOf("assist")
-            fixture.tab(player, "assist", "") shouldBe listOf("on", "off", "line", "plane", "reset")
+            fixture.tab(player, "assist", "") shouldBe listOf("on", "off")
             fixture.tab(player, "ASSIST", "OF") shouldBe listOf("off")
             fixture.tab(player, "assist", "on", "") shouldBe emptyList()
 

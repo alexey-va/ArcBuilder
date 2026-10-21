@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--client-jar", type=Path, required=True)
 parser.add_argument("--ops-root", type=Path, default=repo.parent / "ruscrafting-ops")
 args = parser.parse_args()
-output = repo / "build/reports/placement-assist"
+output = repo / "build/reports/placement-assist-v3"
 scene = output / "scene.json"
 if not scene.is_file():
     parser.error("First run ./gradlew test --tests ru.arc.buildertools.BuilderPlacementAssistPreviewTest")
@@ -29,7 +29,7 @@ template = (renderer / "workshop-preview.template.html").read_text()
 template = template.replace("Мебельная мастерская", "Помощник строительства")
 template = template.replace("Состояние мастерской", "Состояние рамки")
 template = template.replace("Техническое превью: станки, этапы и готовая мебель; пол условный, без мира и NPC",
-    "Офлайн: ряд без точного прицела, пол и стена из геометрии ArcBuilder; нативный glow не воспроизводится")
+    "Офлайн: одна клетка под прицелом — ряд, пол и стена из геометрии ArcBuilder; нативный glow не воспроизводится")
 template = template.replace('data-view="front" aria-pressed="true"', 'data-view="front" aria-pressed="false"')
 template = template.replace('data-view="player" aria-pressed="false"', 'data-view="player" aria-pressed="true"')
 template = template.replace('<div id="viewport"></div>', '<div id="viewport"></div><div class="aim-marker" aria-hidden="true"></div>')

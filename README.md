@@ -11,26 +11,26 @@ The plugin uses arc-core 2.7.18 and requires ARC for its shared visual packet bu
 
 ## Player flow
 
-- `/builder assist line` locks a row after two adjacent ordinary placements.
-  Look towards the next mint cell and right-click: you can miss its exact face
-  while the earned direction stays fixed. `/builder assist plane` locks a floor
-  or wall after the first placement: place above a support for a floor, or on
-  its side for a wall. Your view selects nearby cells on that fixed plane,
-  each adjoining a safe existing full block. An occupied projected cell stops
-  placement. The action bar shows the row direction or the plane coordinate.
-  Sneaking keeps the lock for bridges; `/builder assist reset` chooses a fresh
-  anchor. Looking substantially away restores ordinary interaction.
-  `/builder assist` toggles the helper; `on` and `off` set it explicitly without
-  changing the selected mode. Every player can change this personal preference
-  without builder-tool permissions. Preference and mode survive reconnects;
-  the geometric lock clears on item/slot, world and gameplay-context changes.
-  Hold an ordinary full-cube block without custom item data. Both air clicks and
-  clicks on the ordinary background can place the highlighted cell, with one
-  assisted native attempt per server tick and no timer-driven placement.
-  Each continuation uses the normal server placement path, preserving inventory
-  costs, collision, protection plugins and physics within ordinary reach and
-  sight. Slabs, stairs, containers and custom items retain vanilla placement.
-  The vanilla client's repeat delay still applies.
+- `/builder assist on` enables one persistent automatic helper; `off` disables
+  it. Every player can choose this without builder-tool permissions. The bundled
+  help for new installations has a clickable enable link; existing customized
+  help remains unchanged. The enabled/disabled messages link
+  to the opposite action. The existing selection tool panel also shows one
+  on/off toggle with the current state. Build
+  normally: two adjacent placements establish a row, and the support face
+  establishes a floor or wall. Look into the next air cell to continue the row,
+  or at another supported cell of the same plane to extend the surface. A new
+  ordinary placement elsewhere establishes the next anchor automatically.
+  Building needs no repeated mode or reset commands. Sneaking keeps the anchor.
+  The highlighted cell follows the actual eye ray; the helper never searches
+  neighbouring cells to choose a different destination. A protected or colliding
+  cell consumes the click without placing an unexpected block in the background.
+  Aiming at an existing block restores ordinary placement, so starting a new
+  layer also needs no reset command.
+  Interactive/custom blocks and unsupported targets retain ordinary interaction.
+  Each accepted placement still uses native reach, protection, collision,
+  inventory and physics checks. Ticks refresh guidance and never place blocks.
+  Stairs, slabs, containers and custom items retain ordinary vanilla placement.
 - `/builder wand` gives selection guidance. Left click selects point 1; right
   click selects point 2. Distinct straight BlockDisplay outlines remain visible
   until the selection is cleared or expires.

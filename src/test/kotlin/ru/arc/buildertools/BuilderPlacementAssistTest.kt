@@ -12,6 +12,7 @@ import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.World
 import org.bukkit.WorldBorder
 import org.bukkit.block.Block
@@ -22,6 +23,7 @@ import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import org.bukkit.util.RayTraceResult
 import org.bukkit.util.Vector
@@ -36,10 +38,10 @@ import kotlin.math.abs
 class BuilderPlacementAssistTest : FunSpec({
     test("two committed native blocks expose one offer and ticks never place") {
         AssistFixture().use { f ->
-            f.helper.command(f.player, listOf("on"))
+            f.helper.command(f.player, listOf("line"))
             f.place(f.position(0))
             f.helper.tick()
-            f.packetAdmit shouldBe null
+            f.offer() shouldBe null
             f.scheduler.tick()
             f.place(f.position(1))
             f.scheduler.tick()
@@ -54,12 +56,12 @@ class BuilderPlacementAssistTest : FunSpec({
 
     test("late cancellation cannot establish a line or admit input") {
         AssistFixture().use { f ->
-            f.helper.command(f.player, listOf("on"))
+            f.helper.command(f.player, listOf("line"))
             f.place(f.position(0))
             f.place(f.position(1)).isCancelled = true
             f.scheduler.tick()
             f.helper.tick()
-            f.packetAdmit shouldBe null
+            f.offer() shouldBe null
             f.calls shouldBe 0
         }
     }
@@ -83,8 +85,8 @@ class BuilderPlacementAssistTest : FunSpec({
         }
     }
 
-    test("looking substantially away walls unloaded chunks and protection cannot offer placement") {
-        for (reason in listOf("aim", "wall", "chunk", "protection")) {
+    test("looking away foreground walls and unloaded chunks leave ordinary input alone") {
+        for (reason in listOf("aim", "wall", "chunk")) {
             AssistFixture().use { f ->
                 f.seed()
                 f.offer()
@@ -93,33 +95,37 @@ class BuilderPlacementAssistTest : FunSpec({
                     "wall" -> every { f.world.rayTraceBlocks(any<Location>(), any(), any(), any(), any()) } returns
                         RayTraceResult(f.eye.toVector().add(f.eye.direction.multiply(.5)))
                     "chunk" -> every { f.world.isChunkLoaded(any<Int>(), any<Int>()) } returns false
-                    "protection" -> f.buildAllowed = false
                 }
                 f.helper.tick()
                 f.offer() shouldBe null
                 f.calls shouldBe 0
-                if (reason == "protection") verify { f.renderer.placementAssist(f.player, f.position(2), true) }
             }
         }
     }
 
-    test("line snapping works off the exact cell while crouching and incidental placement preserve direction") {
+    test("look and crouch preserve the row while a successful ordinary turn naturally establishes the next row") {
         AssistFixture().use { f ->
             f.seed()
             val original = checkNotNull(f.offer()).lock
             every { f.player.isSneaking } returns true
             f.aim(Vector(3.5, 63.9, 1.8))
             BuilderPlacementAssistGeometry.aimDistance(f.eye.toVector(), f.eye.direction, f.position(2), 4.5) shouldBe null
-            f.place(f.position(0, 64, -1))
+            f.helper.tick()
+            f.offer() shouldBe null
+            f.aim(BuilderPlacementAssistGeometry.center(f.position(2)))
+            f.helper.tick()
+            (checkNotNull(f.offer()).lock === original) shouldBe true
+            f.place(f.position(1, 64, 1))
             f.scheduler.tick()
+            f.aim(BuilderPlacementAssistGeometry.center(f.position(1, 64, 2)))
             f.helper.tick()
             val offer = checkNotNull(f.offer())
-            (offer.lock === original) shouldBe true
-            offer.target.position shouldBe f.position(2)
+            offer.lock.direction shouldBe BlockFace.SOUTH
+            offer.target.position shouldBe f.position(1, 64, 2)
             f.onNative = f::nativeSuccess
             f.helper.accept(f.input(offer))
             f.calls shouldBe 1
-            f.material(f.position(2)) shouldBe Material.STONE
+            f.material(f.position(1, 64, 2)) shouldBe Material.STONE
         }
     }
 
@@ -140,19 +146,30 @@ class BuilderPlacementAssistTest : FunSpec({
         }
     }
 
-    test("native refusal never advances the constraint or reoffers before its visible cooldown") {
+    test("native refusal consumes further aimed input without another native attempt during its visible cooldown") {
         AssistFixture().use { f ->
             f.seed()
             f.helper.accept(f.input(checkNotNull(f.offer())))
             f.offer() shouldBe null
             verify { f.renderer.placementAssist(f.player, f.position(2), true) }
             verify { f.player.sendActionBar(Component.text("assist.refused")) }
+            f.helper.tick()
+            val refused = checkNotNull(f.offer())
+            refused.target.blocked shouldBe "assist.refused"
+            f.helper.accept(f.input(refused))
+            f.calls shouldBe 1
             repeat(20) { f.helper.tick() }
             f.offer()?.lock?.last shouldBe f.position(1)
             f.onNative = f::nativeSuccess
             f.helper.tick()
             f.helper.accept(f.input(checkNotNull(f.offer())))
+            f.calls shouldBe 2
+            f.material(f.position(2)) shouldBe Material.STONE
+            // The new block now occludes a centre ray from this stationary eye.
             f.aim(BuilderPlacementAssistGeometry.center(f.position(3)))
+            f.helper.tick()
+            f.offer() shouldBe null
+            f.aimPlane(f.position(3), BlockFace.UP)
             f.helper.tick()
             f.offer()?.lock?.last shouldBe f.position(2)
         }
@@ -166,7 +183,7 @@ class BuilderPlacementAssistTest : FunSpec({
             f.place(f.position(0)); f.place(f.position(1))
             f.scheduler.tick()
             f.helper.tick()
-            f.packetAdmit shouldBe null
+            f.offer() shouldBe null
         }
         AssistFixture().use { f ->
             f.player.inventory.setItemInMainHand(ItemStack(Material.STONE, 32).apply {
@@ -176,7 +193,7 @@ class BuilderPlacementAssistTest : FunSpec({
             f.place(f.position(0)); f.place(f.position(1))
             f.scheduler.tick()
             f.helper.tick()
-            f.packetAdmit shouldBe null
+            f.offer() shouldBe null
         }
     }
 
@@ -203,7 +220,7 @@ class BuilderPlacementAssistTest : FunSpec({
                 f.helper.command(f.player, listOf("plane"))
                 f.place(anchor, anchor.relative(normal.oppositeFace))
                 f.scheduler.tick()
-                f.aim(BuilderPlacementAssistGeometry.center(target))
+                f.aimPlane(target, normal)
                 f.helper.tick()
                 val offer = checkNotNull(f.offer())
                 offer.lock.planeNormal shouldBe normal
@@ -214,6 +231,128 @@ class BuilderPlacementAssistTest : FunSpec({
                 f.material(target) shouldBe Material.STONE
                 f.player.inventory.itemInMainHand.amount shouldBe 31
             }
+        }
+    }
+
+    test("one enable follows a row then the same floor plane without mode or reset commands") {
+        AssistFixture().use { f ->
+            f.helper.command(f.player, listOf("on"))
+            f.place(f.position(0), f.position(0, 63))
+            f.place(f.position(1), f.position(0))
+            f.scheduler.tick()
+            f.aimPlane(f.position(2), BlockFace.UP)
+            f.helper.tick()
+            val row = checkNotNull(f.offer())
+            row.target.row shouldBe true
+            row.lock.planeNormal shouldBe BlockFace.UP
+            f.onNative = f::nativeSuccess
+            f.helper.accept(f.input(row))
+
+            f.aimPlane(f.position(1, 64, 1), BlockFace.UP)
+            f.helper.tick()
+            val floor = checkNotNull(f.offer())
+            floor.target.row shouldBe false
+            floor.target.position shouldBe f.position(1, 64, 1)
+            floor.lock.planeNormal shouldBe BlockFace.UP
+            f.helper.accept(f.input(floor))
+            f.calls shouldBe 2
+            f.material(f.position(2)) shouldBe Material.STONE
+            f.material(f.position(1, 64, 1)) shouldBe Material.STONE
+            f.helper.mode(f.player) shouldBe BuilderPlacementAssistMode.AUTO
+        }
+    }
+
+    test("a two-centimetre diagonal aim change never jumps to a neighbouring plane cell") {
+        AssistFixture().use { f ->
+            f.helper.command(f.player, listOf("on"))
+            f.place(f.position(0), f.position(0, 63))
+            f.scheduler.tick()
+            for (supported in listOf(false, true)) {
+                if (supported) f.set(f.position(1), Material.STONE)
+                for (point in listOf(Vector(1.49, 65.0, 1.51), Vector(1.51, 65.0, 1.49))) {
+                    f.aim(point)
+                    f.helper.tick()
+                    val offer = f.offer()
+                    if (supported) checkNotNull(offer).target.position shouldBe f.position(1, 64, 1)
+                    else offer shouldBe null
+                }
+            }
+        }
+    }
+
+    test("orange blocked use-on consumes the aimed gesture and never invokes native background placement") {
+        for (reason in listOf("protected", "occupied", "collision")) {
+            AssistFixture().use { f ->
+                f.seedBackground()
+                when (reason) {
+                    "protected" -> f.buildAllowed = false
+                    "occupied" -> f.set(f.position(2), Material.STONE)
+                    "collision" -> every { f.player.boundingBox } returns BoundingBox(2.1, 64.1, .1, 2.9, 64.9, .9)
+                }
+                f.helper.tick()
+                val offer = checkNotNull(f.offer(f.hit()))
+                offer.target.position shouldBe f.position(2)
+                offer.target.blocked shouldBe "assist.$reason-v2"
+                f.helper.accept(f.input(offer, click = true))
+                f.calls shouldBe 0
+                f.material(f.position(3)) shouldBe Material.AIR
+                f.player.inventory.itemInMainHand.amount shouldBe 32
+                f.offer() shouldBe null
+                verify { f.renderer.placementAssist(f.player, f.position(2), true) }
+                verify(exactly = 1) { f.player.updateInventory() }
+                verify(exactly = 2) { f.player.sendBlockChange(any<Location>(), any<BlockData>()) }
+            }
+        }
+    }
+
+    test("an ordinary interaction with a chest in the current ray is never swallowed by an automatic plane") {
+        AssistFixture().use { f ->
+            f.helper.command(f.player, listOf("on"))
+            f.place(f.position(0), f.position(0, 63))
+            f.set(f.position(1), Material.CHEST)
+            f.scheduler.tick()
+            f.aimPlane(f.position(1), BlockFace.UP)
+            f.helper.tick()
+            f.offer(f.hit()) shouldBe null
+            f.calls shouldBe 0
+        }
+    }
+
+    test("clicking an existing floor starts a new layer naturally without mode or reset commands") {
+        AssistFixture().use { f ->
+            f.helper.command(f.player, listOf("on"))
+            f.place(f.position(0), f.position(0, 63))
+            f.place(f.position(1), f.position(0))
+            f.scheduler.tick()
+            f.aimPlane(f.position(1), BlockFace.UP)
+            f.helper.tick()
+            f.offer(f.hit()) shouldBe null // The real existing block stays an ordinary vanilla target.
+            f.place(f.position(1, 65), f.position(1))
+            f.scheduler.tick()
+            f.eye.x = 2.5; f.eye.y = 67.62; f.eye.z = 1.5
+            f.aimPlane(f.position(2, 65), BlockFace.UP)
+            f.helper.tick()
+            val nextLayer = checkNotNull(f.offer())
+            nextLayer.lock.anchor.y shouldBe 65
+            nextLayer.lock.planeNormal shouldBe BlockFace.UP
+            nextLayer.target.position shouldBe f.position(2, 65)
+            f.calls shouldBe 0
+        }
+    }
+
+    test("an already captured air target becoming occupied never falls through to another native placement") {
+        AssistFixture().use { f ->
+            f.helper.command(f.player, listOf("on"))
+            f.place(f.position(0), f.position(0, 63))
+            f.scheduler.tick()
+            f.aimPlane(f.position(1), BlockFace.UP)
+            f.helper.tick()
+            val input = f.input(checkNotNull(f.offer()))
+            f.set(f.position(1), Material.STONE)
+            f.helper.accept(input)
+            f.calls shouldBe 0
+            f.player.inventory.itemInMainHand.amount shouldBe 32
+            f.material(f.position(1, 65)) shouldBe Material.AIR
         }
     }
 
@@ -229,18 +368,23 @@ class BuilderPlacementAssistTest : FunSpec({
                     "floating" -> f.position(3, 64, 2)
                     else -> f.position(1)
                 }
+                if (reason == "occupied") f.set(anchor.relative(BlockFace.EAST), Material.STONE)
                 if (reason == "unsafe") f.safeSupport = { false }
                 if (reason == "interactive") f.set(anchor, Material.CHEST)
-                f.aim(BuilderPlacementAssistGeometry.center(target))
+                f.aimPlane(target, BlockFace.UP)
                 f.helper.tick()
-                f.offer() shouldBe null
+                val offer = f.offer()
+                if (reason == "occupied") {
+                    checkNotNull(offer).target.blocked shouldBe "assist.occupied-v2"
+                    f.helper.accept(f.input(offer, click = true))
+                } else offer shouldBe null
                 f.calls shouldBe 0
                 if (reason == "occupied") verify { f.renderer.placementAssist(f.player, anchor, true) }
             }
         }
     }
 
-    test("mode and preference persist while reset explicitly chooses a new anchor") {
+    test("on chooses automatic placement while old enabled preferences migrate without another command") {
         AssistFixture().use { f ->
             f.seed()
             f.helper.command(f.player, listOf("plane"))
@@ -248,15 +392,25 @@ class BuilderPlacementAssistTest : FunSpec({
             f.offer() shouldBe null
             f.helper.command(f.player, listOf("off"))
             f.helper.command(f.player, listOf("on"))
-            f.helper.mode(f.player) shouldBe BuilderPlacementAssistMode.PLANE
+            f.helper.mode(f.player) shouldBe BuilderPlacementAssistMode.AUTO
             f.helper.command(f.player, listOf("reset"))
             f.helper.isEnabled(f.player) shouldBe true
             val anchor = f.position(0)
             f.place(anchor, anchor.relative(BlockFace.DOWN))
             f.scheduler.tick()
-            f.aim(BuilderPlacementAssistGeometry.center(f.position(0, 64, 1)))
+            f.aimPlane(f.position(0, 64, 1), BlockFace.UP)
             f.helper.tick()
             f.offer()?.lock?.planeNormal shouldBe BlockFace.UP
+        }
+        AssistFixture().use { f ->
+            f.legacyEnabled()
+            f.helper.isEnabled(f.player) shouldBe true
+            f.helper.mode(f.player) shouldBe BuilderPlacementAssistMode.AUTO
+            f.place(f.position(0), f.position(0, 63))
+            f.scheduler.tick()
+            f.aimPlane(f.position(1), BlockFace.UP)
+            f.helper.tick()
+            checkNotNull(f.offer()).target.position shouldBe f.position(1)
         }
     }
 
@@ -278,10 +432,40 @@ class BuilderPlacementAssistTest : FunSpec({
             f.calls shouldBe 1
             f.player.inventory.itemInMainHand.amount shouldBe 31
             f.material(f.position(2)) shouldBe Material.STONE
-            f.material(f.position(3, 64, 1)) shouldBe Material.AIR
+            f.material(f.position(3)) shouldBe Material.AIR
             f.offer() shouldBe null
             verify(exactly = 2) { f.player.updateInventory() }
             verify(exactly = 4) { f.player.sendBlockChange(any<Location>(), any<BlockData>()) }
+        }
+    }
+
+    test("deferred or revoked frame admission consumes redirected input until the exact frame is ready") {
+        for (deferredBeforeOffer in listOf(true, false)) {
+            AssistFixture().use { f ->
+                f.seedBackground()
+                if (deferredBeforeOffer) {
+                    f.frameReady = false
+                    f.helper.tick()
+                }
+                val input = f.input(checkNotNull(f.offer(f.hit())), click = true)
+                f.frameReady = false
+                f.onNative = f::nativeSuccess
+                f.helper.accept(input)
+                f.calls shouldBe 0
+                f.material(f.position(2)) shouldBe Material.AIR
+                f.material(f.position(3)) shouldBe Material.AIR
+                f.player.inventory.itemInMainHand.amount shouldBe 32
+                f.offer() shouldBe null
+                verify(exactly = 1) { f.player.updateInventory() }
+                verify(exactly = 2) { f.player.sendBlockChange(any<Location>(), any<BlockData>()) }
+                f.frameReady = true
+                f.helper.tick()
+                f.helper.accept(f.input(checkNotNull(f.offer(f.hit())), click = true))
+                f.calls shouldBe 1
+                f.material(f.position(2)) shouldBe Material.STONE
+                f.material(f.position(3)) shouldBe Material.AIR
+                f.player.inventory.itemInMainHand.amount shouldBe 31
+            }
         }
     }
 
@@ -291,7 +475,7 @@ class BuilderPlacementAssistTest : FunSpec({
             f.helper.accept(f.input(checkNotNull(f.offer(f.hit())), click = true))
             f.calls shouldBe 1
             f.material(f.position(2)) shouldBe Material.AIR
-            f.material(f.position(3, 64, 1)) shouldBe Material.AIR
+            f.material(f.position(3)) shouldBe Material.AIR
             f.player.inventory.itemInMainHand.amount shouldBe 32
             verify(exactly = 1) { f.player.updateInventory() }
             verify(exactly = 2) { f.player.sendBlockChange(any<Location>(), any<BlockData>()) }
@@ -331,6 +515,7 @@ private class AssistFixture : AutoCloseable {
     private val materials = mutableMapOf<BuilderBlockPos, Material>()
     var allowed = true
     var buildAllowed = true
+    var frameReady = true
     var safeSupport: (Block) -> Boolean = { true }
     var channel: Any = Any()
     var calls = 0
@@ -354,6 +539,7 @@ private class AssistFixture : AutoCloseable {
         every { player.eyeLocation } answers { eye.clone() }
         every { player.getAttribute(any()) } returns null
         every { player.boundingBox } returns BoundingBox(.2, 65.0, .2, .8, 66.8, .8)
+        every { renderer.placementAssistReady(any(), any(), any()) } answers { frameReady }
         every { world.uid } returns worldId
         every { world.minHeight } returns -64
         every { world.maxHeight } returns 320
@@ -412,11 +598,24 @@ private class AssistFixture : AutoCloseable {
     }
     fun seedBackground() {
         seed()
-        set(position(3, 63, 1), Material.STONE)
-        aim(Vector(3.5, 63.9, 1.8))
+        set(position(3, 63, 0), Material.STONE)
+        aim(Vector(3.5, 63.5, .5))
         helper.tick()
     }
     fun aim(point: Vector) { eye.direction = point.clone().subtract(eye.toVector()) }
+    fun aimPlane(position: BuilderBlockPos, normal: BlockFace) {
+        val point = BuilderPlacementAssistGeometry.center(position)
+        when {
+            normal.modX != 0 -> point.x = if (eye.x < position.x) position.x.toDouble() else position.x + 1.0
+            normal.modY != 0 -> point.y = if (eye.y < position.y) position.y.toDouble() else position.y + 1.0
+            else -> point.z = if (eye.z < position.z) position.z.toDouble() else position.z + 1.0
+        }
+        aim(point)
+    }
+    fun legacyEnabled() {
+        player.persistentDataContainer.set(NamespacedKey(plugin, "placement_assist"), PersistentDataType.BYTE, 1.toByte())
+        player.persistentDataContainer.set(NamespacedKey(plugin, "placement_assist_mode"), PersistentDataType.STRING, "plane")
+    }
     fun offer(hit: BuilderPlacementAssistHit? = null) = packetAdmit?.invoke(player.uniqueId, hit)
     fun receive(input: BuilderPlacementAssistInput) = packetReceive(input)
     private fun vanillaTrace() = checkNotNull(trace(eye, eye.direction, 4.5))

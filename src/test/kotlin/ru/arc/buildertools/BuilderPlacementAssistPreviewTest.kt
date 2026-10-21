@@ -10,7 +10,7 @@ import java.util.UUID
 
 /** Small source-derived fixtures: no alternate particle or display geometry. */
 class BuilderPlacementAssistPreviewTest : FunSpec({
-    test("export off-aim row floor wall and blocked states from production geometry") {
+    test("export ray-selected row floor wall diagonal continuity and blocked states from production geometry") {
         val world = UUID(0L, 1L)
         fun position(x: Int, y: Int = 0, z: Int = 0) = BuilderBlockPos(world, x, y, z)
         fun point(vector: Vector) = listOf(vector.x, vector.y, vector.z)
@@ -35,35 +35,38 @@ class BuilderPlacementAssistPreviewTest : FunSpec({
         val line = BuilderPlacementAssistLock(position(0)).placed(position(1))
         val target = checkNotNull(line.next)
         val eye = Vector(.5, 2.62, .5)
-        val offAim = Vector(3.5, -.1, 1.8)
-        BuilderPlacementAssistGeometry.inView(eye, offAim.clone().subtract(eye), target) shouldBe true
-        BuilderPlacementAssistGeometry.aimDistance(eye, offAim.clone().subtract(eye), target, 4.5) shouldBe null
-        val lineBlocks = listOf(position(0), position(1), position(3, -1, 1))
-        val states = mutableListOf(state("line-off-aim", "Ряд · восток", "Прицел на фоне: выбранная клетка остаётся в ряду",
-            target, lineBlocks, eye, offAim))
+        val aim = Vector(3.5, -.5, .5)
+        (BuilderPlacementAssistGeometry.aimDistance(eye, aim.clone().subtract(eye), target, 4.5) != null) shouldBe true
+        val lineBlocks = listOf(position(0), position(1), position(3, -1, 0))
+        val states = mutableListOf(state("line-through-cell", "Ряд · восток", "Луч проходит через следующую клетку; точная грань опоры не нужна",
+            target, lineBlocks, eye, aim))
         fun plane(id: String, title: String, normal: BlockFace, placed: List<BuilderBlockPos>, eye: Vector, aim: Vector) {
             val lock = BuilderPlacementAssistLock(placed.first(), planeNormal = normal)
             val projection = checkNotNull(BuilderPlacementAssistGeometry.projectPlane(eye, aim.clone().subtract(eye), lock, 4.5))
-            val selected = BuilderPlacementAssistGeometry.planeCandidates(projection, lock).first { candidate ->
-                candidate !in placed && BuilderPlacementAssistGeometry.cardinalFaces.any { face ->
+            val selected = BuilderPlacementAssistGeometry.projectedCell(projection, lock)
+            (selected !in placed) shouldBe true
+            BuilderPlacementAssistGeometry.cardinalFaces.any { face ->
                     face.modX * normal.modX + face.modY * normal.modY + face.modZ * normal.modZ == 0 &&
-                        candidate.relative(face.oppositeFace) in placed
-                }
-            }
+                        selected.relative(face.oppositeFace) in placed
+            } shouldBe true
             lock.inPlane(selected) shouldBe true
-            BuilderPlacementAssistGeometry.inView(eye, aim.clone().subtract(eye), selected) shouldBe true
+            (BuilderPlacementAssistGeometry.aimDistance(eye, aim.clone().subtract(eye), selected, 4.5) != null) shouldBe true
             states += state(id, title, "Клетка на фиксированной плоскости примыкает к существующему блоку",
                 selected, placed, eye, aim)
         }
         plane("plane-floor", "Плоскость · пол Y 0", BlockFace.UP,
-            listOf(position(0), position(1), position(0, 0, 1)), Vector(-.7, 2.62, .3), Vector(1.65, .5, 1.55))
+            listOf(position(0), position(1), position(0, 0, 1)), Vector(-.7, 2.62, .3), Vector(1.5, 1.0, 1.5))
         plane("plane-wall", "Плоскость · стена Z 0", BlockFace.NORTH,
-            listOf(position(0), position(1), position(0, 1)), Vector(.5, 2.62, -3.0), Vector(1.65, 1.6, .5))
+            listOf(position(0), position(1), position(0, 1)), Vector(.5, 2.62, -3.0), Vector(1.5, 1.5, 0.0))
+        plane("plane-diagonal-a", "Плоскость · небольшой поворот A", BlockFace.UP,
+            listOf(position(0), position(1)), eye, Vector(1.49, 1.0, 1.51))
+        plane("plane-diagonal-b", "Плоскость · небольшой поворот B", BlockFace.UP,
+            listOf(position(0), position(1)), eye, Vector(1.51, 1.0, 1.49))
         states += state("blocked", "Ряд · строительство недоступно", "Та же клетка: янтарная рамка, без размещения",
-            target, lineBlocks, eye, offAim, blocked = true)
+            target, lineBlocks, eye, aim, blocked = true)
         val scene = mapOf("states" to states, "palette" to mapOf("ready" to "minecraft:lime_stained_glass",
             "blocked" to "minecraft:orange_stained_glass", "support" to "minecraft:oak_planks"))
-        File("build/reports/placement-assist/scene.json").apply {
+        File("build/reports/placement-assist-v3/scene.json").apply {
             parentFile.mkdirs()
             writeText(GsonBuilder().setPrettyPrinting().create().toJson(scene))
         }

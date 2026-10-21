@@ -20,7 +20,7 @@ import java.util.UUID
 
 internal enum class BuilderPanelAction {
     FILL, REPLACE, COPY, PASTE, PREVIOUS_PAGE, NEXT_PAGE, DECONSTRUCT, DISCONNECT, CROWN,
-    DRAFT, CLEAR, UNDO, CONFIRM, CANCEL, ROTATE_LEFT, ROTATE_RIGHT;
+    DRAFT, CLEAR, UNDO, CONFIRM, CANCEL, ROTATE_LEFT, ROTATE_RIGHT, ASSIST_ON, ASSIST_OFF;
 
     val localeKey: String get() = name.lowercase(java.util.Locale.ROOT).replace('_', '-')
 }

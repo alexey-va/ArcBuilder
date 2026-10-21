@@ -22,36 +22,53 @@ class BuilderPlacementAssistGeometryTest : FunSpec({
         }
     }
 
-    test("earned line ignores incidental placements and advances only its next cell") {
-        val line = BuilderPlacementAssistLock(origin).placed(origin.relative(BlockFace.EAST))
-        (line.placed(origin.relative(BlockFace.UP)) === line) shouldBe true
-        (line.placed(origin.copy(x = 3)) === line) shouldBe true
+    test("successful placements renew direction naturally while same-plane side clicks preserve its normal") {
+        val line = BuilderPlacementAssistLock(origin, planeNormal = BlockFace.UP)
+            .placed(origin.relative(BlockFace.EAST), BlockFace.EAST)
+        line.planeNormal shouldBe BlockFace.UP
         line.placed(checkNotNull(line.next)).next shouldBe origin.copy(x = 3)
+        val turn = line.placed(origin.copy(x = 1, z = 1), BlockFace.SOUTH)
+        turn.direction shouldBe BlockFace.SOUTH
+        turn.planeNormal shouldBe BlockFace.UP
+        turn.anchor shouldBe origin
+        val newStroke = turn.placed(origin.copy(x = 4, y = 66), BlockFace.NORTH)
+        newStroke.direction shouldBe null
+        newStroke.anchor shouldBe origin.copy(x = 4, y = 66)
+        newStroke.planeNormal shouldBe BlockFace.NORTH
         BuilderPlacementAssistLock(origin).inPlane(origin) shouldBe false
     }
 
-    test("line view sector accepts an off-cell ray but not a substantially different view") {
+    test("an off-cell ray never magnetizes the row from a neighbouring crosshair cell") {
         val eye = Vector(.5, 66.62, .5)
         val target = origin.copy(x = 2)
         val direction = Vector(3.5, 63.9, 1.8).subtract(eye)
-        BuilderPlacementAssistGeometry.inView(eye, direction, target) shouldBe true
         BuilderPlacementAssistGeometry.aimDistance(eye, direction, target, 4.5) shouldBe null
-        BuilderPlacementAssistGeometry.inView(eye, Vector(-1, 0, 0), target) shouldBe false
     }
 
-    test("plane projection and local candidates keep the locked floor or wall coordinate") {
+    test("plane chooses exactly the first visible layer cell on either side of a floor or wall") {
         for (normal in listOf(BlockFace.UP, BlockFace.DOWN, BlockFace.EAST, BlockFace.WEST, BlockFace.NORTH, BlockFace.SOUTH)) {
             val lock = BuilderPlacementAssistLock(origin, planeNormal = normal)
             val center = BuilderPlacementAssistGeometry.center(origin)
             val eye = center.clone().add(Vector(normal.modX, normal.modY, normal.modZ).multiply(3))
             val point = checkNotNull(BuilderPlacementAssistGeometry.projectPlane(eye, center.clone().subtract(eye), lock, 4.5))
-            point shouldBe center
-            val candidates = BuilderPlacementAssistGeometry.planeCandidates(point, lock)
-            candidates.size shouldBe 5
-            candidates.first() shouldBe origin
-            candidates.all(lock::inPlane) shouldBe true
+            point shouldBe center.clone().add(Vector(normal.modX, normal.modY, normal.modZ).multiply(.5))
+            BuilderPlacementAssistGeometry.projectedCell(point, lock) shouldBe origin
             BuilderPlacementAssistGeometry.projectPlane(eye, center.clone().subtract(eye), lock, 2.0) shouldBe null
         }
+    }
+
+    test("small diagonal aim movement keeps one plane cell and a reachable face is not projected beyond reach") {
+        val lock = BuilderPlacementAssistLock(origin, planeNormal = BlockFace.UP)
+        val eye = Vector(2.5, 65.62, 3.5)
+        for (point in listOf(Vector(1.49, 65.0, 1.51), Vector(1.51, 65.0, 1.49))) {
+            val projection = checkNotNull(BuilderPlacementAssistGeometry.projectPlane(eye, point.subtract(eye), lock, 4.5))
+            BuilderPlacementAssistGeometry.projectedCell(projection, lock) shouldBe origin.copy(x = 1, z = 1)
+        }
+        val top = Vector(.5, 65.0, 1.5)
+        val projection = checkNotNull(BuilderPlacementAssistGeometry.projectPlane(eye, top.clone().subtract(eye), lock, 4.5))
+        (projection.distance(top) < 1e-9) shouldBe true
+        BuilderPlacementAssistGeometry.projectedCell(projection, lock) shouldBe origin.copy(z = 1)
+        BuilderPlacementAssistGeometry.projectPlane(Vector(.5, 64.5, .5), Vector(1, 0, 0), lock, 4.5) shouldBe null
     }
 
     test("aim requires the real block volume within eye reach and in front of the camera") {

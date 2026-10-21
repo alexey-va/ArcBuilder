@@ -103,7 +103,7 @@ class BuilderPacketRendererTest : FunSpec({
                 val gateway = SelectionTargetGateway()
                 val channel = Any()
                 val attachment = BuilderPacketAttachment(channel, gateway, Logger.getAnonymousLogger())
-                val targetAttachment = BuilderPacketAttachment(channel, gateway, Logger.getAnonymousLogger())
+                val targetAttachment = BuilderPacketAttachment(channel, gateway, Logger.getAnonymousLogger(), compactFrames = true)
                 var staticSubmissions = 0
                 val targetBatchSizes = mutableListOf<Int>()
                 val capturedViewers = mutableSetOf<UUID>()
@@ -125,6 +125,7 @@ class BuilderPacketRendererTest : FunSpec({
                         capturedViewers += player.uniqueId
                         return object : BuilderPreviewConnection {
                             override val identity = targetAttachment.identity
+                            override fun isAdmitted(desired: List<BuilderPacketDisplay>) = targetAttachment.isAdmitted(desired)
                             override fun submit(desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int>) {
                                 targetBatchSizes += desired.size
                                 targetAttachment.submit(desired, forceResetIds)
@@ -165,7 +166,11 @@ class BuilderPacketRendererTest : FunSpec({
                         gateway.displayCalls shouldBe calls
 
                         renderer.placementAssist(player, first.copy(x = 7), false)
+                        renderer.placementAssistReady(player, first.copy(x = 7), false) shouldBe false
                         gateway.drain()
+                        renderer.placementAssistReady(player, first.copy(x = 7), false) shouldBe true
+                        renderer.placementAssistReady(player, first.copy(x = 7), true) shouldBe false
+                        renderer.placementAssistReady(player, first.copy(x = 8), false) shouldBe false
                         gateway.visible.size shouldBe 38
                         gateway.visible.keys.containsAll(unchangedIds) shouldBe true
                         val assistIds = gateway.visible.keys - unchangedIds
@@ -179,16 +184,33 @@ class BuilderPacketRendererTest : FunSpec({
                         gateway.drain()
                         gateway.visible.keys.containsAll(unchangedIds) shouldBe true
                         val blockedAssistIds = gateway.visible.keys - unchangedIds
-                        blockedAssistIds.size shouldBe 12
+                        blockedAssistIds shouldBe assistIds
                         blockedAssistIds.all { gateway.visible.getValue(it).glowRgb == BuilderPlacementAssistAppearance.forState(true).glowRgb } shouldBe true
+                        gateway.displayCalls shouldBe withAssistCalls
+                        val blockedPose = assistIds.associateWith { gateway.visible.getValue(it) }
+                        gateway.frameAdmissions += VisualPacketAdmission.SERVER_RATE
+                        renderer.placementAssist(player, first.copy(x = 8), true)
+                        renderer.placementAssistReady(player, first.copy(x = 8), true) shouldBe false
+                        gateway.step()
+                        renderer.placementAssistReady(player, first.copy(x = 8), true) shouldBe false
+                        assistIds.forEach { id -> gateway.visible.getValue(id) shouldBe blockedPose.getValue(id) }
+                        gateway.drain()
+                        renderer.placementAssistReady(player, first.copy(x = 8), true) shouldBe true
+                        assistIds.forEach { id ->
+                            gateway.visible.getValue(id) shouldBe blockedPose.getValue(id).copy(x = blockedPose.getValue(id).x + 1.0)
+                        }
+                        gateway.displayCalls shouldBe withAssistCalls
                         renderer.clearPlacementAssist(player.uniqueId)
+                        renderer.placementAssistReady(player, first.copy(x = 8), true) shouldBe false
                         gateway.drain()
                         gateway.visible.keys shouldBe unchangedIds
                         staticSubmissions shouldBe 1
 
                         renderer.selectionTarget(player, first.copy(x = 5))
                         gateway.drain()
-                        gateway.visible.size shouldBe 26
+                        gateway.visible.keys shouldBe unchangedIds
+                        cursor.forEach { old -> gateway.visible.getValue(old.entityId) shouldBe old.copy(x = old.x + 1.0) }
+                        gateway.displayCalls shouldBe withAssistCalls
                         gateway.visible.keys.containsAll(savedIds) shouldBe true
                         staticSubmissions shouldBe 1
                         renderer.suppressSelectionGlow(player.uniqueId, true)
@@ -293,6 +315,7 @@ class BuilderPacketRendererTest : FunSpec({
 
 private class SelectionTargetGateway : BuilderPreviewPacketGateway {
     val visible = linkedMapOf<Int, BuilderPacketDisplay>()
+    val frameAdmissions = ArrayDeque<VisualPacketAdmission>()
     var displayCalls = 0
         private set
     private val tasks = ArrayDeque<() -> Unit>()
@@ -308,10 +331,27 @@ private class SelectionTargetGateway : BuilderPreviewPacketGateway {
         visible[display.entityId] = display
         return VisualPacketAdmission.ALLOWED
     }
+    override fun update(channel: Any, previous: BuilderPacketDisplay, display: BuilderPacketDisplay): VisualPacketAdmission {
+        visible[display.entityId] = display
+        return VisualPacketAdmission.ALLOWED
+    }
+    override fun frame(channel: Any, previous: List<BuilderPacketDisplay>, desired: List<BuilderPacketDisplay>, forceResetIds: Set<Int>): VisualPacketAdmission {
+        val admission = frameAdmissions.removeFirstOrNull() ?: VisualPacketAdmission.ALLOWED
+        if (admission != VisualPacketAdmission.ALLOWED) return admission
+        val oldIds = previous.mapTo(mutableSetOf(), BuilderPacketDisplay::entityId)
+        val desiredIds = desired.mapTo(mutableSetOf(), BuilderPacketDisplay::entityId)
+        (oldIds - desiredIds).forEach(visible::remove)
+        desired.forEach { display ->
+            if (display.entityId !in oldIds || display.entityId in forceResetIds) displayCalls++
+            visible[display.entityId] = display
+        }
+        return VisualPacketAdmission.ALLOWED
+    }
     override fun destroy(channel: Any, entityIds: List<Int>): VisualPacketAdmission {
         entityIds.forEach(visible::remove)
         return VisualPacketAdmission.ALLOWED
     }
     override fun flush(channel: Any) = Unit
+    fun step() { tasks.removeFirst().invoke() }
     fun drain() { while (tasks.isNotEmpty()) tasks.removeFirst().invoke() }
 }

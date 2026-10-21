@@ -40,6 +40,7 @@ async function assertCells(server, player, signal, cells, remaining) {
 
 async function assertBridge(server, player, signal, placed, remaining) {
   const cells = Array.from({ length: 6 }, (_, x) => ({ x, y: 65, z: 0, material: x < placed ? 'stone' : 'air' }));
+  cells.push({ x: 3, y: 65, z: -1, material: 'air' });
   await assertCells(server, player, signal, cells, remaining);
 }
 
@@ -69,18 +70,18 @@ async function aimAtReadyTarget(player, target, signal, readyPrefix = 'Continue 
   }
 }
 
-test('locked row assists imprecise background and air clicks while crouching without duplicate placement', async ({ player, server, signal }) => {
+test('automatic assistant continues the aimed row through background and air clicks without mode commands', async ({ player, server, signal }) => {
   assert.equal(player.bot.version, '1.21.11');
   await commands(server, player, [
     'minecraft:fill -2 64 -2 7 70 6 air',
     'minecraft:fill -2 64 2 7 64 6 stone',
     'minecraft:fill 0 64 0 1 64 0 stone',
-    'minecraft:setblock 3 65 -1 stone',
+    'minecraft:setblock 3 65 -2 stone',
     `minecraft:clear ${player.username}`,
   ]);
   await player.setGameMode('survival');
-  await player.teleport(2.5, 65, 3.5);
-  await waitUntil(() => player.bot.entity.position.distanceTo(position(player, 2.5, 65, 3.5)) < 0.1 &&
+  await player.teleport(2.5, 65, 2.5);
+  await waitUntil(() => player.bot.entity.position.distanceTo(position(player, 2.5, 65, 2.5)) < 0.1 &&
     player.bot.blockAt(position(player, 0, 64, 0))?.name === 'stone', { signal });
 
   // No operator status or builder permission is granted anywhere in this test.
@@ -107,19 +108,19 @@ test('locked row assists imprecise background and air clicks while crouching wit
     await player.bot.waitForTicks(3);
   }
 
-  // The ordinary ray hits a background block beside the locked row. Vanilla would
-  // place at x=3 and leave a gap at x=2; the assistant must keep the earned direction.
+  // The eye ray enters the next row cell, then reaches a background block farther
+  // away. Vanilla would place at (3,65,-1); the assistant continues (2,65,0).
   player.bot.setControlState('sneak', true);
   // Mineflayer lookAt uses eyeHeight, which changes only after entityCrouch metadata.
   // Wait for the server pose before computing a ray from the crouched eye.
   await waitUntil(() => player.bot.entity.crouching === true && player.bot.entity.eyeHeight === 1.27, { signal });
-  await aimAtReadyTarget(player, position(player, 3.5, 65.5, 0.5), signal);
+  await aimAtReadyTarget(player, position(player, 3.5, 65.5, -1.5), signal);
   const { yaw, pitch, eyeHeight } = player.bot.entity;
   const ray = position(player, -Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
   const background = player.bot.world.raycast(player.bot.entity.position.offset(0, eyeHeight, 0), ray, 4.5);
-  assert.deepEqual(background?.position, position(player, 3, 65, -1), 'The crouched eye ray must hit the background block');
+  assert.deepEqual(background?.position, position(player, 3, 65, -2), 'The crouched eye ray must hit the background block');
   player.bot._client.write('block_place', {
-    hand: 0, location: position(player, 3, 65, -1), direction: 3,
+    hand: 0, location: position(player, 3, 65, -2), direction: 3,
     cursorX: 0.5, cursorY: 0.5, cursorZ: 1,
     insideBlock: false, worldBorderHit: false, sequence: ++sequence,
   });
@@ -129,9 +130,8 @@ test('locked row assists imprecise background and air clicks while crouching wit
 
   player.bot.setControlState('sneak', false);
   await waitUntil(() => player.bot.entity.crouching === false && player.bot.entity.eyeHeight === 1.62, { signal });
-  // This ray passes above the actual next-cell cube. It deliberately failed the
-  // old exact-cell targeting even though the locked row is plainly in front of us.
-  await aimAtReadyTarget(player, position(player, 3.5, 67, 0.5), signal);
+  // Aim into the complete air cell; no precise support-face hit is required.
+  await aimAtReadyTarget(player, position(player, 3.5, 65.5, 0.5), signal);
   await player.bot.waitForTicks(20);
   await assertBridge(server, player, signal, 3, 5);
   useAir(player, ++sequence);
@@ -147,7 +147,7 @@ test('locked row assists imprecise background and air clicks while crouching wit
   await assertBridge(server, player, signal, 4, 4);
 });
 
-test('locked floor plane supports a two-dimensional patch without aiming at support faces', async ({ player, server, signal }) => {
+test('automatic assistant follows a row into a floor patch without plane or reset commands', async ({ player, server, signal }) => {
   await commands(server, player, [
     'minecraft:fill -2 64 -2 7 70 6 air',
     'minecraft:fill -2 64 2 7 64 6 stone',
@@ -158,7 +158,7 @@ test('locked floor plane supports a two-dimensional patch without aiming at supp
   await player.teleport(2.5, 65, 3.5);
   await waitUntil(() => player.bot.entity.position.distanceTo(position(player, 2.5, 65, 3.5)) < 0.1 &&
     player.bot.blockAt(position(player, 0, 64, 0))?.name === 'stone', { signal });
-  player.chat('/builder assist plane');
+  player.chat('/builder assist on');
   await expect(player).toHaveReceivedMessage(/placement (?:helper|assistant).*enabled/i);
   await player.giveItem('stone', 8);
   await player.bot.equip(player.bot.inventory.items().find(item => item.name === 'stone'), 'hand');
@@ -175,7 +175,7 @@ test('locked floor plane supports a two-dimensional patch without aiming at supp
   await assertCells(server, player, signal, cells(1), 7);
   for (let index = 1; index < patch.length; index++) {
     const [x, z] = patch[index];
-    await aimAtReadyTarget(player, position(player, x + 0.5, 65.5, z + 0.5), signal, 'Plane ');
+    await aimAtReadyTarget(player, position(player, x + 0.5, 66, z + 0.5), signal, 'Plane ');
     useAir(player, ++sequence);
     await assertCells(server, player, signal, cells(index + 1), 7 - index);
   }

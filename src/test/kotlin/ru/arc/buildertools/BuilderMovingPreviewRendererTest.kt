@@ -26,6 +26,29 @@ import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
 
 class BuilderMovingPreviewRendererTest : FunSpec({
+    test("same-window paste translation retains every block and frame identity while updating its pose") {
+        withMovingPreview { fixture ->
+            for (x in -1..0) for (z in -1..0) fixture.world.loadChunk(x, z)
+            val clipboard = BuilderClipboard((0..2).map { BuilderClipboardBlock(it, 0, 0, "minecraft:stone") },
+                3, 1, 1, 1, Long.MAX_VALUE)
+            val model = BuilderPastePreviewModel.create(clipboard, 0)
+            val first = BuilderBlockPos(fixture.world.uid, 2, 64, 0)
+            var displayed: BuilderBlockPos? = null
+            fixture.renderer.paste(fixture.player, model, first) { displayed = it }
+            fixture.drain()
+            val original = fixture.active.toMap()
+            original.size shouldBe 27
+            val submissions = fixture.sent.size
+            val next = first.copy(x = 3)
+            fixture.renderer.paste(fixture.player, model, next) { displayed = it }
+            fixture.drain()
+            displayed shouldBe next
+            fixture.active.keys shouldBe original.keys
+            original.forEach { (id, old) -> fixture.active.getValue(id) shouldBe old.copy(x = old.x + 1.0) }
+            fixture.sent.drop(submissions).all { (removed, added) -> removed.isEmpty() && added.isEmpty() } shouldBe true
+        }
+    }
+
     test("paste publishes native clipboard states and origin together and freeze fences a pending cursor pose") {
         withMovingPreview { fixture ->
             for (x in -1..3) for (z in -1..0) fixture.world.loadChunk(x, z)
@@ -341,7 +364,7 @@ private fun withMovingPreview(previewLimit: Int = 32, test: (MovingPreviewFixtur
                         val added = byId.values.filter { it.entityId !in active || it.entityId in forceResetIds }
                         sent += removed to added
                         removed.forEach(active::remove)
-                        added.forEach { active[it.entityId] = it }
+                        byId.values.forEach { active[it.entityId] = it }
                     }
                 }
                 val packets = object : BuilderPreviewPacketTransport {
