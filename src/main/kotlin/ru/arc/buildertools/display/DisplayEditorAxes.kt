@@ -112,8 +112,11 @@ internal class DisplayEditorAxes(
                     glowColorOverride = Color.fromRGB(DisplayEditorAxesGeometry.colors[part.axis])
                     viewRange = .5f
                     shadowRadius = 0f
-                    interpolationDuration = 0
-                    teleportDuration = 0
+                    interpolationDelay = 0
+                    // Match the native draft's one-tick motion. Core 2.7.42 re-emits
+                    // metadata index 8 for every changed transform, even with delay 0.
+                    interpolationDuration = 1
+                    teleportDuration = 1
                 }
             })
         }
