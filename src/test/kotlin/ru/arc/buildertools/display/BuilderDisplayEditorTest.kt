@@ -9,11 +9,13 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.spyk
+import io.mockk.verify
 import io.papermc.paper.connection.PlayerGameConnection
 import io.papermc.paper.dialog.DialogResponseView
 import io.papermc.paper.event.player.PlayerCustomClickEvent
 import net.kyori.adventure.key.Key
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.format.TextDecoration
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
@@ -27,9 +29,11 @@ import org.bukkit.entity.TextDisplay
 import org.bukkit.event.block.Action
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerQuitEvent
+import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
+import org.bukkit.metadata.FixedMetadataValue
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.util.RayTraceResult
 import org.bukkit.util.Vector
@@ -38,9 +42,161 @@ import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.menu.PaperDialogScreen
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.Locale
+import java.util.concurrent.CompletableFuture
 
 /** Native entity/session orchestration. Exact Paper ray collision and client rendering are separate checks. */
 class BuilderDisplayEditorTest : FunSpec({
+    test("Shift F cancels the private gesture and opens axes with the current value while F still cycles mode") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)
+            f.command("axis", "x")
+            f.rightClick()
+            f.player.setRotation(15f, 0f)
+            f.editor.tick()
+            f.displays() shouldHaveSize 2
+            f.player.isSneaking = true
+            f.swap().isCancelled shouldBe true
+            f.screen().id shouldBe "builder.display-editor.axes"
+            f.screen().buttons.single { it.id.value == "axis_x" }.label shouldBe Component.text("display-editor.axis-selected-x").decoration(TextDecoration.ITALIC, false)
+            f.screen().numberInputs.map { it.initial } shouldBe listOf(100f, 100f, 100f)
+            f.displays() shouldHaveSize 1
+            f.editor.capture(saved) shouldBe before
+            f.player.isSneaking = false
+            f.swap().isCancelled shouldBe true
+            f.command("menu")
+            f.screen().buttons.single { it.id.value == "rotate" }.label shouldBe Component.text("display-editor.mode-selected-rotate").decoration(TextDecoration.ITALIC, false)
+        }
+    }
+
+    test("axis menu without selection keeps axis choice and offers no size mutation controls") {
+        displayFixture { f ->
+            f.command("tool")
+            f.player.isSneaking = true
+            f.swap()
+            f.screen().numberInputs shouldHaveSize 0
+            f.screen().buttons.map { it.id.value } shouldBe listOf("axis_free", "axis_x", "axis_y", "axis_z")
+            f.click("axis_z")
+            f.screen().buttons.single { it.id.value == "axis_z" }.label shouldBe Component.text("display-editor.axis-selected-z").decoration(TextDecoration.ITALIC, false)
+            f.command("exit")
+            f.swap().isCancelled shouldBe false
+            f.displays() shouldHaveSize 0
+        }
+    }
+
+    test("local size sliders retain unsaved input across axis choices and apply with undo") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)!!
+            f.command("axis")
+            f.clickScale("axis_y", 125f, 75f, 200f)
+            f.screen().numberInputs.map { it.initial } shouldBe listOf(125f, 75f, 200f)
+            f.editor.capture(saved) shouldBe before
+            f.clickScale("apply_scale", 125f, 75f, 200f)
+            val resized = f.editor.capture(saved)!!
+            DisplayEditorGeometry.scale(resized.pose) shouldBe DisplayEditorScale(1.25f, .75f, 2f)
+            resized.pose.position() shouldBe before.pose.position()
+            resized.content shouldBe before.content
+            f.command("undo")
+            BuilderDisplayEditor.samePose(f.editor.capture(saved)!!.pose, before.pose) shouldBe true
+        }
+    }
+
+    test("menu resets rotation and size independently and each remains undoable") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            f.command("axis")
+            f.clickScale("apply_scale", 200f, 75f, 150f)
+            // Entity yaw is a separate native rotation; the capture combines it with the display matrix.
+            saved.setRotation(35f, 0f)
+            val rotated = f.editor.capture(saved)!!
+            f.command("axis")
+            f.click("reset_rotation")
+            val resetRotation = f.editor.capture(saved)!!
+            BuilderDisplayEditor.samePose(resetRotation.pose, DisplayEditorGeometry.withoutRotation(rotated.pose)) shouldBe true
+            resetRotation.content shouldBe rotated.content
+            saved.location.yaw shouldBe 0f
+            f.click("reset_scale")
+            val resetScale = f.editor.capture(saved)!!
+            DisplayEditorGeometry.scale(resetScale.pose) shouldBe DisplayEditorScale(1f, 1f, 1f)
+            resetScale.pose.position() shouldBe rotated.pose.position()
+            f.command("undo")
+            BuilderDisplayEditor.samePose(f.editor.capture(saved)!!.pose, resetRotation.pose) shouldBe true
+        }
+    }
+
+    test("scale mutation refuses source changes access loss revoked permission and stale callbacks") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            f.command("axis")
+            saved.block = Material.GOLD_BLOCK.createBlockData()
+            val changed = f.editor.capture(saved)!!
+            f.clickScale("apply_scale", 150f, 150f, 150f)
+            f.editor.capture(saved) shouldBe changed
+            f.buildAccess = { it.y != 66 }
+            f.clickScale("apply_scale", 150f, 150f, 150f)
+            f.editor.capture(saved) shouldBe changed
+            f.buildAccess = { true }
+            val stale = f.actionKey("reset_rotation")
+            f.permission.setPermission(BuilderDisplayEditor.PERMISSION, false)
+            f.clickKey(stale)
+            f.editor.capture(saved) shouldBe changed
+            f.command("exit")
+            f.permission.setPermission(BuilderDisplayEditor.PERMISSION, true)
+            f.clickKey(stale)
+            f.editor.capture(saved) shouldBe changed
+        }
+    }
+
+    test("scale application protects expanded destination cells and validates every submitted number") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)!!
+            f.command("axis")
+            for (value in listOf(null, Float.NaN, 0f, 4f, 401f, 100.5f)) {
+                f.clickScale("apply_scale", value, 100f, 100f)
+                f.editor.capture(saved) shouldBe before
+            }
+            // x=1 is outside the original [0,1) footprint but inside the requested wider object.
+            f.buildAccess = { it.x != 1 }
+            f.clickScale("apply_scale", 300f, 100f, 100f)
+            f.editor.capture(saved) shouldBe before
+        }
+    }
+
+    test("input claim and private axes are released on exit quit permission loss and shutdown") {
+        displayFixture { f ->
+            f.command("tool")
+            f.player.getMetadata(BuilderDisplayEditor.INPUT_METADATA).single().let {
+                it.owningPlugin shouldBe f.plugin
+                it.asBoolean() shouldBe true
+            }
+            f.editor.tick()
+            verify { f.axes.update(f.player, match { it.parts.size == 6 }) }
+            f.command("axis")
+            f.player.hasMetadata(BuilderDisplayEditor.INPUT_METADATA) shouldBe true
+            f.command("exit")
+            f.player.hasMetadata(BuilderDisplayEditor.INPUT_METADATA) shouldBe false
+            verify { f.axes.clear(f.player.uniqueId) }
+            // Cleanup must also remove this plugin's claim when no session remains.
+            f.player.setMetadata(BuilderDisplayEditor.INPUT_METADATA, FixedMetadataValue(f.plugin, true))
+            f.command("exit")
+            f.player.hasMetadata(BuilderDisplayEditor.INPUT_METADATA) shouldBe false
+            f.command("tool")
+            f.editor.onQuit(PlayerQuitEvent(f.player, Component.empty()))
+            f.player.hasMetadata(BuilderDisplayEditor.INPUT_METADATA) shouldBe false
+            f.command("tool")
+            f.permission.setPermission(BuilderDisplayEditor.PERMISSION, false)
+            f.editor.tick()
+            f.player.hasMetadata(BuilderDisplayEditor.INPUT_METADATA) shouldBe false
+            f.permission.setPermission(BuilderDisplayEditor.PERMISSION, true)
+            f.command("tool")
+            f.editor.closeAsync().isDone shouldBe true
+            f.player.hasMetadata(BuilderDisplayEditor.INPUT_METADATA) shouldBe false
+            verify { f.axes.closeAsync() }
+        }
+    }
+
     test("Shift magnet saves a bottom slab against the ceiling using its rendered top face") {
         displayFixture { f ->
             f.command("block", "oak_slab")
@@ -269,6 +425,9 @@ private class DisplayFixture(paper: MockBukkitTestRuntime) : AutoCloseable {
     var rayHit: RayTraceResult? = null
     private val screens = mutableListOf<Pair<PaperDialogScreen, Any>>()
     private val dialogs = spyk(testDialogs(plugin) { screen, registration -> screens += screen to registration })
+    val axes = mockk<DisplayEditorAxes>(relaxed = true) {
+        every { closeAsync() } returns CompletableFuture.completedFuture(null)
+    }
     val editor: BuilderDisplayEditor
 
     init {
@@ -292,7 +451,7 @@ private class DisplayFixture(paper: MockBukkitTestRuntime) : AutoCloseable {
                 configure(display)
                 paper.server.registerEntity(display as EntityMock)
                 display
-            })
+            }, axes = axes)
     }
 
     fun command(vararg args: String) { editor.command(player, args.toList()) }
@@ -306,16 +465,21 @@ private class DisplayFixture(paper: MockBukkitTestRuntime) : AutoCloseable {
         editor.tick()
         editor.onInteract(PlayerInteractEvent(player, Action.RIGHT_CLICK_AIR, player.inventory.itemInMainHand, null, BlockFace.SELF, EquipmentSlot.HAND))
     }
+    fun swap() = PlayerSwapHandItemsEvent(player, player.inventory.itemInMainHand, player.inventory.itemInOffHand).also(editor::onSwap)
     fun actionKey(action: String): String {
         val nonce = screens.last().second.javaClass.getMethod("getNonce").invoke(screens.last().second) as String
         return "${plugin.name.lowercase(Locale.ROOT)}:dialog/$nonce/$action"
     }
     fun click(action: String) = clickKey(actionKey(action))
     fun clickText(action: String, value: String) = clickKey(actionKey(action), value)
+    fun clickScale(action: String, x: Float?, y: Float?, z: Float?) = clickKey(actionKey(action), numbers = mapOf("scale_x" to x, "scale_y" to y, "scale_z" to z))
     fun screen(): PaperDialogScreen = screens.last().first
-    fun clickKey(key: String, text: String? = null) {
+    fun clickKey(key: String, text: String? = null, numbers: Map<String, Float?>? = null) {
         val connection = mockk<PlayerGameConnection> { every { player } returns this@DisplayFixture.player }
-        val response = text?.let { value -> mockk<DialogResponseView> { every { getText("display_text") } returns value } }
+        val response = if (text == null && numbers == null) null else mockk<DialogResponseView> {
+            every { getText(any()) } returns text
+            every { getFloat(any()) } answers { numbers?.get(firstArg<String>()) }
+        }
         dialogs.onCustomClick(mockk<PlayerCustomClickEvent> {
             every { commonConnection } returns connection
             every { identifier } returns Key.key(key)

@@ -5,9 +5,39 @@ import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.shouldBe
 import org.joml.Matrix4f
 import org.joml.Vector3d
+import org.joml.Vector3f
 import java.util.UUID
 
 class DisplayEditorGeometryTest : FunSpec({
+    test("absolute local scale and both resets preserve a rotated non-uniform object's centre and the other property") {
+        val pose = DisplayEditorPose(12.5, 66.25, -3.75)
+            .withMatrix(Matrix4f().rotateXYZ(.4f, -.8f, .25f).scale(2f, .75f, 1.5f))
+        val desired = DisplayEditorScale(1.23f, 3.01f, .05f)
+        val resized = DisplayEditorGeometry.withScale(pose, desired)!!
+        val unit = DisplayEditorGeometry.withScale(pose, DisplayEditorScale(1f, 1f, 1f))!!
+        val unrotated = DisplayEditorGeometry.withoutRotation(pose)
+        listOf(resized, unit, unrotated).forEach { it.position() shouldBe pose.position() }
+        for (axis in 0..2) {
+            val originalDirection = pose.matrix().getColumn(axis, Vector3f()).normalize()
+            val resizedColumn = resized.matrix().getColumn(axis, Vector3f())
+            resizedColumn.length().toDouble() shouldBe (desired.values()[axis].toDouble() plusOrMinus .000001)
+            Vector3f(resizedColumn).normalize().distance(originalDirection).toDouble() shouldBe (0.0 plusOrMinus .000001)
+            val unitColumn = unit.matrix().getColumn(axis, Vector3f())
+            unitColumn.length().toDouble() shouldBe (1.0 plusOrMinus .000001)
+            unitColumn.distance(originalDirection).toDouble() shouldBe (0.0 plusOrMinus .000001)
+            val aligned = unrotated.matrix().getColumn(axis, Vector3f())
+            aligned.length().toDouble() shouldBe (pose.matrix().getColumn(axis, Vector3f()).length().toDouble() plusOrMinus .000001)
+            aligned.normalize().distance(Vector3f().setComponent(axis, 1f)).toDouble() shouldBe (0.0 plusOrMinus .000001)
+        }
+    }
+
+    test("absolute scale refuses invisible non-finite and excessive components") {
+        val pose = DisplayEditorPose(.5, 65.5, 3.5)
+        for (invalid in listOf(0f, -.5f, .049f, 4.01f, Float.NaN, Float.POSITIVE_INFINITY)) {
+            DisplayEditorGeometry.withScale(pose, DisplayEditorScale(1f, invalid, 1f)) shouldBe null
+        }
+    }
+
     test("picking follows rotated scaled visual geometry and rejects empty AABB corners") {
         val pose = DisplayEditorPose(0.0, 65.0, 4.0).withMatrix(Matrix4f().rotateZ((Math.PI / 4).toFloat()).scale(4f, .5f, 1f))
         val mesh = DisplayEditorMesh(1.0, 1.0, 1.0)

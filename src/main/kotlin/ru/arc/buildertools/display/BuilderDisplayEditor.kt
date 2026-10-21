@@ -37,6 +37,7 @@ import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
+import org.bukkit.metadata.FixedMetadataValue
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.util.RayTraceResult
@@ -50,6 +51,7 @@ import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.menu.PaperDialogScreen
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.logging.Level
 import kotlin.math.abs
 import kotlin.math.exp
@@ -71,6 +73,7 @@ internal class BuilderDisplayEditor(
     private val spawnDisplay: (World, Location, Class<out Display>, (Display) -> Unit) -> Display = { world, at, type, configure ->
         world.spawn(at, type) { configure(it) }
     },
+    private val axes: DisplayEditorAxes = DisplayEditorAxes(plugin),
 ) : Listener, AutoCloseable {
     internal enum class Kind { BLOCK, ITEM, TEXT }
 
@@ -135,7 +138,7 @@ internal class BuilderDisplayEditor(
             "text" -> if (args.size > 1) createText(player, session, args.drop(1).joinToString(" ")) else openText(player, session, false)
             "move", "rotate", "scale" -> setMode(player, session, DisplayEditorMode.valueOf(action.uppercase(Locale.ROOT)))
             "axis" -> args.getOrNull(1)?.let { raw -> DisplayEditorAxis.entries.firstOrNull { it.name.equals(raw, true) } }
-                ?.let { setAxis(player, session, it) } ?: openAxes(player, session)
+                ?.let { setAxis(player, session, it) } ?: openAxes(player, session, begin = true)
             "confirm" -> commit(player, session)
             "cancel" -> cancel(player, session)
             "undo" -> undo(player, session)
@@ -169,7 +172,8 @@ internal class BuilderDisplayEditor(
             if (!session.enabled) return@forEach
             if (!holding(player, session)) { forget(player); return@forEach }
             val selected = session.selected?.let(::entity)
-            if (session.selected != null && (selected == null || !mayEdit(player, selected) || !centreAccessible(player, capture(selected)))) {
+            val selectedState = selected?.let(::capture)
+            if (session.selected != null && (selected == null || !mayEdit(player, selected) || !centreAccessible(player, selectedState))) {
                 forget(player); tell(player, "access-lost"); return@forEach
             }
             val drag = session.drag
@@ -180,9 +184,12 @@ internal class BuilderDisplayEditor(
                 }
                 updateDrag(player, session, drag)
             }
+            val snapshot = session.drag?.draft ?: selectedState
+            val frame = snapshot?.let { DisplayEditorAxesGeometry.frame(it.pose, it.content.mesh(), session.axis) }
+                ?: cursorAxes(player, session.axis)
+            if (frame == null) axes.clear(id) else axes.update(player, frame)
             if (ticks % 4L == 0L) {
-                val snapshot = session.drag?.draft ?: selected?.let(::capture)
-                snapshot?.let { outline(player, it, session.axis) }
+                snapshot?.let { outline(player, it) }
                 hud(player, session)
             }
         }
@@ -220,7 +227,8 @@ internal class BuilderDisplayEditor(
         val player = event.player
         val session = sessions[player.uniqueId]?.takeIf { it.enabled } ?: return
         event.isCancelled = true
-        if (player.isSneaking) setAxis(player, session, DisplayEditorAxis.entries[(session.axis.ordinal + 1) % DisplayEditorAxis.entries.size])
+        if (!allowed(player) || !holding(player, session)) { forget(player); return }
+        if (player.isSneaking) openAxes(player, session, begin = true)
         else setMode(player, session, DisplayEditorMode.entries[(session.mode.ordinal + 1) % DisplayEditorMode.entries.size])
     }
 
@@ -355,9 +363,7 @@ internal class BuilderDisplayEditor(
     private fun commit(player: Player, session: Session) {
         val drag = session.drag ?: run { tell(player, "nothing-to-confirm"); return }
         val source = drag.sourceId?.let(::entity)
-        if (!allowed(player) || !holding(player, session) ||
-            (drag.sourceId != null && (source == null || !mayEdit(player, source) || !locks.heldBy(drag.sourceId, player.uniqueId) || !same(capture(source), drag.before))) ||
-            drag.before?.let { !accessible(player, it) } == true || !accessible(player, drag.draft)) {
+        if (!canCommit(player, session, drag.sourceId, source, drag.before, drag.draft)) {
             cancelDraft(player, session); tell(player, "stale-or-denied"); return
         }
         val saved = if (source == null) spawn(drag.draft, false) else source.takeIf { applyPose(it, drag.draft) }
@@ -370,6 +376,12 @@ internal class BuilderDisplayEditor(
         session.selected = saved.uniqueId
         tell(player, "saved")
     }
+
+    private fun canCommit(player: Player, session: Session, sourceId: UUID?, source: Display?, before: Snapshot?, after: Snapshot): Boolean =
+        allowed(player) && holding(player, session) &&
+            (sourceId == null || (session.selected == sourceId && source != null && mayEdit(player, source) &&
+                locks.heldBy(sourceId, player.uniqueId) && same(capture(source), before))) &&
+            before?.let { accessible(player, it) } != false && accessible(player, after)
 
     private fun createBlock(player: Player, session: Session, materialName: String?) {
         val material = materialName?.let(BuilderMaterialArguments::parse) ?: player.inventory.itemInMainHand.type
@@ -468,11 +480,42 @@ internal class BuilderDisplayEditor(
         } } }, reopen = { openMenu(player, session) })
     }
 
-    private fun openAxes(player: Player, session: Session) {
+    private fun openAxes(player: Player, session: Session, begin: Boolean = false, scaleDraft: DisplayEditorScale? = null, feedback: String? = null) {
         cancelDraft(player, session)
+        if (begin) dialogs.beginFlow(player)
+        val target = session.selected?.let(::entity)?.takeIf { mayEdit(player, it) && locks.heldBy(it.uniqueId, player.uniqueId) }
+        val before = target?.let(::capture)
+        val scale = before?.let { scaleDraft ?: DisplayEditorGeometry.scale(it.pose) }
         show(player, session, { fresh ->
-            DisplayEditorMenu.axes({ tr(player, it) }, session.axis) { if (fresh()) { setAxis(player, session, it); openAxes(player, session) } }
+            DisplayEditorMenu.axes(
+                { tr(player, it) }, session.axis, scale, before?.let { selectionLabel(player, it) }, feedback?.let { tr(player, it) },
+                chooseAxis = { axis, values -> if (fresh()) {
+                    setAxis(player, session, axis)
+                    openAxes(player, session, scaleDraft = values ?: scale)
+                } },
+                applyScale = { values -> if (fresh() && target != null && before != null) {
+                    applyMenuPose(player, session, target, before, values?.let { DisplayEditorGeometry.withScale(before.pose, it) })
+                } },
+                reset = { rotation -> if (fresh() && target != null && before != null) {
+                    val pose = if (rotation) DisplayEditorGeometry.withoutRotation(before.pose)
+                        else DisplayEditorGeometry.withScale(before.pose, DisplayEditorScale(1f, 1f, 1f))
+                    applyMenuPose(player, session, target, before, pose)
+                } },
+            )
         })
+    }
+
+    private fun applyMenuPose(player: Player, session: Session, target: Display, before: Snapshot, pose: DisplayEditorPose?) {
+        if (pose == null) { openAxes(player, session, feedback = "invalid-scale"); return }
+        val after = before.copy(pose = pose)
+        if (!canCommit(player, session, target.uniqueId, target, before, after)) {
+            openAxes(player, session, feedback = "stale-or-denied"); return
+        }
+        if (!samePose(before.pose, pose)) {
+            if (!applyPose(target, after)) { openAxes(player, session, feedback = "failed"); return }
+            remember(session, Undo(target.uniqueId, before, capture(target)))
+        }
+        openAxes(player, session, feedback = "saved")
     }
 
     private fun openText(player: Player, session: Session, editing: Boolean, initial: String? = null, invalid: Boolean = false) {
@@ -560,6 +603,7 @@ internal class BuilderDisplayEditor(
         session.heldSlot = player.inventory.heldItemSlot
         session.heldItem = held.clone()
         session.lastAction = ticks
+        player.setMetadata(INPUT_METADATA, FixedMetadataValue(plugin, true))
         return true
     }
 
@@ -721,22 +765,22 @@ internal class BuilderDisplayEditor(
         return Content(Kind.TEXT, DisplayEditorShape(mesh, .0125f, (mesh.height / 2).toFloat(), 0f), text = value)
     }
 
-    private fun outline(player: Player, state: Snapshot, axis: DisplayEditorAxis) {
+    private fun cursorAxes(player: Player, axis: DisplayEditorAxis): DisplayEditorAxesFrame? {
+        if (!rayReady(player)) return null
+        val eye = player.eyeLocation
+        val distance = trace(player)?.hitPosition?.distance(eye.toVector())?.minus(.8)?.coerceIn(.5, 3.0) ?: 3.0
+        val point = eye.toVector().toVector3d().fma(distance, eye.direction.toVector3d())
+        if (point.y < player.world.minHeight || point.y >= player.world.maxHeight ||
+            !player.world.worldBorder.isInside(Location(player.world, point.x, point.y, point.z))) return null
+        return DisplayEditorAxesGeometry.frame(DisplayEditorPose(point.x, point.y, point.z), null, axis)
+    }
+
+    private fun outline(player: Player, state: Snapshot) {
         val corners = DisplayEditorGeometry.corners(state.pose, state.content.mesh())
         val color = Color.fromRGB(134, 220, 241)
         for ((from, to) in DisplayEditorGeometry.edges) for (step in 0..2) {
             val point = Vector3d(corners[from]).lerp(corners[to], step / 2.0)
             player.spawnParticle(Particle.DUST, point.x, point.y, point.z, 1, 0.0, 0.0, 0.0, 0.0, Particle.DustOptions(color, .55f))
-        }
-        val center = state.pose.position()
-        for (index in 0..2) {
-            if (axis != DisplayEditorAxis.FREE && axis.ordinal != index + 1) continue
-            val colorAxis = listOf(Color.fromRGB(255, 107, 97), Color.fromRGB(155, 212, 141), Color.fromRGB(146, 190, 216))[index]
-            val outside = corners.maxOf { it[index] } + .12
-            for (step in 1..5) {
-                val point = Vector3d(center).also { it.setComponent(index, outside + step * .12) }
-                player.spawnParticle(Particle.DUST, point.x, point.y, point.z, 1, 0.0, 0.0, 0.0, 0.0, Particle.DustOptions(colorAxis, .7f))
-            }
         }
     }
 
@@ -769,6 +813,8 @@ internal class BuilderDisplayEditor(
     }
 
     private fun forget(player: Player) {
+        player.removeMetadata(INPUT_METADATA, plugin)
+        axes.clear(player.uniqueId)
         val session = sessions.remove(player.uniqueId) ?: return
         deselect(player, session)
         session.revision++
@@ -778,6 +824,7 @@ internal class BuilderDisplayEditor(
 
     private fun forget(id: UUID) {
         Bukkit.getPlayer(id)?.let { forget(it); return }
+        axes.clear(id)
         sessions.remove(id)?.drag?.preview?.remove()
         locks.release(id)
     }
@@ -798,16 +845,20 @@ internal class BuilderDisplayEditor(
     ))
     private fun tell(player: Player, key: String) = player.sendMessage(tr(player, key))
 
-    override fun close() {
-        if (closed) return
+    override fun close() { closeAsync() }
+
+    fun closeAsync(): CompletableFuture<Void> {
+        if (closed) return axes.closeAsync()
         sessions.keys.toList().forEach(::forget)
         closed = true
         locks.clear()
         dialogs.close()
         HandlerList.unregisterAll(this)
+        return axes.closeAsync()
     }
 
     internal companion object {
+        const val INPUT_METADATA = "arcbuilder-display-editor"
         const val PERMISSION = "arcbuild.display"
         const val ADMIN = "arcbuild.display.admin"
         const val TEXT_LINE_WIDTH = 1024

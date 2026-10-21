@@ -34,6 +34,16 @@ class DisplayEditorMenuTest : FunSpec({
             val form = DisplayEditorMenu.textForm(::text, "bad input", false, true) {}
             form.inputs.single().initial shouldBe "bad input"
             form.body.size shouldBe 2
+            val axes = DisplayEditorMenu.axes(::text, DisplayEditorAxis.Y, DisplayEditorScale(1.234f, .05f, 4f), text("selected-object"), text("saved"), { _, _ -> }, {}, {})
+            axes.numberInputs.map { it.initial } shouldBe listOf(123f, 5f, 400f)
+            axes.numberInputs.all { it.start == 5f && it.end == 400f && it.step == 1f && it.width <= 426 } shouldBe true
+            axes.buttons.map { it.id.value } shouldContainExactly listOf("axis_free", "axis_x", "axis_y", "axis_z", "apply_scale", "reset_scale", "reset_rotation")
+            PlainTextComponentSerializer.plainText().serialize(axes.buttons.single { it.id.value == "axis_y" }.label).startsWith("✔ ") shouldBe true
+            axes.buttons.all { it.label.decoration(TextDecoration.ITALIC) == TextDecoration.State.FALSE } shouldBe true
+            (axes.columns * axes.buttons.maxOf { it.width } + (axes.columns - 1) * 4 <= 426) shouldBe true
+            val idle = DisplayEditorMenu.axes(::text, DisplayEditorAxis.FREE, null, null, null, { _, _ -> }, {}, {})
+            idle.numberInputs.isEmpty() shouldBe true
+            idle.buttons.size shouldBe 4
         }
     }
 })

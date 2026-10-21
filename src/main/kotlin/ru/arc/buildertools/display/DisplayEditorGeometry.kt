@@ -29,12 +29,34 @@ internal data class DisplayEditorMesh(val width: Double, val height: Double, val
 internal enum class DisplayEditorMode { MOVE, ROTATE, SCALE }
 internal enum class DisplayEditorAxis { FREE, X, Y, Z }
 
+internal data class DisplayEditorScale(val x: Float, val y: Float, val z: Float) {
+    fun valid() = listOf(x, y, z).all { it.isFinite() && it in DisplayEditorGeometry.MIN_SCALE..DisplayEditorGeometry.MAX_SCALE }
+    fun values() = listOf(x, y, z)
+}
+
 internal object DisplayEditorGeometry {
     const val RANGE = 12.0
     const val MAX_EXTENT = 8.0
     const val MIN_SCALE = .05f
     const val MAX_SCALE = 4f
     const val MAX_CELLS = 729
+
+    fun scale(pose: DisplayEditorPose): DisplayEditorScale = pose.matrix().getScale(org.joml.Vector3f()).let {
+        DisplayEditorScale(it.x.coerceIn(MIN_SCALE, MAX_SCALE), it.y.coerceIn(MIN_SCALE, MAX_SCALE), it.z.coerceIn(MIN_SCALE, MAX_SCALE))
+    }
+
+    /** Normalize each local basis independently, preserving its direction and the visual centre. */
+    fun withScale(pose: DisplayEditorPose, desired: DisplayEditorScale): DisplayEditorPose? {
+        if (!desired.valid()) return null
+        val matrix = pose.matrix()
+        val current = matrix.getScale(org.joml.Vector3f())
+        if ((0..2).any { !current[it].isFinite() || current[it] <= 0f }) return null
+        return pose.withMatrix(matrix.scale(desired.x / current.x, desired.y / current.y, desired.z / current.z))
+    }
+
+    fun withoutRotation(pose: DisplayEditorPose): DisplayEditorPose = scale(pose).let {
+        pose.withMatrix(Matrix4f().scaling(it.x, it.y, it.z))
+    }
 
     fun corners(pose: DisplayEditorPose, mesh: DisplayEditorMesh): List<Vector3d> {
         val matrix = Matrix4d(pose.matrix())

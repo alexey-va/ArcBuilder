@@ -18,7 +18,7 @@ item stays in the inventory. Displays have no item collection or conversion path
 | Right-click again | Validate and save the draft |
 | Left-click | Cancel the gesture; a second click clears selection |
 | F | Cycle Move → Rotate → Scale |
-| Shift+F | Cycle free / world X / Y / Z |
+| Shift+F | Cancel the current gesture and open axes / precise size |
 | Wheel while transforming | Adjust distance / 5-degree rotation / scale |
 | Shift while moving | Attach the transformed mesh to a collision surface |
 | Shift while rotating / scaling | Snap to 15 degrees / 10 percent |
@@ -31,6 +31,19 @@ surface magnet takes precedence over a constrained movement axis.
 
 The menu also changes axes, duplicates the selection, edits its text, confirms
 deletion and undoes up to 20 committed changes in the current session.
+The axes panel selects free / world X / Y / Z for mouse gestures. Its three
+size sliders use the **model's own axes**, which rotate with the object: 5–400%,
+one-percent steps, with 100% representing the original size. Choosing a mouse
+axis preserves pending slider values. **Apply size** saves the three values
+together; moving a native slider does not update the world before this action.
+Percent values avoid the native client's long fractional float labels.
+
+**Reset rotation** immediately restores 0° while preserving the visual centre
+and current local scale lengths. It includes both native entity yaw/pitch and
+the Display transformation rotations. **Reset size** immediately restores
+(1, 1, 1) while retaining the centre and the directions of the model axes.
+Both actions use the same current-snapshot, ownership, protection and undo path
+as Apply size. No selection means that only the four mouse-axis choices appear.
 Deletion identifies the captured object's type and location. Text accepts at most
 120 characters, four short lines and 240 default-font pixels per line; `\n`
 introduces a line break. Text is literal Adventure content, not MiniMessage or a
@@ -40,6 +53,13 @@ Direct routes are `/builder display block [material]`, `item [material]`,
 `text [text]`, `move`, `rotate`, `scale`, `axis [free|x|y|z]`, `confirm`, `cancel`,
 `duplicate`, `delete`, `undo`, `tool` and `exit`. Ordinary builder commands end an
 editor session before entering their own tool flow.
+
+While enabled, the editor owns F / Shift+F through Bukkit player metadata
+`arcbuilder-display-editor = true`, owned by the ArcBuilder plugin. ARC's global
+swap handler checks this exact key, enabled owning plugin name and boolean
+before opening menus or forwarding other actions. It cancels and returns so the
+editor's HIGHEST listener can handle the key. Exit, quit, access loss and close
+remove only this plugin's claim; there is no separate cross-plugin registry.
 
 ## Ownership and mutation
 
@@ -103,9 +123,22 @@ Transforms permit scales 0.05–4, a maximum eight-block envelope per axis, at m
 729 footprint cells and 20-block corner reach. Full footprint protection runs
 only on final actions. Per-tick previews check the source/destination centre and
 loaded bounds; the existing runtime tick owns the bounded 16-session loop. Idle
-sessions expire after ten minutes. A private cyan outline plus red/green/blue
-world-axis particles uses at most 51 points every four ticks; axis guides start
-outside the transformed object's envelope.
+sessions expire after ten minutes. A private cyan outline uses at most 36 dust
+points every four ticks. The world axes themselves are six stable, private
+packet BlockDisplay handles: red X, green Y and blue Z rods with endpoint caps.
+The constrained axis is thicker; every rod extends beyond the transformed
+object's positive envelope so large opaque objects do not hide the entire guide.
+With no selection, a small triad near the aim point provides an orientation
+reference without implying a selected object. The previous particle axes are
+removed.
+
+One standard Core `PaperPacketDisplays` owner manages at most 96 handles across
+the 16 editor sessions. The existing editor tick produces geometry; Core owns
+coalesced asynchronous packets, viewer/chunk tracking and reconnect handling.
+Unchanged frames do not rewrite poses. World changes and exit remove the old
+handles, and module close / failed initialization await the owner's terminal
+cleanup through the runtime's existing visual drains. These guides never create
+native world entities or persistent state.
 
 ## Evidence
 
@@ -114,6 +147,13 @@ negative coordinates, complete footprints, limits, chunk-corner preflight,
 ownership and exclusive locks. MockBukkit tests exercise private-to-persistent
 commit, inventory preservation, source/destination protection, stale snapshots
 and callbacks, permission loss, cancellation, quit, undo chains and cleanup.
+The precise controls also cover Shift+F gesture cancellation, F mode cycling,
+empty selection, pending slider values, input bounds, destination expansion,
+stale source / callbacks, reset / undo and the metadata ownership lifecycle.
+Rotated non-uniform geometry tests verify that local resizing and each reset
+preserve the centre and the other transform property. Packet-handle tests check
+private audiences, stable identity, world-change cleanup and the actual drain
+future without claiming network delivery.
 Shape tests cover all slab variants, generated/handheld items, special-model and
 custom-data fallbacks. Controller tests check the saved native slab top against
 a ceiling and the generated diamond face against a wall after Shift snapping.
@@ -123,6 +163,9 @@ dialog display/dismissal. Its pre-spawn factory supplies the missing
 mock registry, entity lifecycle and production initializer. Production uses
 Paper 1.21.11 APIs. The custom-model fallback test also preserves explicit model
 and component metadata that MockBukkit's `ItemMetaMock.clone/equals` omit.
+Controller tests inject a mocked axis renderer; the separate renderer test uses
+the real renderer with mocked Core packet handles. Production always constructs
+the standard Core owner; no silent fallback renderer is installed.
 
 The dialog composition test checks both locale catalogs, action order, selected
 labels, object identity in deletion and the 426-pixel width budget. Offline

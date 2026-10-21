@@ -991,6 +991,8 @@ internal class BuilderToolsRuntime(
             attempt { initializedConstructionProjectsMenu?.close() }
             attempt { initializedConstructionMenus?.close() }
             val visualDrains = listOf(
+                runCatching { entityEditor?.closeAsync() ?: CompletableFuture.completedFuture(null) }
+                    .getOrElse { CompletableFuture.failedFuture(it) },
                 runCatching { initializedBookPreviewPresentation?.closeAsync() ?: CompletableFuture.completedFuture(null) }
                     .getOrElse { CompletableFuture.failedFuture(it) },
                 runCatching { this.displayRenderer.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
@@ -4267,6 +4269,8 @@ internal class BuilderToolsRuntime(
         constructionInstantRequests.clear()
         bookHoldHints.clear()
         val visualDrains = listOf(
+            runCatching { entityEditor?.closeAsync() ?: CompletableFuture.completedFuture(null) }
+                .getOrElse { CompletableFuture.failedFuture(it) },
             runCatching { bookPreviewPresentation.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
             runCatching { displayRenderer.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) },
         )

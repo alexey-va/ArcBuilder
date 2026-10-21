@@ -6,12 +6,16 @@ import ru.arc.paper.menu.PaperDialogActionId
 import ru.arc.paper.menu.PaperDialogBody
 import ru.arc.paper.menu.PaperDialogButton
 import ru.arc.paper.menu.PaperDialogInputId
+import ru.arc.paper.menu.PaperDialogClickContext
+import ru.arc.paper.menu.PaperDialogNumberRangeInput
 import ru.arc.paper.menu.PaperDialogScreen
 import ru.arc.paper.menu.PaperDialogTextInput
+import kotlin.math.roundToInt
 
 /** Pure, inspectable native-dialog composition; callbacks always return to the editor's authority boundary. */
 internal object DisplayEditorMenu {
     val TEXT = PaperDialogInputId.of("display_text")
+    val SCALE = listOf("scale_x", "scale_y", "scale_z").map(PaperDialogInputId::of)
 
     fun root(
         text: (String) -> Component,
@@ -46,20 +50,54 @@ internal object DisplayEditorMenu {
         columns = 3,
     )
 
-    fun axes(text: (String) -> Component, selected: DisplayEditorAxis, action: (DisplayEditorAxis) -> Unit) = PaperDialogScreen(
+    fun axes(
+        text: (String) -> Component,
+        selected: DisplayEditorAxis,
+        scale: DisplayEditorScale?,
+        selection: Component?,
+        feedback: Component?,
+        chooseAxis: (DisplayEditorAxis, DisplayEditorScale?) -> Unit,
+        applyScale: (DisplayEditorScale?) -> Unit,
+        reset: (Boolean) -> Unit,
+    ) = PaperDialogScreen(
         id = "builder.display-editor.axes",
         title = text("axis-title"),
-        body = listOf(PaperDialogBody(text("axis-body"), 380)),
-        buttons = DisplayEditorAxis.entries.map { axis ->
-            PaperDialogButton(
+        body = listOfNotNull(
+            PaperDialogBody(text("axis-body"), 380),
+            selection?.let { PaperDialogBody(it, 380) },
+            PaperDialogBody(text(if (scale == null) "scale-select-first" else "scale-body"), 380),
+            feedback?.let { PaperDialogBody(it, 380) },
+        ),
+        numberInputs = scale?.values()?.mapIndexed { index, value ->
+            PaperDialogNumberRangeInput(
+                SCALE[index], text("scale-label-${"xyz"[index]}"),
+                5f, 400f, (value * 100).roundToInt().coerceIn(5, 400).toFloat(), 1f, 360,
+            )
+        }.orEmpty(),
+        buttons = buildList {
+            DisplayEditorAxis.entries.forEach { axis -> add(PaperDialogButton(
                 id = PaperDialogActionId.of("axis_${axis.name.lowercase()}"),
                 label = text("axis-${if (axis == selected) "selected" else "option"}-${axis.name.lowercase()}"),
                 width = 180,
-                onClick = { action(axis) },
-            )
+                onClick = { chooseAxis(axis, readScale(it)) },
+            )) }
+            if (scale != null) {
+                add(PaperDialogButton(PaperDialogActionId.of("apply_scale"), text("apply-scale"), text("apply-scale-help"), 180,
+                    onClick = { applyScale(readScale(it)) }))
+                add(PaperDialogButton(PaperDialogActionId.of("reset_scale"), text("reset-scale"), text("reset-scale-help"), 180,
+                    onClick = { reset(false) }))
+                add(PaperDialogButton(PaperDialogActionId.of("reset_rotation"), text("reset-rotation"), text("reset-rotation-help"), 180,
+                    onClick = { reset(true) }))
+            }
         },
         columns = 2,
     )
+
+    private fun readScale(context: PaperDialogClickContext): DisplayEditorScale? {
+        val values = SCALE.map { context.number(it) ?: return null }
+        if (values.any { !it.isFinite() || it !in 5f..400f || it % 1f != 0f }) return null
+        return DisplayEditorScale(values[0] / 100, values[1] / 100, values[2] / 100).takeIf(DisplayEditorScale::valid)
+    }
 
     fun textForm(text: (String) -> Component, initial: String, editing: Boolean, invalid: Boolean, submit: (String) -> Unit) = PaperDialogScreen(
         id = "builder.display-editor.text",
