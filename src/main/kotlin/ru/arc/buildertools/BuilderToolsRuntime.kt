@@ -33,6 +33,7 @@ import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.event.player.PlayerSwapHandItemsEvent
 import org.bukkit.event.player.PlayerDropItemEvent
 import org.bukkit.event.player.PlayerTeleportEvent
+import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
@@ -150,6 +151,7 @@ internal class BuilderToolsRuntime(
     private val lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
     private val lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
     private val sendPlayerMessage: (Player, Component) -> Unit = { player, message -> player.sendMessage(message) },
+    private val selectionTargetResolver: (Player, Double) -> BuilderBlockPos? = BuilderSelectionTarget::resolve,
 ) : Listener, CommandExecutor, TabCompleter, AutoCloseable {
     private val systemBuildBookCatalog = if (systemBuildBookResolver == null) requireNotNull(BuilderToolsConfiguration.current(plugin.dataPath).systemBooks) { "System build-book catalog is not prepared" } else null
     private val systemBuildBookResolver = systemBuildBookResolver ?: requireNotNull(systemBuildBookCatalog)::resolve
@@ -586,6 +588,8 @@ internal class BuilderToolsRuntime(
     private val materialScans = mutableMapOf<UUID, Any>()
     private val panelPlanSummaries = mutableMapOf<UUID, Pair<UUID, Component>>()
     private val selectionUndoAvailable = mutableMapOf<UUID, Pair<Long, Boolean>>()
+    private val selectionTargets = mutableMapOf<UUID, BuilderBlockPos>()
+    private val selectionTargetFailures = mutableSetOf<UUID>()
     private var constructionSchedulerTick = 0L
     private val runtimeHealth = AtomicReference(
         RuntimeHealthContribution(state = RuntimeHealthState.STARTING),
@@ -942,7 +946,10 @@ internal class BuilderToolsRuntime(
                 plugin, config.selectionPanelSettings(), messages, ::selectionPanelView, ::onSelectionPanelAction,
                 onSelectionGlowSuppression = this.displayRenderer::suppressSelectionGlow,
             )
-            checkNotNull(taskScope.runTimer(1L, 1L) { selectionActionPanel?.tick() }) {
+            checkNotNull(taskScope.runTimer(1L, 1L) {
+                selectionActionPanel?.tick()
+                tickSelectionTargets()
+            }) {
                 "Builder selection action panel task was not scheduled"
             }
         } catch (failure: Throwable) {
@@ -1295,6 +1302,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun dismissSelectionControls(playerId: UUID) {
+        clearSelectionTarget(playerId)
         materialScans.remove(playerId)
         selectionPanelPages.remove(playerId)
         crownSelectionDialog?.close(playerId)
@@ -1330,6 +1338,43 @@ internal class BuilderToolsRuntime(
     fun onSelectionTeleport(event: PlayerTeleportEvent) {
         invalidatePendingBookRequests(event.player.uniqueId)
         dismissSelectionControls(event.player.uniqueId)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onSelectionWorldChange(event: PlayerChangedWorldEvent) = dismissSelectionControls(event.player.uniqueId)
+
+    private fun clearSelectionTarget(playerId: UUID) {
+        selectionTargets.remove(playerId)
+        displayRenderer.clearSelectionTarget(playerId)
+    }
+
+    private fun refreshSelectionTarget(player: Player): BuilderBlockPos? {
+        val target = if (canUseSelectionPanel(player) && !player.isDead && !constructionRecovering &&
+            player.uniqueId !in constructionStarts && !operationLocks.isPlayerLocked(player.uniqueId) &&
+            selectionActionPanel?.isTargeted(player) != true
+        ) selectionTargetResolver(player, config.maximumRange) else null
+        if (target == null) {
+            if (selectionTargets.containsKey(player.uniqueId)) clearSelectionTarget(player.uniqueId)
+        } else if (selectionTargets[player.uniqueId] != target) {
+            displayRenderer.selectionTarget(player, target)
+            selectionTargets[player.uniqueId] = target
+        }
+        return target
+    }
+
+    private fun tickSelectionTargets() {
+        if (closed) return
+        Bukkit.getOnlinePlayers().forEach { player ->
+            try {
+                refreshSelectionTarget(player)
+                selectionTargetFailures.remove(player.uniqueId)
+            } catch (failure: Exception) {
+                clearSelectionTarget(player.uniqueId)
+                if (selectionTargetFailures.add(player.uniqueId)) {
+                    error("Builder selector target failed for ${player.name}", failure)
+                }
+            }
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -1619,12 +1664,14 @@ internal class BuilderToolsRuntime(
 
     private fun setPosition(player: Player, location: Location, first: Boolean) {
         ensureAvailable(player)
+        require(location.world == player.world) { "Selection world mismatch" }
+        val position = BuilderBlockPos(player.world.uid, location.blockX, location.blockY, location.blockZ).validated()
+        val points = selections.points(player.uniqueId, player.world.uid)
+        if ((if (first) points.first else points.second) == position) return
         materialScans.remove(player.uniqueId)
         selectionPanelPages.remove(player.uniqueId)
         crownSelectionDialog?.close(player.uniqueId)
         materialPicker?.close(player.uniqueId)
-        require(location.world == player.world) { "Selection world mismatch" }
-        val position = BuilderBlockPos(player.world.uid, location.blockX, location.blockY, location.blockZ).validated()
         previews.plan(player.uniqueId)?.takeIf { it.kind != BuilderPlanKind.BUILD_BOOK }
             ?.let { discardPendingPlan(player.uniqueId) }
         val update = selections.set(player.uniqueId, position, first)
@@ -3799,15 +3846,16 @@ internal class BuilderToolsRuntime(
                 return
             }
         }
-        val clicked = event.clickedBlock ?: return
         val first = when (event.action) {
-            org.bukkit.event.block.Action.LEFT_CLICK_BLOCK -> true
-            org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK -> false
+            org.bukkit.event.block.Action.LEFT_CLICK_BLOCK, org.bukkit.event.block.Action.LEFT_CLICK_AIR -> true
+            org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK, org.bukkit.event.block.Action.RIGHT_CLICK_AIR -> false
             else -> return
         }
         event.isCancelled = true
-        runBuilderAction(player, diagnostic = beginAction(player, if (first) "selection_first" else "selection_second", clicked.location, site = null)) {
-            setPosition(player, clicked.location, first)
+        runBuilderAction(player, diagnostic = beginAction(player, if (first) "selection_first" else "selection_second", event.clickedBlock?.location, site = null)) {
+            ensureAvailable(player)
+            val target = refreshSelectionTarget(player) ?: return@runBuilderAction
+            setPosition(player, Location(player.world, target.x.toDouble(), target.y.toDouble(), target.z.toDouble()), first)
         }
     }
 
@@ -4045,6 +4093,8 @@ internal class BuilderToolsRuntime(
 
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
+        selectionTargets.remove(event.player.uniqueId)
+        selectionTargetFailures.remove(event.player.uniqueId)
         bookRequests.invalidate(event.player.uniqueId)
         selectionActionPanel?.clear(event.player.uniqueId)
         crownSelectionDialog?.clearPlayer(event.player.uniqueId)
@@ -4197,6 +4247,8 @@ internal class BuilderToolsRuntime(
         attempt { constructionPlayerLeases.close() }
         attempt { operationLocks.close() }
         selections.clear()
+        selectionTargets.clear()
+        selectionTargetFailures.clear()
         attempt { clipboardController.close() }
         attempt { BuildingManager.clearPreviews() }
         attempt { BuildingManager.installPreviewBridge(null) }

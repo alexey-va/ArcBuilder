@@ -42,6 +42,7 @@ import org.bukkit.event.block.Action
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.player.PlayerCommandPreprocessEvent
 import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
@@ -1132,6 +1133,103 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("selector air clicks commit the shown cell once and ignore the off hand") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("AirSelector", GameMode.CREATIVE)
+            player.teleport(Location(journey.world, .5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            val wand = player.inventory.itemInMainHand
+            fun click(action: Action, hand: EquipmentSlot = EquipmentSlot.HAND) = PlayerInteractEvent(
+                player, action, wand, null, BlockFace.SELF, hand,
+            ).also { event ->
+                // Vanilla air interactions may already deny both default actions.
+                event.setUseInteractedBlock(org.bukkit.event.Event.Result.DENY)
+                event.setUseItemInHand(org.bukkit.event.Event.Result.DENY)
+                journey.paper.callEvent(event)
+            }
+            val first = BuilderBlockPos(journey.world.uid, 0, 65, 0)
+            val second = first.copy(x = 1)
+            journey.targetCells[player.uniqueId] = first
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe first
+            click(Action.LEFT_CLICK_AIR).isCancelled shouldBe true
+            checkNotNull(journey.renderer.selections[player.uniqueId]).points.first shouldBe first
+            journey.targetCells[player.uniqueId] = second
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe second
+            click(Action.RIGHT_CLICK_AIR).isCancelled shouldBe true
+            checkNotNull(journey.renderer.selections[player.uniqueId]).points.second shouldBe second
+
+            journey.command(player, "builder fill stone") shouldBe true
+            val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
+            val renders = journey.renderer.selectionRenders
+            while (player.nextComponentMessage() != null) { /* drain previous feedback */ }
+            click(Action.RIGHT_CLICK_AIR)
+            journey.renderer.selectionRenders shouldBe renders
+            journey.renderer.plans[player.uniqueId] shouldBeSameInstanceAs plan
+            player.nextComponentMessage() shouldBe null
+
+            journey.targetCells[player.uniqueId] = second.copy(x = 2)
+            click(Action.RIGHT_CLICK_AIR, EquipmentSlot.OFF_HAND)
+            checkNotNull(journey.renderer.selections[player.uniqueId]).points.second shouldBe second
+            journey.targetCells.remove(player.uniqueId)
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe null
+            click(Action.LEFT_CLICK_AIR)
+            checkNotNull(journey.renderer.selections[player.uniqueId]).points.first shouldBe first
+            journey.renderer.plans[player.uniqueId] shouldBeSameInstanceAs plan
+        }
+    }
+
+    test("selector cursor clears on tool changes teleport world change quit and runtime close") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("CursorLifecycle", GameMode.CREATIVE)
+            player.teleport(Location(journey.world, .5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            val wand = player.inventory.itemInMainHand.clone()
+            val target = BuilderBlockPos(journey.world.uid, 0, 65, 0)
+            journey.targetCells[player.uniqueId] = target
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe target
+            journey.paper.callEvent(PlayerItemHeldEvent(player, 0, 1))
+            journey.renderer.targets[player.uniqueId] shouldBe null
+            player.inventory.setItemInMainHand(ItemStack(Material.STICK))
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe null
+            player.inventory.setItemInMainHand(wand)
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe target
+
+            player.teleport(Location(journey.world, 1.5, 64.0, 3.5))
+            journey.renderer.targets[player.uniqueId] shouldBe null
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe target
+            val other = journey.paper.addSimpleWorld("cursor-other-world")
+            other.loadChunk(0, 0)
+            val otherTarget = target.copy(worldId = other.uid)
+            journey.targetCells[player.uniqueId] = otherTarget
+            player.teleport(Location(other, .5, 64.0, 3.5))
+            journey.renderer.targets[player.uniqueId] shouldBe null
+            journey.paper.performTicks(1)
+            journey.renderer.targets[player.uniqueId] shouldBe otherTarget
+            journey.paper.callEvent(PlayerQuitEvent(player, Component.empty()))
+            journey.renderer.targets[player.uniqueId] shouldBe null
+            journey.targetCells.remove(player.uniqueId)
+
+            val remaining = journey.builder("CursorAtReload", GameMode.CREATIVE)
+            remaining.teleport(Location(journey.world, .5, 64.0, 3.5))
+            remaining.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            remaining.performCommand("builder wand") shouldBe true
+            journey.targetCells[remaining.uniqueId] = target
+            journey.paper.performTicks(1)
+            journey.renderer.targets[remaining.uniqueId] shouldBe target
+            journey.stopForRecovery() shouldBe emptyList()
+            journey.renderer.targets shouldBe emptyMap()
+        }
+    }
+
     test("selection panel stays near the nearest selection edge and returns without losing selection") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("LocalPanelBuilder", GameMode.CREATIVE)
@@ -1195,6 +1293,8 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.activeLeases() shouldBe 0
 
             player.inventory.setItemInMainHand(wand)
+            // A changed corner discards the old plan; repeated clicks are now quiet no-ops.
+            journey.select(player, journey.world, wand, 0, 64, 1, 1, 64, 0)
             journey.select(player, journey.world, wand, 0, 64, 0, 1, 64, 0)
             journey.renderer.plans[player.uniqueId] shouldBe null
             checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.CONFIRM) shouldBe false
@@ -1766,6 +1866,7 @@ private class ArcBuilderJourney private constructor(
     val renderer: RecordingBuilderDisplayRenderer,
     private var runtime: BuilderToolsRuntime,
     private val buildings: MutableMap<String, Building>,
+    val targetCells: MutableMap<UUID, BuilderBlockPos>,
 ) : AutoCloseable {
     fun addBuilding(building: Building) { buildings[building.fileName] = building }
 
@@ -1838,6 +1939,7 @@ private class ArcBuilderJourney private constructor(
             displayRenderer = renderer, physicsUpdater = RecordingBuilderPhysicsUpdater(),
             draftStorage = InMemoryBuilderDraftStorage(), systemBuildBookResolver = { null },
             schematicLoader = { id, _ -> java.util.concurrent.CompletableFuture.completedFuture(buildings[id] ?: schematicTestBuilding(id)) },
+            selectionTargetResolver = { player, _ -> targetCells[player.uniqueId] },
         )
         checkNotNull(plugin.getCommand("builder")).setExecutor(runtime)
         if (awaitReady) await("sliced startup journal recovery") { runtime.runtimeHealthContribution().state == RuntimeHealthState.UP }
@@ -1874,6 +1976,7 @@ private class ArcBuilderJourney private constructor(
         y2: Int,
         z2: Int,
     ) {
+        targetCells[player.uniqueId] = BuilderBlockPos(world.uid, x1, y1, z1)
         val first = PlayerInteractEvent(
             player,
             Action.LEFT_CLICK_BLOCK,
@@ -1884,6 +1987,7 @@ private class ArcBuilderJourney private constructor(
         )
         paper.callEvent(first)
         first.isCancelled shouldBe true
+        targetCells[player.uniqueId] = BuilderBlockPos(world.uid, x2, y2, z2)
         val second = PlayerInteractEvent(
             player,
             Action.RIGHT_CLICK_BLOCK,
@@ -2047,6 +2151,7 @@ private class ArcBuilderJourney private constructor(
                 BuilderToolsModule.shutdown()
                 val renderer = RecordingBuilderDisplayRenderer()
                 val buildings = mutableMapOf<String, Building>()
+                val targetCells = mutableMapOf<UUID, BuilderBlockPos>()
                 val runtime = BuilderToolsRuntime(
                     plugin = plugin,
                     config = BuilderToolsConfig(config).validated(),
@@ -2062,6 +2167,9 @@ private class ArcBuilderJourney private constructor(
                     systemBuildBookResolver = systemResolver,
                     lootTableResolver = lootTableResolver,
                     lootTableAccess = lootTableAccess,
+                    // Native ray/face/bounds semantics have their own focused fixture.
+                    // These journeys drive the same resolver boundary for both tick and input.
+                    selectionTargetResolver = { player, _ -> targetCells[player.uniqueId] },
                 )
                 checkNotNull(plugin.getCommand("builder")).apply {
                     setExecutor(runtime)
@@ -2070,7 +2178,7 @@ private class ArcBuilderJourney private constructor(
                 val world = paper.addSimpleWorld("survival")
                 // Every journey target is already loaded; planners must never load chunks implicitly.
                 for (chunkX in -1..1) for (chunkZ in -1..1) world.loadChunk(chunkX, chunkZ)
-                val journey = ArcBuilderJourney(paper, plugin, world, renderer, runtime, buildings)
+                val journey = ArcBuilderJourney(paper, plugin, world, renderer, runtime, buildings, targetCells)
                 journey.await("ArcBuilder runtime readiness") {
                     runtime.runtimeHealthContribution().state == RuntimeHealthState.UP
                 }
@@ -2147,6 +2255,7 @@ private data class RecordedSelection(
 private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
     val selections = mutableMapOf<UUID, RecordedSelection>()
     val plans = mutableMapOf<UUID, BuilderPlan>()
+    val targets = mutableMapOf<UUID, BuilderBlockPos>()
     private val books = mutableSetOf<UUID>()
     var selectionRenders = 0
         private set
@@ -2162,6 +2271,14 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
         selections.remove(playerId)
     }
 
+    override fun selectionTarget(player: Player, position: BuilderBlockPos?) {
+        if (position == null) targets.remove(player.uniqueId) else targets[player.uniqueId] = position
+    }
+
+    override fun clearSelectionTarget(playerId: UUID) {
+        targets.remove(playerId)
+    }
+
     override fun plan(player: Player, plan: BuilderPlan) {
         plans[player.uniqueId] = plan
     }
@@ -2174,6 +2291,7 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
         selections.remove(playerId)
         plans.remove(playerId)
         books.remove(playerId)
+        targets.remove(playerId)
     }
 
     override fun open(site: ConstructionSite) {
@@ -2192,6 +2310,7 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
         selections.clear()
         plans.clear()
         books.clear()
+        targets.clear()
     }
 }
 

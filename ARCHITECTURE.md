@@ -51,6 +51,26 @@ the fill, replace, and fence-disconnect controllers.
 
 ## Selection and preview
 
+The held selector resolves its cursor every tick through `BuilderSelectionTarget`.
+Ordinary aim selects the ray-hit block; sneaking selects an adjacent air cell on
+the hit face, or an air cell five blocks along the eye ray when nothing is hit.
+The bounded ray is checked for loaded chunks before Paper traces precise collision
+shapes, and target height, border and chunk checks precede air reads. Both mouse
+buttons, including air clicks, use this same resolver after private action-panel
+controls have first refusal. Repeating the same corner is a no-op.
+An independent private `TARGET` layer in `BuilderBlockDisplayRenderer` draws a
+white twelve-edge cell outline. It reuses selection bounds and packet lifecycle;
+unchanged targets retain their IDs. Tool/context exits clear that layer without
+discarding saved selection corners. The existing one-tick panel task owns cursor
+refresh, including aim, movement and sneak changes.
+The renderer combines selection, plan and book layers into one desired set per
+viewer, including only permitted scenes in the current world. The twelve-edge
+cursor has a separate logical attachment on the same captured channel and shared
+packet budget, so aim changes never copy or reconcile large static previews.
+Removing either stream preserves the other; book observers never receive the
+owner's private selection or cursor. Chunk eviction, replay, disconnect and close
+drain both streams through the existing packet lifecycle.
+
 `BuilderSelectionController` owns two in-memory corners per player. The selector
 wand is recognized by persistent item data in `BuilderToolsRuntime`. A complete
 selection becomes the immutable `BuilderSelection` domain value from

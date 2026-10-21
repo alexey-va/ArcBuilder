@@ -284,6 +284,7 @@ private fun withMovingPreview(previewLimit: Int = 32, test: (MovingPreviewFixtur
                     }
                     override fun nextEntityId() = nextId++
                     override fun connection(player: Player) = connection
+                    override fun targetConnection(player: Player): BuilderPreviewConnection? = null
                 }
                 val messages = mockk<LocalizedMiniMessage>(relaxed = true)
                 every { messages.render(any(), any(), any()) } returns Component.empty()

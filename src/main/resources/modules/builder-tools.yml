@@ -541,16 +541,21 @@ locales:
     wand:
       name: "<#d48763><bold>Инструмент строителя"
       lore:
-        - "<#e6fff3>ЛКМ по блоку — первая точка."
-        - "<#e6fff3>ПКМ по блоку — вторая точка."
-        - "<#969696>Контур виден постоянно до /builder clear."
-        - "<#969696>Размер области зависит от ваших прав."
         - "<reset>"
-        - "<#8c8c8c><#d48763>/builder <#e6fff3>— команды строителя."
+        - "<#e6fff3>Белый контур — клетка под прицелом."
+        - "<#b8b8b8>Shift — воздух у грани блока;"
+        - "<#b8b8b8>в пустоте — в 5 блоках впереди."
+        - "<reset>"
+        - "<#b8b8b8>Выделение сохраняется до /builder clear."
+        - "<#b8b8b8>Размер области зависит от ваших прав."
+        - "<#b8b8b8>/builder — команды строителя."
+        - "<reset>"
+        - "<#d48763>[▶] <#e6fff3>ЛКМ — первая точка; ПКМ — вторая."
       received: |-
 
         <prefix><#2bba43>Инструмент строителя готов.
         <#8c8c8c>   <#e6fff3>ЛКМ — первая точка; ПКМ — вторая.
+        <#8c8c8c>   <#e6fff3>Shift — выбрать клетку воздуха.
       inventory-full: "<prefix><#ff9f0f>Освободите слот для инструмента строителя."
       material-required: |-
 
@@ -1495,11 +1500,16 @@ locales:
     wand:
       name: "<aqua><bold>Builder selector"
       lore:
-        - "<gray>Left-click a block — position 1"
-        - "<gray>Right-click a block — position 2"
-        - "<dark_gray>The outline stays visible until /builder clear"
-        - "<dark_gray>The selector never changes blocks"
-      received: "<prefix><green>Your echo shard is now the builder selector."
+        - "<reset>"
+        - "<gray>The white outline shows the targeted cell"
+        - "<#b8b8b8>Shift — air next to the block face;"
+        - "<#b8b8b8>in empty space — 5 blocks ahead"
+        - "<reset>"
+        - "<#b8b8b8>Saved selection stays until /builder clear"
+        - "<#b8b8b8>The selector never changes blocks"
+        - "<reset>"
+        - "<aqua>[▶] <gray>Left-click — position 1; right-click — position 2"
+      received: "<prefix><green>Your echo shard is now the builder selector. <gray>Hold Shift to select air."
       inventory-full: "<prefix><yellow>Free one slot or hold a single echo shard."
       material-required: |-
 

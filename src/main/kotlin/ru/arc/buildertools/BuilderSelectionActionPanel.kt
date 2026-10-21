@@ -93,6 +93,8 @@ internal class BuilderSelectionActionPanel(
     /** The selector calls this before changing a corner; a miss remains an ordinary tool gesture. */
     fun intercept(player: Player): Boolean = panels.intercept(player)
 
+    fun isTargeted(player: Player): Boolean = panels.target(player) != null
+
     override fun frame(player: Player): ActionPanelFrame<BuilderPanelContext, BuilderPanelAction>? {
         if (closed) return null
         val current = view(player) ?: return null

@@ -39,6 +39,8 @@ import java.util.PriorityQueue
  */
 internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseable {
     fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?)
+    fun selectionTarget(player: Player, position: BuilderBlockPos?) = Unit
+    fun clearSelectionTarget(playerId: UUID) = Unit
     fun suppressSelectionGlow(playerId: UUID, suppressed: Boolean) = Unit
     fun clearSelection(playerId: UUID)
     fun plan(player: Player, plan: BuilderPlan)
@@ -103,7 +105,7 @@ internal class BuilderBlockDisplayRenderer(
     private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
     planningTasks: BuilderPlanningTasks? = null,
 ) : BuilderDisplayRenderer, Listener {
-    private enum class Layer { SELECTION, PLAN, BOOK }
+    private enum class Layer { SELECTION, TARGET, PLAN, BOOK }
 
     private data class DisplaySpec(
         val x: Double,
@@ -141,7 +143,6 @@ internal class BuilderBlockDisplayRenderer(
     private data class Scene(
         val worldId: UUID,
         val entities: Map<DisplayKey, BuilderPacketDisplay>,
-        val audience: BuilderPacketScene,
     )
     private data class BookBlock(val location: Location, val blockData: BlockData) {
         val blockState: String by lazy(LazyThreadSafetyMode.NONE) { blockData.asString }
@@ -149,6 +150,10 @@ internal class BuilderBlockDisplayRenderer(
     private data class BookModel(val blocks: List<BookBlock>, val bounds: List<BuilderBlockPos>)
     private class PlanCalculation(val plan: BuilderPlan)
     private var scenes = mutableMapOf<Pair<UUID, Layer>, Scene>()
+    // The packet transport replaces one viewer's complete desired set. Keep its
+    // chunk/reconnect lifecycle at that same boundary, across every visible layer.
+    private val audiences = mutableMapOf<UUID, BuilderPacketScene>()
+    private val targetAudiences = mutableMapOf<UUID, BuilderPacketScene>()
     private var suppressedSelectionGlow = mutableSetOf<UUID>()
     private var movingPreviews = mutableMapOf<Pair<UUID, Layer>, MovingPreview>()
     private var pendingPlans = mutableMapOf<UUID, PlanCalculation>()
@@ -302,9 +307,9 @@ internal class BuilderBlockDisplayRenderer(
                             // Keep the old scene throughout preparation, then publish one complete delta.
                             if (entities.isEmpty()) remove(player.uniqueId, layer)
                             else {
-                                val scene = Scene(worldId, entities, previous?.audience ?: BuilderPacketScene())
+                                val scene = Scene(worldId, entities)
                                 scenes[key] = scene
-                                syncScene(key, scene)
+                                syncScene(key)
                             }
                             specs = nextSpecs
                             true
@@ -371,12 +376,23 @@ internal class BuilderBlockDisplayRenderer(
         replace(player, Layer.SELECTION, specs)
     }
 
+    override fun selectionTarget(player: Player, position: BuilderBlockPos?) {
+        if (closed) return
+        if (position == null || position.worldId != player.world.uid) {
+            clearSelectionTarget(player.uniqueId)
+            return
+        }
+        replace(player, Layer.TARGET, bounds(listOf(position), Material.WHITE_STAINED_GLASS, Color.WHITE))
+    }
+
+    override fun clearSelectionTarget(playerId: UUID) = remove(playerId, Layer.TARGET)
+
     override fun suppressSelectionGlow(playerId: UUID, suppressed: Boolean) {
         if (closed) return
         val changed = if (suppressed) suppressedSelectionGlow.add(playerId) else suppressedSelectionGlow.remove(playerId)
         if (!changed) return
         val key = playerId to Layer.SELECTION
-        scenes[key]?.let { syncScene(key, it) }
+        if (key in scenes) syncScene(key)
     }
 
     override fun clearSelection(playerId: UUID) {
@@ -674,10 +690,10 @@ internal class BuilderBlockDisplayRenderer(
             val spec = nextSpecs.getValue(displayKey)
             nextEntities[displayKey] = packetDisplay(spec)
         }
-        val scene = Scene(player.world.uid, nextEntities, previous?.audience ?: BuilderPacketScene())
+        val scene = Scene(player.world.uid, nextEntities)
         // Publish before enqueueing so cleanup can remove even a partially sent scene.
         scenes[key] = scene
-        syncScene(key, scene)
+        syncScene(key)
     }
 
     private fun packetDisplay(spec: DisplaySpec) = BuilderPacketDisplay(
@@ -693,21 +709,53 @@ internal class BuilderBlockDisplayRenderer(
         if (viewer.isOnline) refreshViewersNextTick()
     }
 
-    private fun syncScene(key: Pair<UUID, Layer>, scene: Scene) {
+    private fun syncScene(key: Pair<UUID, Layer>) {
+        if (closed) return
+        if (key.second == Layer.TARGET) {
+            val player = Bukkit.getPlayer(key.first)
+            if (player == null) targetAudiences.remove(key.first)?.close() else syncTarget(player)
+            return
+        }
         val candidates = if (key.second == Layer.BOOK) Bukkit.getOnlinePlayers()
             else listOfNotNull(Bukkit.getPlayer(key.first))
-        val audience = candidates.mapNotNull { viewer ->
-            if (!viewer.isOnline || viewer.world.uid != scene.worldId ||
-                (viewer.uniqueId != key.first && !viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION))) {
-                return@mapNotNull null
+        candidates.forEach(::syncViewer)
+    }
+
+    private fun syncTarget(viewer: Player) {
+        val id = viewer.uniqueId
+        val target = scenes[id to Layer.TARGET]?.takeIf { viewer.isOnline && viewer.world.uid == it.worldId }
+        val connection = if (target != null) packets.targetConnection(viewer) else null
+        if (target == null || connection == null) {
+            targetAudiences.remove(id)?.close()
+            return
+        }
+        targetAudiences.getOrPut(id, ::BuilderPacketScene)
+            .update(target.entities.values, mapOf(id to BuilderPacketViewer(connection, sentChunks(viewer))))
+    }
+
+    private fun syncViewer(viewer: Player) {
+        val viewerId = viewer.uniqueId
+        if (!viewer.isOnline) {
+            audiences.remove(viewerId)?.close()
+            return
+        }
+        val displays = buildList {
+            scenes.forEach { (key, scene) ->
+                if (key.second != Layer.TARGET && viewer.world.uid == scene.worldId && (viewerId == key.first ||
+                    key.second == Layer.BOOK && viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION))) {
+                    if (key.second == Layer.SELECTION && key.first in suppressedSelectionGlow) {
+                        addAll(scene.entities.values.map { it.copy(glowing = false) })
+                    } else addAll(scene.entities.values)
+                }
             }
-            val connection = packets.connection(viewer) ?: return@mapNotNull null
-            viewer.uniqueId to BuilderPacketViewer(connection, sentChunks(viewer))
-        }.toMap()
-        val displays = if (key.second == Layer.SELECTION && key.first in suppressedSelectionGlow) {
-            scene.entities.values.map { it.copy(glowing = false) }
-        } else scene.entities.values
-        scene.audience.update(displays, audience)
+        }
+        val connection = if (displays.isNotEmpty()) packets.connection(viewer) else null
+        if (connection == null) {
+            audiences.remove(viewerId)?.close()
+            return
+        }
+        audiences.getOrPut(viewerId, ::BuilderPacketScene)
+            .update(displays, mapOf(viewerId to BuilderPacketViewer(connection, sentChunks(viewer))))
     }
 
     @EventHandler
@@ -715,9 +763,8 @@ internal class BuilderBlockDisplayRenderer(
 
     @EventHandler
     fun onChunkUnload(event: PlayerChunkUnloadEvent) {
-        scenes.values.filter { it.worldId == event.world.uid }.forEach {
-            it.audience.forgetChunk(event.player.uniqueId, event.chunk.chunkKey)
-        }
+        audiences[event.player.uniqueId]?.forgetChunk(event.player.uniqueId, event.chunk.chunkKey)
+        targetAudiences[event.player.uniqueId]?.forgetChunk(event.player.uniqueId, event.chunk.chunkKey)
     }
 
     @EventHandler
@@ -732,13 +779,15 @@ internal class BuilderBlockDisplayRenderer(
     @EventHandler
     fun onQuit(event: PlayerQuitEvent) {
         pendingPlans.remove(event.player.uniqueId)
-        scenes.values.forEach { it.audience.removeViewer(event.player.uniqueId) }
+        audiences.remove(event.player.uniqueId)?.close()
+        targetAudiences.remove(event.player.uniqueId)?.close()
         packets.forget(event.player)
     }
 
     private fun resetViewer(playerId: UUID) {
         pendingPlans.remove(playerId)
-        scenes.values.forEach { it.audience.removeViewer(playerId) }
+        audiences.remove(playerId)?.close()
+        targetAudiences.remove(playerId)?.close()
         movingPreviews.filterKeys { it.first == playerId }.values.forEach(MovingPreview::suspend)
         refreshViewersNextTick()
     }
@@ -747,12 +796,13 @@ internal class BuilderBlockDisplayRenderer(
         if (closed || viewerRefresh != null || scenes.isEmpty()) return
         viewerRefresh = taskScope.runLater(1L) {
             viewerRefresh = null
-            if (!closed) scenes.forEach { (key, scene) -> syncScene(key, scene) }
+            if (!closed) Bukkit.getOnlinePlayers().forEach { viewer -> syncViewer(viewer); syncTarget(viewer) }
         }
     }
 
     private fun remove(playerId: UUID, layer: Layer) {
-        scenes.remove(playerId to layer)?.audience?.close()
+        val key = playerId to layer
+        if (scenes.remove(key) != null) syncScene(key)
     }
 
     override fun clearPlayer(playerId: UUID) {
@@ -787,7 +837,10 @@ internal class BuilderBlockDisplayRenderer(
         } }
         movingPreviews.values.forEach { attempt(it::close) }
         if (ownsPlanningWork) attempt { (planningWork as AutoCloseable).close() }
-        scenes.values.forEach { scene -> attempt { scene.audience.close() } }
+        audiences.values.forEach { audience -> attempt { audience.close() } }
+        audiences.clear()
+        targetAudiences.values.forEach { audience -> attempt { audience.close() } }
+        targetAudiences.clear()
         bookBossBars.clear()
         bookSites.clear()
         scenes.clear()

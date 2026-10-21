@@ -59,6 +59,9 @@ internal interface BuilderPreviewPacketTransport : AutoCloseable {
     /** Captures the current player channel; all later calls use only that channel snapshot. */
     fun connection(player: Player): BuilderPreviewConnection?
 
+    /** Independent twelve-edge cursor stream on the same channel and packet budget. */
+    fun targetConnection(player: Player): BuilderPreviewConnection?
+
     fun forget(player: Player) = Unit
     /** Completion means terminal packet cleanup, not merely scheduling it. */
     fun closeAsync(): CompletableFuture<Void> { close(); return CompletableFuture.completedFuture(null) }
@@ -398,6 +401,7 @@ internal class PacketEventsBuilderPreviewTransport(
 ) : BuilderPreviewPacketTransport {
     /* Weak keys keep one attachment per live Bukkit player without retaining disconnected players. */
     private var attachments = WeakHashMap<Player, BuilderPacketAttachment>()
+    private var targetAttachments = WeakHashMap<Player, BuilderPacketAttachment>()
     private var closed = false
     private val terminal = CompletableFuture<Void>()
     private val retiring = AtomicInteger()
@@ -426,26 +430,35 @@ internal class PacketEventsBuilderPreviewTransport(
     @Suppress("DEPRECATION")
     override fun nextEntityId(): Int = Bukkit.getUnsafe().nextEntityId()
 
-    override fun connection(player: Player): BuilderPreviewConnection? {
+    override fun connection(player: Player): BuilderPreviewConnection? = capture(player, attachments)
+
+    override fun targetConnection(player: Player): BuilderPreviewConnection? = capture(player, targetAttachments)
+
+    private fun capture(
+        player: Player,
+        owners: MutableMap<Player, BuilderPacketAttachment>,
+    ): BuilderPreviewConnection? {
         if (closed) return null
         val channel = PacketEvents.getAPI().playerManager.getChannel(player) ?: return null
         if (!gateway.isOpen(channel)) return null
 
-        val current = attachments[player]
+        val current = owners[player]
         if (current != null && current.accepts(channel)) return current
         current?.let(::retire)
-        return BuilderPacketAttachment(channel, gateway, logger).also { attachments[player] = it }
+        return BuilderPacketAttachment(channel, gateway, logger).also { owners[player] = it }
     }
 
     override fun forget(player: Player) {
         attachments.remove(player)?.let(::retire)
+        targetAttachments.remove(player)?.let(::retire)
     }
 
     override fun closeAsync(): CompletableFuture<Void> {
         if (closed) return terminal.copy()
         closed = true
-        val remaining = attachments.values.toList()
+        val remaining = attachments.values.toList() + targetAttachments.values.toList()
         attachments.clear()
+        targetAttachments.clear()
         remaining.forEach(::retire)
         closeSubmitted = true
         completeCloseIfDrained()

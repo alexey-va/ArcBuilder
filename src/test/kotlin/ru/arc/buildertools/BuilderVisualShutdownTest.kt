@@ -26,6 +26,7 @@ class BuilderVisualShutdownTest : FunSpec({
                 override fun blockStateId(blockData: BlockData) = 1
                 override fun nextEntityId() = 1
                 override fun connection(player: Player): BuilderPreviewConnection? = null
+                override fun targetConnection(player: Player): BuilderPreviewConnection? = null
                 override fun closeAsync(): CompletableFuture<Void> { packetCloses++; return physicalPackets.copy() }
             }
             LifecycleTaskScope(TestTaskScheduler()).use { tasks ->
@@ -64,6 +65,7 @@ class BuilderVisualShutdownTest : FunSpec({
                 override fun blockStateId(blockData: BlockData) = 1
                 override fun nextEntityId() = 1
                 override fun connection(player: Player): BuilderPreviewConnection? = null
+                override fun targetConnection(player: Player): BuilderPreviewConnection? = null
                 override fun closeAsync(): CompletableFuture<Void> =
                     CompletableFuture.failedFuture(IllegalStateException("channel closed before cleanup"))
             }
