@@ -146,7 +146,7 @@ tasks {
 }
 
 // E2E uses the same separate service provider and API owner as production.
-val e2eArcVersion = "1.4.409"
+val e2eArcVersion = "1.4.429"
 val e2eArcCoreVersion = "0.1.16"
 val e2eArcCoreSha256 = "310d53d5c1ae83a47a957fd944cee390d7eb197932cefd4960dd0eb095a6803b"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
@@ -193,6 +193,10 @@ val prepareE2eRuntimeArtifacts = tasks.register("prepareE2eRuntimeArtifacts") {
         }
         require(arcEntries.none { it.startsWith("ru/arc/paper/schematics/") }) {
             "The schematic implementation belongs to ArcCore, not ARC"
+        }
+        require("ru/ruscrafting/onboarding/api/OnboardingBuildProgressService.class" in arcEntries &&
+            "ru/ruscrafting/onboarding/api/OnboardingBuildProgressService\$Stage.class" in arcEntries) {
+            "ARC must provide the onboarding progress API and stage enum consumed by ArcBuilder"
         }
         require("ru/arc/paper/api/ArcSchematicService.class" in coreEntries &&
             "ru/arc/paper/schematics/PaperSchematicServiceProvider.class" in coreEntries) {

@@ -47,7 +47,8 @@ async function selectReplacement(player, server, signal, materials = 2) {
 
   const first = player.bot.blockAt(player.bot.entity.position.clone().set(0, 64, 0));
   const second = player.bot.blockAt(player.bot.entity.position.clone().set(1, 64, 0));
-  await player.bot.lookAt(first.position.offset(0.5, 0.5, 0.5), true);
+  // Non-forced lookAt waits for the look packet before the raw start-dig packet.
+  await player.bot.lookAt(first.position.offset(0.5, 0.5, 0.5), false);
   // Send the real left-click/start-dig packet; the selector cancels mining.
   player.bot._client.write('block_dig', { status: 0, location: first.position, face: 1, sequence: 0 });
   await expect(player).toHaveReceivedMessage('Position 1 selected.');
