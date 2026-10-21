@@ -11,6 +11,7 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
+import org.bukkit.Location
 import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.command.Command
@@ -275,6 +276,7 @@ private class CommandFixture(
     val allowed: World,
     val blocked: World,
     private val messages: CommandMessageRecorder,
+    private val targetCells: MutableMap<java.util.UUID, BuilderBlockPos>,
 ) : AutoCloseable {
     private val plain = PlainTextComponentSerializer.plainText()
 
@@ -326,9 +328,13 @@ private class CommandFixture(
 
     @Suppress("DEPRECATION")
     fun selectSmallArea(player: Player) {
+        val firstTarget = BuilderBlockPos(allowed.uid, 0, 64, 0)
+        val secondTarget = BuilderBlockPos(allowed.uid, 1, 64, 0)
+        player.teleport(Location(allowed, .5, 64.0, 3.5))
         player.inventory.setItemInMainHand(org.bukkit.inventory.ItemStack(org.bukkit.Material.ECHO_SHARD))
         execute(player, "wand") shouldBe true
         val wand = player.inventory.itemInMainHand
+        targetCells[player.uniqueId] = firstTarget
         val first = PlayerInteractEvent(
             player,
             Action.LEFT_CLICK_BLOCK,
@@ -339,6 +345,7 @@ private class CommandFixture(
         )
         paper.callEvent(first)
         first.isCancelled shouldBe true
+        targetCells[player.uniqueId] = secondTarget
         val second = PlayerInteractEvent(
             player,
             Action.RIGHT_CLICK_BLOCK,
@@ -349,6 +356,7 @@ private class CommandFixture(
         )
         paper.callEvent(second)
         second.isCancelled shouldBe true
+        runtime.selectionPanelView(player)?.selection shouldBe BuilderSelection(firstTarget, secondTarget)
     }
 
     override fun close() {
@@ -424,6 +432,7 @@ private fun withCommandFixture(
                 }
                 BuilderToolsModule.shutdown()
                 val messages = CommandMessageRecorder()
+                val targetCells = mutableMapOf<java.util.UUID, BuilderBlockPos>()
                 val runtime = BuilderToolsRuntime(
                     plugin = plugin,
                     config = BuilderToolsConfig(config).validated(),
@@ -435,6 +444,7 @@ private fun withCommandFixture(
                     systemBuildBookResolver = { null },
                     systemBuildBookIds = systemBuildBookIds,
                     sendPlayerMessage = messages::record,
+                    selectionTargetResolver = { player, _ -> targetCells[player.uniqueId] },
                 )
                 val command = checkNotNull(plugin.getCommand("builder"))
                 command.setExecutor(runtime)
@@ -450,7 +460,7 @@ private fun withCommandFixture(
                     Thread.yield()
                 }
                 runtime.runtimeHealthContribution().state shouldBe RuntimeHealthState.UP
-                CommandFixture(paper, plugin, runtime, command, allowed, blocked, messages).use(block)
+                CommandFixture(paper, plugin, runtime, command, allowed, blocked, messages, targetCells).use(block)
             } finally {
                 ConfigManager.clear()
             }
