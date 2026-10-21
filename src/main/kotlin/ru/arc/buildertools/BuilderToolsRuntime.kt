@@ -586,6 +586,7 @@ internal class BuilderToolsRuntime(
     private var materialPicker: BuilderMaterialPicker? = null
     private var crownSelectionDialog: BuilderCrownSelectionDialog? = null
     private var entityEditor: BuilderDisplayEditor? = null
+    private var placementAssist: BuilderPlacementAssist? = null
     private val selectionPanelPages = mutableMapOf<UUID, Int>()
     private val materialScans = mutableMapOf<UUID, Any>()
     private val panelPlanSummaries = mutableMapOf<UUID, Pair<UUID, Component>>()
@@ -963,10 +964,26 @@ internal class BuilderToolsRuntime(
                     }.isSuccess
                 },
             )
+            placementAssist = BuilderPlacementAssist(
+                plugin = plugin,
+                renderer = this.displayRenderer,
+                messages = messages,
+                taskScope = taskScope,
+                isContextAllowed = { player ->
+                    !closed && !player.isDead && entityEditor?.isEditing(player) != true &&
+                        !operationLocks.isPlayerLocked(player.uniqueId) &&
+                        runCatching { ensureOperationalContext(player) }.isSuccess
+                },
+                canBuild = { player, block, material ->
+                    runCatching { ensureMutable(player, block, material) }.isSuccess
+                },
+                sendMessage = sendPlayerMessage,
+            )
             checkNotNull(taskScope.runTimer(1L, 1L) {
                 selectionActionPanel?.tick()
                 tickSelectionTargets()
                 entityEditor?.tick()
+                placementAssist?.tick()
             }) {
                 "Builder selection action panel task was not scheduled"
             }
@@ -982,6 +999,7 @@ internal class BuilderToolsRuntime(
             attempt { selectionActionPanel?.close() }
             attempt { crownSelectionDialog?.close() }
             attempt { entityEditor?.close() }
+            attempt { placementAssist?.close() }
             attempt { materialPicker?.close() }
             attempt { initializedPlayerRecoveries?.close() }
             attempt { initializedBooks?.close() }
@@ -1467,15 +1485,21 @@ internal class BuilderToolsRuntime(
             Bukkit.getOnlinePlayers().map(Player::getName)
         }
         if (args.size > 1 && args[0].equals("systembook", ignoreCase = true)) return systemSuggestions
-        if (sender !is Player || !hasUsePermission(sender)) return systemSuggestions
+        if (sender !is Player) return systemSuggestions
         if (args.size == 1) {
             return filterPrefix(
-                BuilderRootCommand.entries.filter { rootCommandAvailable(sender, it) }.map(BuilderRootCommand::literal) + systemSuggestions,
+                BuilderRootCommand.entries.filter {
+                    (it == BuilderRootCommand.ASSIST || hasUsePermission(sender)) && rootCommandAvailable(sender, it)
+                }.map(BuilderRootCommand::literal) + systemSuggestions,
                 args[0],
             )
         }
         val root = BuilderRootCommand.parse(args.firstOrNull()) ?: return emptyList()
+        if (root != BuilderRootCommand.ASSIST && !hasUsePermission(sender)) return emptyList()
         if (!rootCommandAvailable(sender, root)) return emptyList()
+        if (root == BuilderRootCommand.ASSIST) {
+            return if (args.size == 2) filterPrefix(listOf("on", "off"), args[1]) else emptyList()
+        }
         if (root == BuilderRootCommand.DISPLAY) return entityEditor?.tabComplete(args.drop(1)).orEmpty()
         if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)
         if (root == BuilderRootCommand.REPLACE) {
@@ -1537,6 +1561,10 @@ internal class BuilderToolsRuntime(
 
     private fun handleBuilder(player: Player, args: Array<out String>) {
         val root = BuilderRootCommand.parse(args.firstOrNull()) ?: BuilderRootCommand.HELP
+        if (root == BuilderRootCommand.ASSIST) {
+            checkNotNull(placementAssist).command(player, args.drop(1))
+            return
+        }
         if (root != BuilderRootCommand.DISPLAY && entityEditor?.hasSession(player) == true) {
             entityEditor?.command(player, listOf("exit"))
         }
@@ -1609,6 +1637,7 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.UNDO -> prepareUndo(player)
             BuilderRootCommand.STATUS -> showStatus(player)
             BuilderRootCommand.PROJECTS -> error("Projects command is handled before operational context checks")
+            BuilderRootCommand.ASSIST -> error("Assistant preferences are handled before operational context checks")
         }
     }
 
@@ -4239,6 +4268,7 @@ internal class BuilderToolsRuntime(
         attempt { selectionActionPanel?.close() }
         attempt { crownSelectionDialog?.close() }
         attempt { entityEditor?.close() }
+        attempt { placementAssist?.close() }
         attempt { materialPicker?.close() }
         materialScans.clear()
         panelPlanSummaries.clear()

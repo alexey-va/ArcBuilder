@@ -40,6 +40,7 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 | `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
 | `crown` | `BuilderCrownController` | `CROWN` | `arcbuild.crown` |
 | `display` | `display/BuilderDisplayEditor` | separate decorative entity edits | explicit `arcbuild.display` |
+| `assist [on\|off]` | `BuilderPlacementAssist` | native single-block placement | personal preference; no builder permission |
 | `book` | `BuilderBookLifecycle` and its coordinators | `BUILD_BOOK` when building | book permissions |
 | `confirm`, `cancel`, `undo`, `status` | `BuilderToolsRuntime` | `UNDO` for undo | existing operation context |
 
@@ -62,6 +63,33 @@ decoration is assessed in `docs/display-editor-economy-20261021.md`.
 
 `BuilderPlanningHost` is the shared runtime preflight and plan boundary for
 the fill, replace, and fence-disconnect controllers.
+
+## Personal placement assistant
+
+`BuilderPlacementAssist` owns the player opt-in preference, transient straight
+line and next-cell targeting. `/builder assist [on|off]` changes only that
+preference before the general builder permission and operation gates, so players
+can change it without builder-tool permissions. Existing global recovery and
+durable player-lease input isolation remains authoritative. Actual targeting and use still require the ordinary
+game mode, world, recovery, operation-lock, range, loaded-chunk, border and build
+protection checks. Active display-editor input takes priority.
+
+The first implementation assists ordinary full-cube block items without custom
+metadata; partial shapes, containers and custom items retain vanilla placement.
+Two adjacent successful normal block placements establish the line. Only a new
+main-hand use action aimed at the next cell may continue it; the tick callback
+refreshes the personal display, never places blocks. A narrow adapter bound to
+Paper 1.21.11 invokes the normal native use-item-on handler on the owning thread.
+The native path remains responsible for placement events, cancellation,
+collision, item consumption and physics; the helper does not implement a second
+block or inventory transaction and does not create bulk-operation undo records.
+Input admission retains the native prediction sequence and fences connection,
+item, slot, world and lifecycle state before use.
+
+Transient targeting and displays clear on disable, invalid context, sneak,
+slot changes, teleport, world change, death, disconnect and runtime close.
+The persistent preference is separate from the line, so a reconnect or reload
+requires a fresh normal line before assistance can place another block.
 
 ## Selection and preview
 

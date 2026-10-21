@@ -11,6 +11,18 @@ The plugin uses arc-core 2.7.18 and requires ARC for its shared visual packet bu
 
 ## Player flow
 
+- `/builder assist` toggles a personal placement helper; `/builder assist on`
+  and `/builder assist off` set it explicitly. Any player can change this
+  preference without builder-tool permissions, and it survives reconnects.
+  Hold an ordinary full-cube block without custom item data. Place two
+  neighbouring blocks in a straight line normally, then aim at the
+  outlined next cell and use the held block to continue the row, including
+  from an air click beside the edge. Sneaking or changing the held slot resets
+  the line for ordinary placement. The private display outline never changes
+  blocks on its own. Each continuation uses the normal server placement path,
+  preserving inventory costs, collision, protection plugins and block physics;
+  the vanilla client's repeat delay still applies. Slabs, stairs, containers and
+  custom items continue to use ordinary vanilla placement.
 - `/builder wand` gives selection guidance. Left click selects point 1; right
   click selects point 2. Distinct straight BlockDisplay outlines remain visible
   until the selection is cleared or expires.

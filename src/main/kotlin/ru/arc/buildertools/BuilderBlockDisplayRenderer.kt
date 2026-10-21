@@ -41,6 +41,8 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
     fun selection(player: Player, points: BuilderSelectionPoints, selection: BuilderSelection?)
     fun selectionTarget(player: Player, position: BuilderBlockPos?) = Unit
     fun clearSelectionTarget(playerId: UUID) = Unit
+    fun placementAssist(player: Player, position: BuilderBlockPos, blocked: Boolean) = Unit
+    fun clearPlacementAssist(playerId: UUID) = Unit
     fun suppressSelectionGlow(playerId: UUID, suppressed: Boolean) = Unit
     fun clearSelection(playerId: UUID)
     fun plan(player: Player, plan: BuilderPlan)
@@ -105,7 +107,7 @@ internal class BuilderBlockDisplayRenderer(
     private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
     planningTasks: BuilderPlanningTasks? = null,
 ) : BuilderDisplayRenderer, Listener {
-    private enum class Layer { SELECTION, TARGET, PLAN, BOOK }
+    private enum class Layer { SELECTION, TARGET, ASSIST, PLAN, BOOK }
 
     private data class DisplaySpec(
         val x: Double,
@@ -386,6 +388,20 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     override fun clearSelectionTarget(playerId: UUID) = remove(playerId, Layer.TARGET)
+
+    override fun placementAssist(player: Player, position: BuilderBlockPos, blocked: Boolean) {
+        if (closed) return
+        if (position.worldId != player.world.uid) {
+            clearPlacementAssist(player.uniqueId)
+            return
+        }
+        val appearance = BuilderPlacementAssistAppearance.forState(blocked)
+        replace(player, Layer.ASSIST, edgeSpecs(
+            BuilderPlacementAssistAppearance.edges(position), appearance.material, Color.fromRGB(appearance.glowRgb),
+        ))
+    }
+
+    override fun clearPlacementAssist(playerId: UUID) = remove(playerId, Layer.ASSIST)
 
     override fun suppressSelectionGlow(playerId: UUID, suppressed: Boolean) {
         if (closed) return
@@ -711,7 +727,7 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun syncScene(key: Pair<UUID, Layer>) {
         if (closed) return
-        if (key.second == Layer.TARGET) {
+        if (key.second == Layer.TARGET || key.second == Layer.ASSIST) {
             val player = Bukkit.getPlayer(key.first)
             if (player == null) targetAudiences.remove(key.first)?.close() else syncTarget(player)
             return
@@ -723,14 +739,16 @@ internal class BuilderBlockDisplayRenderer(
 
     private fun syncTarget(viewer: Player) {
         val id = viewer.uniqueId
-        val target = scenes[id to Layer.TARGET]?.takeIf { viewer.isOnline && viewer.world.uid == it.worldId }
-        val connection = if (target != null) packets.targetConnection(viewer) else null
-        if (target == null || connection == null) {
+        val displays = listOf(Layer.TARGET, Layer.ASSIST).flatMap { layer ->
+            scenes[id to layer]?.takeIf { viewer.isOnline && viewer.world.uid == it.worldId }?.entities?.values.orEmpty()
+        }
+        val connection = if (displays.isNotEmpty()) packets.targetConnection(viewer) else null
+        if (connection == null) {
             targetAudiences.remove(id)?.close()
             return
         }
         targetAudiences.getOrPut(id, ::BuilderPacketScene)
-            .update(target.entities.values, mapOf(id to BuilderPacketViewer(connection, sentChunks(viewer))))
+            .update(displays, mapOf(id to BuilderPacketViewer(connection, sentChunks(viewer))))
     }
 
     private fun syncViewer(viewer: Player) {
@@ -741,7 +759,7 @@ internal class BuilderBlockDisplayRenderer(
         }
         val displays = buildList {
             scenes.forEach { (key, scene) ->
-                if (key.second != Layer.TARGET && viewer.world.uid == scene.worldId && (viewerId == key.first ||
+                if (key.second != Layer.TARGET && key.second != Layer.ASSIST && viewer.world.uid == scene.worldId && (viewerId == key.first ||
                     key.second == Layer.BOOK && viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION))) {
                     if (key.second == Layer.SELECTION && key.first in suppressedSelectionGlow) {
                         addAll(scene.entities.values.map { it.copy(glowing = false) })

@@ -124,6 +124,16 @@ glyphs:
 
 surfaces:
   hud:
+    - id: placement-assist-ready
+      actionbar: builder:assist.ready
+    - id: placement-assist-occupied
+      actionbar: builder:assist.blocked-occupied
+    - id: placement-assist-protected
+      actionbar: builder:assist.blocked-protected
+    - id: placement-assist-collision
+      actionbar: builder:assist.blocked-collision
+    - id: placement-assist-refused
+      actionbar: builder:assist.refused
     - id: book-draft-hold-hint
       title: builder:book.hold-hint.title
       subtitle: builder:book.hold-hint.subtitle

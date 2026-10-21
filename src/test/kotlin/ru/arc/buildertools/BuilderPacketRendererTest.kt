@@ -164,6 +164,28 @@ class BuilderPacketRendererTest : FunSpec({
                         gateway.visible.keys shouldBe unchangedIds
                         gateway.displayCalls shouldBe calls
 
+                        renderer.placementAssist(player, first.copy(x = 7), false)
+                        gateway.drain()
+                        gateway.visible.size shouldBe 38
+                        gateway.visible.keys.containsAll(unchangedIds) shouldBe true
+                        val assistIds = gateway.visible.keys - unchangedIds
+                        assistIds.size shouldBe 12
+                        assistIds.all { gateway.visible.getValue(it).glowRgb == BuilderPlacementAssistAppearance.forState(false).glowRgb } shouldBe true
+                        val withAssistCalls = gateway.displayCalls
+                        renderer.placementAssist(player, first.copy(x = 7), false)
+                        gateway.drain()
+                        gateway.displayCalls shouldBe withAssistCalls
+                        renderer.placementAssist(player, first.copy(x = 7), true)
+                        gateway.drain()
+                        gateway.visible.keys.containsAll(unchangedIds) shouldBe true
+                        val blockedAssistIds = gateway.visible.keys - unchangedIds
+                        blockedAssistIds.size shouldBe 12
+                        blockedAssistIds.all { gateway.visible.getValue(it).glowRgb == BuilderPlacementAssistAppearance.forState(true).glowRgb } shouldBe true
+                        renderer.clearPlacementAssist(player.uniqueId)
+                        gateway.drain()
+                        gateway.visible.keys shouldBe unchangedIds
+                        staticSubmissions shouldBe 1
+
                         renderer.selectionTarget(player, first.copy(x = 5))
                         gateway.drain()
                         gateway.visible.size shouldBe 26
@@ -180,7 +202,7 @@ class BuilderPacketRendererTest : FunSpec({
                         gateway.drain()
                         gateway.visible.keys shouldBe savedIds
                         staticSubmissions shouldBe 2 // Selection glow change only.
-                        targetBatchSizes.all { it == 0 || it == 12 } shouldBe true
+                        targetBatchSizes.all { it == 0 || it == 12 || it == 24 } shouldBe true
                         capturedViewers shouldBe setOf(player.uniqueId)
                         world.entities.filterIsInstance<BlockDisplay>().size shouldBe 0
                         renderer.selectionTarget(player, first)

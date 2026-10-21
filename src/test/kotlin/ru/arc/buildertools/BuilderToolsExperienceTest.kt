@@ -25,6 +25,7 @@ class BuilderToolsExperienceTest : FunSpec({
             "deconstruct",
             "crown",
             "display",
+            "assist",
             "confirm",
             "cancel",
             "undo",
@@ -38,8 +39,9 @@ class BuilderToolsExperienceTest : FunSpec({
         BuilderRootCommand.parse(null) shouldBe null
     }
 
-    test("status projects and canonical cancel remain available during an operation") {
+    test("status projects cancel and personal assistant controls remain available during an operation") {
         BuilderRootCommand.entries.filter(BuilderRootCommand::safeDuringOperation) shouldBe listOf(
+            BuilderRootCommand.ASSIST,
             BuilderRootCommand.CANCEL,
             BuilderRootCommand.STATUS,
             BuilderRootCommand.PROJECTS,

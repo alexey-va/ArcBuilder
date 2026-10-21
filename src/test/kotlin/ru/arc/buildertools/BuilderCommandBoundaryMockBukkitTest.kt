@@ -166,6 +166,35 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
         }
     }
 
+    test("ordinary player can toggle the personal placement assistant without builder permissions") {
+        withCommandFixture { fixture ->
+            val player = fixture.player("PlacementHelper")
+            fixture.tab(player, "ass") shouldBe listOf("assist")
+            fixture.tab(player, "assist", "") shouldBe listOf("on", "off")
+            fixture.tab(player, "ASSIST", "OF") shouldBe listOf("off")
+            fixture.tab(player, "assist", "on", "") shouldBe emptyList()
+
+            fixture.assertRejected(player, "включ") { fixture.execute(player, "assist", "on") }
+            fixture.assertRejected(player, "выключ") { fixture.execute(player, "assist") }
+            fixture.assertRejected(player, "выключ") { fixture.execute(player, "assist", "off") }
+        }
+    }
+
+    test("invalid assistant arguments preserve preference and off works outside building context") {
+        withCommandFixture { fixture ->
+            val player = fixture.player("HelperPreference")
+            fixture.assertRejected(player, "включ") { fixture.execute(player, "assist", "on") }
+            fixture.assertRejected(player, "/builder assist") { fixture.execute(player, "assist", "sideways") }
+            fixture.assertRejected(player, "/builder assist") { fixture.execute(player, "assist", "off", "extra") }
+            fixture.assertRejected(player, "выключ") { fixture.execute(player, "assist") }
+
+            fixture.assertRejected(player, "включ") { fixture.execute(player, "assist", "on") }
+            player.gameMode = GameMode.SPECTATOR
+            player.teleport(fixture.blocked.spawnLocation)
+            fixture.assertRejected(player, "выключ") { fixture.execute(player, "assist", "off") }
+        }
+    }
+
     test("umbrella permission reaches feature validation while another feature permission does not") {
         withCommandFixture { fixture ->
             val umbrella = fixture.player("Umbrella")
@@ -260,7 +289,7 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
     test("unauthorized tab completion does not leak feature commands") {
         withCommandFixture { fixture ->
             val noAccess = fixture.player("NoSuggestions")
-            fixture.tab(noAccess, "") shouldBe emptyList()
+            fixture.tab(noAccess, "") shouldBe listOf("assist")
 
             val fillOnly = fixture.player("FillSuggestions")
             fixture.grant(fillOnly, "arcbuild.fill")
