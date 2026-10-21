@@ -9,7 +9,6 @@ import org.bukkit.FluidCollisionMode
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
-import org.bukkit.Particle
 import org.bukkit.World
 import org.bukkit.block.Block
 import org.bukkit.block.data.BlockData
@@ -95,6 +94,10 @@ internal class BuilderDisplayEditor(
         var baseline: DisplayEditorPose, var distance: Double, var grabOffset: Vector3d,
         var previousYaw: Float, var previousPitch: Float,
         var yaw: Double = 0.0, var pitch: Double = 0.0, var wheel: Double = 0.0,
+        val axisHandle: Boolean = false,
+        var axisGesture: DisplayEditorAxisGesture? = null,
+        var axisDelta: Double = 0.0,
+        var axisPaused: Boolean = false,
     )
     private class Session {
         var enabled = false
@@ -104,6 +107,7 @@ internal class BuilderDisplayEditor(
         var drag: Drag? = null
         var mode = DisplayEditorMode.MOVE
         var axis = DisplayEditorAxis.FREE
+        var hoveredAxis: DisplayEditorAxis? = null
         val undo = ArrayDeque<Undo>()
         var revision = 0L
         var lastAction = 0L
@@ -185,11 +189,11 @@ internal class BuilderDisplayEditor(
                 updateDrag(player, session, drag)
             }
             val snapshot = session.drag?.draft ?: selectedState
-            val frame = snapshot?.let { DisplayEditorAxesGeometry.frame(it.pose, it.content.mesh(), session.axis) }
+            session.hoveredAxis = if (session.drag == null && selectedState != null) axisHit(player, session, selectedState)?.axis else null
+            val frame = snapshot?.let { DisplayEditorAxesGeometry.frame(it.pose, it.content.mesh(), session.axis, session.hoveredAxis) }
                 ?: cursorAxes(player, session.axis)
             if (frame == null) axes.clear(id) else axes.update(player, frame)
             if (ticks % 4L == 0L) {
-                snapshot?.let { outline(player, it) }
                 hud(player, session)
             }
         }
@@ -240,7 +244,7 @@ internal class BuilderDisplayEditor(
         event.isCancelled = true
         val delta = ((event.newSlot - event.previousSlot + 13) % 9) - 4
         val direction = if (delta > 0) 1 else -1
-        if (session.mode == DisplayEditorMode.MOVE) drag.distance = (drag.distance + direction * .25).coerceIn(.5, 10.0)
+        if (session.mode == DisplayEditorMode.MOVE && (!drag.axisHandle || session.axis == DisplayEditorAxis.FREE)) drag.distance = (drag.distance + direction * .25).coerceIn(.5, 10.0)
         else drag.wheel += direction
         session.lastAction = ticks
     }
@@ -274,6 +278,17 @@ internal class BuilderDisplayEditor(
         if (!allowed(player) || !holding(player, session)) { forget(player); return }
         session.lastAction = ticks
         if (session.drag != null) { commit(player, session); return }
+        val selected = session.selected?.let(::entity)?.takeIf { mayEdit(player, it) && locks.heldBy(it.uniqueId, player.uniqueId) }
+        val selectedState = selected?.let(::capture)
+        if (selectedState != null && centreAccessible(player, selectedState)) {
+            val handle = axisHit(player, session, selectedState)
+            if (handle != null) {
+                if (!accessible(player, selectedState)) { tell(player, "no-access"); return }
+                session.axis = handle.axis
+                startDrag(player, session, selectedState, selected.uniqueId, selectedState, handle.distance, axisHandle = true)
+                return
+            }
+        }
         val picked = pick(player) ?: run { tell(player, "no-target"); return }
         if (!mayEdit(player, picked.first)) { tell(player, "not-owner"); return }
         if (!locks.available(picked.first.uniqueId, player.uniqueId)) { tell(player, "locked"); return }
@@ -292,7 +307,7 @@ internal class BuilderDisplayEditor(
         cancel(player, session)
     }
 
-    private fun startDrag(player: Player, session: Session, snapshot: Snapshot, sourceId: UUID?, before: Snapshot?, hitDistance: Double? = null) {
+    private fun startDrag(player: Player, session: Session, snapshot: Snapshot, sourceId: UUID?, before: Snapshot?, hitDistance: Double? = null, axisHandle: Boolean = false) {
         if (!enable(player, session)) return
         cancelDraft(player, session)
         if (!centreAccessible(player, snapshot) || before?.let { !centreAccessible(player, it) } == true) { tell(player, "no-access"); return }
@@ -305,7 +320,10 @@ internal class BuilderDisplayEditor(
             sourceId, before, snapshot, preview, snapshot.pose, distance,
             snapshot.pose.position().sub(eye.toVector().toVector3d().fma(distance, eye.direction.toVector3d())),
             eye.yaw, eye.pitch,
+            axisHandle = axisHandle,
+            axisGesture = if (axisHandle) DisplayEditorGeometry.axisGesture(snapshot.pose, session.axis, eye.toVector().toVector3d(), eye.direction.toVector3d()) else null,
         )
+        session.hoveredAxis = null
         session.lastAction = ticks
         dialogs.close(player)
         hud(player, session)
@@ -317,13 +335,36 @@ internal class BuilderDisplayEditor(
         drag.pitch += eye.pitch - drag.previousPitch
         drag.previousYaw = eye.yaw
         drag.previousPitch = eye.pitch
+        val directAxis = drag.axisHandle && session.axis != DisplayEditorAxis.FREE && session.mode != DisplayEditorMode.ROTATE
+        if (directAxis) {
+            if (drag.axisGesture == null) {
+                DisplayEditorGeometry.axisGesture(drag.draft.pose, session.axis, eye.toVector().toVector3d(), eye.direction.toVector3d())?.let {
+                    // Recover from a head-on view without applying an accumulated cursor jump.
+                    drag.baseline = drag.draft.pose
+                    drag.wheel = 0.0
+                    drag.axisDelta = 0.0
+                    drag.axisGesture = it
+                }
+            }
+            var displacement = drag.axisGesture?.let { DisplayEditorGeometry.axisDisplacement(it, eye.toVector().toVector3d(), eye.direction.toVector3d()) }
+            if (drag.axisPaused && displacement != null) {
+                drag.baseline = drag.draft.pose
+                drag.wheel = 0.0
+                drag.axisDelta = 0.0
+                drag.axisGesture = DisplayEditorGeometry.axisGesture(drag.baseline, session.axis, eye.toVector().toVector3d(), eye.direction.toVector3d())
+                displacement = 0.0
+            }
+            drag.axisPaused = displacement == null
+            if (displacement != null) drag.axisDelta = displacement
+        } else drag.axisPaused = false
         val pose = when (session.mode) {
             DisplayEditorMode.MOVE -> {
-                var next = drag.draft.pose.at(DisplayEditorGeometry.constrain(
+                var next = if (directAxis) drag.baseline.at(drag.baseline.position().fma(drag.axisDelta + drag.wheel * .25, DisplayEditorGeometry.axisVector(session.axis)))
+                else drag.draft.pose.at(DisplayEditorGeometry.constrain(
                     eye.toVector().toVector3d().fma(drag.distance, eye.direction.toVector3d()).add(drag.grabOffset),
                     drag.baseline.position(), session.axis,
                 ))
-                if (player.isSneaking) trace(player)?.let { hit -> hit.hitBlockFace?.let { face ->
+                if (player.isSneaking && !directAxis) trace(player)?.let { hit -> hit.hitBlockFace?.let { face ->
                     next = DisplayEditorGeometry.onSurface(next, drag.draft.content.mesh(), hit.hitPosition.toVector3d(), face.direction.toVector3d())
                 } }
                 next
@@ -340,15 +381,10 @@ internal class BuilderDisplayEditor(
                 drag.baseline.withMatrix(rotation.mul(drag.baseline.matrix()))
             }
             DisplayEditorMode.SCALE -> {
-                var factor = exp((-drag.pitch * .025 + drag.wheel * .05).coerceIn(-4.0, 4.0)).toFloat()
+                var factor = if (directAxis) ((1 + drag.axisDelta / (drag.axisGesture?.scaleSpan ?: 1.0)).coerceAtLeast(.01) * exp((drag.wheel * .05).coerceIn(-4.0, 4.0))).toFloat()
+                    else exp((-drag.pitch * .025 + drag.wheel * .05).coerceIn(-4.0, 4.0)).toFloat()
                 if (player.isSneaking) factor = (round(factor * 10) / 10).coerceAtLeast(.1f)
-                val scaling = when (session.axis) {
-                    DisplayEditorAxis.FREE -> Vector3f(factor)
-                    DisplayEditorAxis.X -> Vector3f(factor, 1f, 1f)
-                    DisplayEditorAxis.Y -> Vector3f(1f, factor, 1f)
-                    DisplayEditorAxis.Z -> Vector3f(1f, 1f, factor)
-                }
-                drag.baseline.withMatrix(Matrix4f().scaling(scaling).mul(drag.baseline.matrix()))
+                DisplayEditorGeometry.worldScale(drag.baseline, session.axis, factor)
             }
         }
         val next = drag.draft.copy(pose = pose)
@@ -586,6 +622,9 @@ internal class BuilderDisplayEditor(
             drag.yaw = 0.0; drag.pitch = 0.0; drag.wheel = 0.0
             drag.previousYaw = eye.yaw; drag.previousPitch = eye.pitch
             drag.grabOffset = drag.draft.pose.position().sub(eye.toVector().toVector3d().fma(drag.distance, eye.direction.toVector3d()))
+            drag.axisDelta = 0.0
+            drag.axisPaused = false
+            drag.axisGesture = if (drag.axisHandle) DisplayEditorGeometry.axisGesture(drag.baseline, session.axis, eye.toVector().toVector3d(), eye.direction.toVector3d()) else null
         }
     }
 
@@ -622,6 +661,20 @@ internal class BuilderDisplayEditor(
     private fun selected(player: Player, session: Session): Display? = session.selected?.let(::entity)
         ?.takeIf { mayEdit(player, it) && locks.heldBy(it.uniqueId, player.uniqueId) }
         .also { if (it == null) tell(player, "select-first") }
+
+    private fun axisHit(player: Player, session: Session, state: Snapshot): DisplayEditorAxisHit? {
+        val selectedId = session.selected ?: return null
+        if (session.drag != null || !locks.heldBy(selectedId, player.uniqueId) || !rayReady(player)) return null
+        val eye = player.eyeLocation
+        val origin = eye.toVector().toVector3d()
+        val direction = eye.direction.toVector3d()
+        val obstruction = minOf(
+            trace(player)?.hitPosition?.distance(eye.toVector()) ?: DisplayEditorGeometry.RANGE,
+            DisplayEditorGeometry.rayDistance(origin, direction, state.pose, state.content.mesh()) ?: DisplayEditorGeometry.RANGE,
+        )
+        // Derive picking from the stable frame, never the enlarged hover frame.
+        return DisplayEditorAxesGeometry.pick(DisplayEditorAxesGeometry.frame(state.pose, state.content.mesh(), session.axis), origin, direction, obstruction)
+    }
 
     private fun pick(player: Player): Pair<Display, Double>? {
         if (!rayReady(player)) return null
@@ -775,21 +828,17 @@ internal class BuilderDisplayEditor(
         return DisplayEditorAxesGeometry.frame(DisplayEditorPose(point.x, point.y, point.z), null, axis)
     }
 
-    private fun outline(player: Player, state: Snapshot) {
-        val corners = DisplayEditorGeometry.corners(state.pose, state.content.mesh())
-        val color = Color.fromRGB(134, 220, 241)
-        for ((from, to) in DisplayEditorGeometry.edges) for (step in 0..2) {
-            val point = Vector3d(corners[from]).lerp(corners[to], step / 2.0)
-            player.spawnParticle(Particle.DUST, point.x, point.y, point.z, 1, 0.0, 0.0, 0.0, 0.0, Particle.DustOptions(color, .55f))
-        }
-    }
-
     private fun hud(player: Player, session: Session) {
         val drag = session.drag
-        val key = if (drag == null) "hud-idle" else "hud-${session.mode.name.lowercase()}"
+        val key = when {
+            drag == null -> if (session.hoveredAxis != null) "hud-axis-hover" else "hud-idle"
+            drag.axisPaused -> "hud-axis-paused"
+            drag.axisHandle && session.axis != DisplayEditorAxis.FREE && session.mode != DisplayEditorMode.ROTATE -> "hud-${session.mode.name.lowercase()}-axis"
+            else -> "hud-${session.mode.name.lowercase()}"
+        }
         player.sendActionBar(tr(player, key, mapOf(
             "mode" to plain(tr(player, "mode-name-${session.mode.name.lowercase()}")),
-            "axis" to plain(tr(player, "axis-name-${session.axis.name.lowercase()}")),
+            "axis" to plain(tr(player, "axis-name-${(session.hoveredAxis ?: session.axis).name.lowercase()}")),
         )))
     }
 
@@ -810,6 +859,7 @@ internal class BuilderDisplayEditor(
         cancelDraft(player, session)
         locks.release(player.uniqueId)
         session.selected = null
+        session.hoveredAxis = null
     }
 
     private fun forget(player: Player) {

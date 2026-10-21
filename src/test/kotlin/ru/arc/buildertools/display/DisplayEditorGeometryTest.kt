@@ -9,6 +9,37 @@ import org.joml.Vector3f
 import java.util.UUID
 
 class DisplayEditorGeometryTest : FunSpec({
+    test("gizmo scale stretches only the selected world coordinate of a rotated non-uniform model") {
+        val pose = DisplayEditorPose(4.0, 65.0, 7.0).withMatrix(Matrix4f().rotateXYZ(.4f, -.7f, .25f).scale(2f, .7f, 1.5f))
+        val mesh = DisplayEditorMesh(1.0, 1.0, 1.0)
+        val before = DisplayEditorGeometry.corners(pose, mesh)
+        for (axis in listOf(DisplayEditorAxis.X, DisplayEditorAxis.Y, DisplayEditorAxis.Z)) {
+            for (factor in listOf(.7f, 1.4f)) {
+                val stretched = DisplayEditorGeometry.worldScale(pose, axis, factor)
+                stretched.position() shouldBe pose.position()
+                DisplayEditorGeometry.corners(stretched, mesh).zip(before).forEach { (after, original) ->
+                    for (coordinate in 0..2) {
+                        val expected = pose.position()[coordinate] + (original[coordinate] - pose.position()[coordinate]) * if (coordinate == axis.ordinal - 1) factor else 1f
+                        after[coordinate] shouldBe (expected plusOrMinus .000001)
+                    }
+                }
+            }
+        }
+    }
+
+    test("axis gesture follows outward and inward rays while near-parallel views and rays behind the plane pause") {
+        val pose = DisplayEditorPose(0.0, 0.0, 0.0)
+        val eye = Vector3d(0.0, 0.0, -3.0)
+        fun ray(x: Double) = Vector3d(x, 0.0, 3.0).normalize()
+        val gesture = DisplayEditorGeometry.axisGesture(pose, DisplayEditorAxis.X, eye, ray(1.35))!!
+        DisplayEditorGeometry.axisDisplacement(gesture, eye, ray(2.0))!! shouldBe (.65 plusOrMinus .000001)
+        DisplayEditorGeometry.axisDisplacement(gesture, eye, ray(.8))!! shouldBe (-.55 plusOrMinus .000001)
+        DisplayEditorGeometry.axisDisplacement(gesture, eye, Vector3d(1.0, 0.0, 0.0)) shouldBe null
+        DisplayEditorGeometry.axisDisplacement(gesture, eye, Vector3d(0.0, 0.0, -1.0)) shouldBe null
+        DisplayEditorGeometry.axisGesture(pose, DisplayEditorAxis.X, eye, Vector3d(1.0, 0.0, 0.0)) shouldBe null
+        DisplayEditorGeometry.axisGesture(pose, DisplayEditorAxis.FREE, eye, ray(1.35)) shouldBe null
+    }
+
     test("absolute local scale and both resets preserve a rotated non-uniform object's centre and the other property") {
         val pose = DisplayEditorPose(12.5, 66.25, -3.75)
             .withMatrix(Matrix4f().rotateXYZ(.4f, -.8f, .25f).scale(2f, .75f, 1.5f))

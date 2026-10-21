@@ -9,39 +9,78 @@ import org.bukkit.plugin.Plugin
 import org.bukkit.util.Transformation
 import org.joml.Quaternionf
 import org.joml.Vector3f
+import org.joml.Vector3d
 import ru.arc.paper.display.PacketBlockDisplay
 import ru.arc.paper.display.PaperPacketDisplays
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 internal data class DisplayEditorAxisPart(
     val axis: Int, val x: Float, val y: Float, val z: Float,
     val width: Float, val height: Float, val depth: Float,
+    val hovered: Boolean = false,
 )
 
-internal data class DisplayEditorAxesFrame(val x: Double, val y: Double, val z: Double, val parts: List<DisplayEditorAxisPart>)
+internal data class DisplayEditorAxesFrame(
+    val x: Double, val y: Double, val z: Double, val parts: List<DisplayEditorAxisPart>,
+    val handleStarts: List<Double>? = null,
+)
+
+internal data class DisplayEditorAxisHit(val axis: DisplayEditorAxis, val distance: Double)
 
 /** Canonical geometry shared by the packet handles, tests and the source-derived preview. */
 internal object DisplayEditorAxesGeometry {
     val materials = listOf(Material.RED_CONCRETE, Material.LIME_CONCRETE, Material.BLUE_CONCRETE)
     val colors = listOf(0xff6b61, 0x9bd48d, 0x6f9fff)
 
-    fun frame(pose: DisplayEditorPose, mesh: DisplayEditorMesh?, selected: DisplayEditorAxis): DisplayEditorAxesFrame {
+    fun frame(pose: DisplayEditorPose, mesh: DisplayEditorMesh?, selected: DisplayEditorAxis, hovered: DisplayEditorAxis? = null): DisplayEditorAxesFrame {
         val corners = mesh?.let { DisplayEditorGeometry.corners(pose, it) }
         val parts = (0..2).flatMap { axis ->
             val active = selected.ordinal == axis + 1
-            val thickness = if (active) .055f else .025f
-            val tip = if (active) .13f else .085f
+            val pointed = hovered?.ordinal == axis + 1
+            val thickness = if (pointed) .08f else if (active) .055f else .025f
+            val tip = if (pointed) .18f else if (active) .13f else .085f
             val reach = if (corners == null) .65f else ((corners.maxOf { it[axis] } - pose.position()[axis]) + .85).toFloat()
             val start = Vector3f(-thickness / 2).also { it.setComponent(axis, .05f) }
             val size = Vector3f(thickness).also { it.setComponent(axis, reach - .05f) }
             val end = Vector3f(-tip / 2).also { it.setComponent(axis, reach - tip / 2) }
             listOf(
-                DisplayEditorAxisPart(axis, start.x, start.y, start.z, size.x, size.y, size.z),
-                DisplayEditorAxisPart(axis, end.x, end.y, end.z, tip, tip, tip),
+                DisplayEditorAxisPart(axis, start.x, start.y, start.z, size.x, size.y, size.z, pointed),
+                DisplayEditorAxisPart(axis, end.x, end.y, end.z, tip, tip, tip, pointed),
             )
         }
-        return DisplayEditorAxesFrame(pose.x, pose.y, pose.z, parts)
+        return DisplayEditorAxesFrame(pose.x, pose.y, pose.z, parts,
+            corners?.let { points -> (0..2).map { axis -> points.maxOf { it[axis] } - pose.position()[axis] + .08 } })
+    }
+
+    /** Six canonical boxes, with 0.075-block aim tolerance. Hover inflation never feeds picking. */
+    fun pick(frame: DisplayEditorAxesFrame, origin: Vector3d, direction: Vector3d, maximum: Double): DisplayEditorAxisHit? {
+        val starts = frame.handleStarts ?: return null // The idle orientation triad is not a target.
+        if (!origin.isFinite || !direction.isFinite || abs(direction.lengthSquared() - 1.0) > 1e-5 || !maximum.isFinite()) return null
+        val centre = Vector3d(frame.x, frame.y, frame.z)
+        return frame.parts.mapNotNull { part ->
+            val low = Vector3d(part.x.toDouble(), part.y.toDouble(), part.z.toDouble()).add(centre).sub(.075, .075, .075)
+            val high = Vector3d(part.x + part.width.toDouble(), part.y + part.height.toDouble(), part.z + part.depth.toDouble()).add(centre).add(.075, .075, .075)
+            // Only the part outside the source envelope is a handle, even when the inner line glows through it.
+            low.setComponent(part.axis, max(low[part.axis], centre[part.axis] + starts[part.axis]))
+            var near = 0.0
+            var far = min(DisplayEditorGeometry.RANGE, maximum)
+            for (axis in 0..2) {
+                if (abs(direction[axis]) < 1e-10) {
+                    if (origin[axis] < low[axis] || origin[axis] > high[axis]) return@mapNotNull null
+                } else {
+                    val first = (low[axis] - origin[axis]) / direction[axis]
+                    val second = (high[axis] - origin[axis]) / direction[axis]
+                    near = max(near, min(first, second))
+                    far = min(far, max(first, second))
+                    if (near > far) return@mapNotNull null
+                }
+            }
+            DisplayEditorAxisHit(DisplayEditorAxis.entries[part.axis + 1], near).takeIf { near in 0.0..far }
+        }.minWithOrNull(compareBy<DisplayEditorAxisHit> { it.distance }.thenBy { it.axis.ordinal })
     }
 }
 
@@ -85,6 +124,7 @@ internal class DisplayEditorAxes(
                 Vector3f(part.x, part.y, part.z), Quaternionf(),
                 Vector3f(part.width, part.height, part.depth), Quaternionf(),
             )
+            display.glowColorOverride = Color.fromRGB(if (part.hovered) 0xfff0b3 else DisplayEditorAxesGeometry.colors[part.axis])
         }
         scene.frame = frame
     }

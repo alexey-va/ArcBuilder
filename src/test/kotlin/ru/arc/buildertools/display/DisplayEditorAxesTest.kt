@@ -8,12 +8,36 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.bukkit.Location
 import org.joml.Matrix4f
+import org.joml.Vector3d
 import ru.arc.paper.display.PacketBlockDisplay
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.concurrent.CompletableFuture
 
 class DisplayEditorAxesTest : FunSpec({
+    test("canonical handle picking admits aim tolerance but rejects idle inner hidden and out-of-reach guides") {
+        val pose = DisplayEditorPose(0.0, 0.0, 0.0)
+        val mesh = DisplayEditorMesh(1.0, 1.0, 1.0)
+        val frame = DisplayEditorAxesGeometry.frame(pose, mesh, DisplayEditorAxis.FREE)
+        val eye = Vector3d(0.0, 0.0, -3.0)
+        fun toward(x: Double, y: Double, z: Double) = Vector3d(x, y, z).sub(eye).normalize()
+        DisplayEditorAxesGeometry.pick(frame, eye, toward(1.35, 0.0, 0.0), 12.0)?.axis shouldBe DisplayEditorAxis.X
+        DisplayEditorAxesGeometry.pick(frame, eye, toward(1.35, .09, 0.0), 12.0)?.axis shouldBe DisplayEditorAxis.X
+        DisplayEditorAxesGeometry.pick(frame, eye, toward(1.35, .3, 0.0), 12.0) shouldBe null
+        DisplayEditorAxesGeometry.pick(frame, eye, toward(.2, 0.0, 0.0), 12.0) shouldBe null
+        DisplayEditorAxesGeometry.pick(frame, eye, toward(1.35, 0.0, 0.0), 1.0) shouldBe null
+        DisplayEditorAxesGeometry.pick(frame, Vector3d(1.35, 0.0, -20.0), Vector3d(0.0, 0.0, 1.0), 100.0) shouldBe null
+        val hiddenDirection = toward(0.0, 0.0, 1.35)
+        val sourceHit = DisplayEditorGeometry.rayDistance(eye, hiddenDirection, pose, mesh)!!
+        DisplayEditorAxesGeometry.pick(frame, eye, hiddenDirection, sourceHit) shouldBe null
+        DisplayEditorAxesGeometry.pick(DisplayEditorAxesGeometry.frame(pose, null, DisplayEditorAxis.FREE), eye, toward(.65, 0.0, 0.0), 12.0) shouldBe null
+        val hover = DisplayEditorAxesGeometry.frame(pose, mesh, DisplayEditorAxis.Y, DisplayEditorAxis.X)
+        hover.parts.count { it.hovered } shouldBe 2
+        hover.parts.first().height shouldBe .08f
+        // Producing a hover frame never mutates the canonical boxes or widens their aim target.
+        DisplayEditorAxesGeometry.pick(frame, eye, toward(1.35, .3, 0.0), 12.0) shouldBe null
+    }
+
     test("selected world guides extend beyond a rotated large object and one guide is visibly thicker") {
         val pose = DisplayEditorPose(3.0, 65.0, 5.0).withMatrix(Matrix4f().rotateXYZ(.3f, .6f, .2f).scale(3f, 2f, .75f))
         val mesh = DisplayEditorMesh(1.0, 1.0, 1.0)

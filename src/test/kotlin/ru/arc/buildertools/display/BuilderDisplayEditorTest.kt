@@ -30,6 +30,7 @@ import org.bukkit.event.block.Action
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.player.PlayerSwapHandItemsEvent
+import org.bukkit.event.player.PlayerItemHeldEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
@@ -37,6 +38,7 @@ import org.bukkit.metadata.FixedMetadataValue
 import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.util.RayTraceResult
 import org.bukkit.util.Vector
+import org.joml.Vector3d
 import org.mockbukkit.mockbukkit.entity.EntityMock
 import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.menu.PaperDialogScreen
@@ -46,6 +48,129 @@ import java.util.concurrent.CompletableFuture
 
 /** Native entity/session orchestration. Exact Paper ray collision and client rendering are separate checks. */
 class BuilderDisplayEditorTest : FunSpec({
+    test("hovered Display handle starts a constrained move and active right click commits instead of repicking") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)!!
+            val tip = f.tip(saved, DisplayEditorAxis.X)
+            f.lookAt(tip)
+            f.editor.tick()
+            f.frames.last().parts.filter { it.hovered }.map { it.axis } shouldBe listOf(0, 0)
+            f.rightClick()
+            f.displays() shouldHaveSize 2
+            f.lookAt(Vector3d(tip).add(.6, 0.0, 0.0))
+            f.editor.tick()
+            val moved = f.previewPose()
+            moved.x shouldBe (before.pose.x + .6 plusOrMinus .00001)
+            moved.y shouldBe (before.pose.y plusOrMinus .00001)
+            moved.z shouldBe (before.pose.z plusOrMinus .00001)
+            f.editor.capture(saved) shouldBe before
+            f.rightClick()
+            f.displays() shouldHaveSize 1
+            BuilderDisplayEditor.samePose(f.editor.capture(saved)!!.pose, moved) shouldBe true
+            f.command("undo")
+            BuilderDisplayEditor.samePose(f.editor.capture(saved)!!.pose, before.pose) shouldBe true
+        }
+    }
+
+    test("captured move keeps its axis when Shift sees an unrelated surface") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)!!
+            val tip = f.tip(saved, DisplayEditorAxis.X)
+            f.lookAt(tip)
+            f.rightClick()
+            f.player.isSneaking = true
+            f.rayHit = RayTraceResult(Vector(3.0, 68.0, 4.0), BlockFace.DOWN)
+            f.lookAt(Vector3d(tip).add(.4, 0.0, 0.0))
+            f.editor.tick()
+            val moved = f.previewPose()
+            moved.x shouldBe (before.pose.x + .4 plusOrMinus .00001)
+            moved.y shouldBe (before.pose.y plusOrMinus .00001)
+            moved.z shouldBe (before.pose.z plusOrMinus .00001)
+            f.command("cancel")
+            f.editor.capture(saved) shouldBe before
+        }
+    }
+
+    test("captured scale grows outward shrinks inward and preserves the other world dimensions") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)!!
+            f.command("scale")
+            val tip = f.tip(saved, DisplayEditorAxis.X)
+            f.lookAt(tip)
+            f.rightClick()
+            f.lookAt(Vector3d(tip).add(.6, 0.0, 0.0))
+            f.editor.tick()
+            val larger = f.previewPose()
+            (DisplayEditorGeometry.scale(larger).x > 1f) shouldBe true
+            DisplayEditorGeometry.scale(larger).y shouldBe 1f
+            DisplayEditorGeometry.scale(larger).z shouldBe 1f
+            f.lookAt(Vector3d(tip).add(-.3, 0.0, 0.0))
+            f.editor.tick()
+            val smaller = f.previewPose()
+            (DisplayEditorGeometry.scale(smaller).x < 1f) shouldBe true
+            smaller.position() shouldBe before.pose.position()
+            f.command("cancel")
+            f.editor.capture(saved) shouldBe before
+        }
+    }
+
+    test("a valid axis drag pauses then resumes without a jump and retains wheel changes") {
+        displayFixture { f ->
+            val saved = f.createBlock()
+            f.command("scale")
+            val tip = f.tip(saved, DisplayEditorAxis.X)
+            f.lookAt(tip)
+            f.rightClick()
+            f.lookAt(Vector3d(tip).add(.5, 0.0, 0.0))
+            f.editor.tick()
+            val enlarged = f.previewPose()
+            f.player.setRotation(-90f, 0f) // Exactly along positive world X.
+            f.editor.tick()
+            BuilderDisplayEditor.samePose(f.previewPose(), enlarged) shouldBe true
+            f.editor.onWheel(PlayerItemHeldEvent(f.player, 0, 1))
+            f.editor.tick()
+            val wheelAdjusted = f.previewPose()
+            (DisplayEditorGeometry.scale(wheelAdjusted).x > DisplayEditorGeometry.scale(enlarged).x) shouldBe true
+            f.lookAt(Vector3d(tip).add(1.0, 0.0, 0.0))
+            f.editor.tick()
+            BuilderDisplayEditor.samePose(f.previewPose(), wheelAdjusted) shouldBe true
+            f.lookAt(Vector3d(tip).add(1.2, 0.0, 0.0))
+            f.editor.tick()
+            (DisplayEditorGeometry.scale(f.previewPose()).x > DisplayEditorGeometry.scale(wheelAdjusted).x) shouldBe true
+        }
+    }
+
+    test("handle clicks recheck current aim source and access and never target the idle triad") {
+        displayFixture { f ->
+            f.command("tool")
+            f.editor.tick()
+            f.rightClick()
+            f.displays() shouldHaveSize 0
+            val saved = f.createBlock()
+            val before = f.editor.capture(saved)!!
+            val tip = f.tip(saved, DisplayEditorAxis.X)
+            f.lookAt(tip)
+            f.editor.tick()
+            f.frames.last().parts.any { it.hovered } shouldBe true
+            f.rayHit = RayTraceResult(f.player.eyeLocation.toVector().add(f.player.eyeLocation.direction), BlockFace.NORTH)
+            f.rightClick()
+            f.frames.last().parts.any { it.hovered } shouldBe false
+            f.displays() shouldHaveSize 1
+            f.rayHit = null
+            f.buildAccess = { it.y != 66 }
+            f.rightClick()
+            f.displays() shouldHaveSize 1
+            f.buildAccess = { true }
+            saved.teleport(saved.location.add(0.0, 3.0, 0.0))
+            f.rightClick()
+            f.displays() shouldHaveSize 1
+            (f.editor.capture(saved)!!.pose.y > before.pose.y + 2) shouldBe true
+        }
+    }
+
     test("Shift F cancels the private gesture and opens axes with the current value while F still cycles mode") {
         displayFixture { f ->
             val saved = f.createBlock()
@@ -423,10 +548,12 @@ private class DisplayFixture(paper: MockBukkitTestRuntime) : AutoCloseable {
     val permission = player.addAttachment(plugin, BuilderDisplayEditor.PERMISSION, true)
     var buildAccess: (Block) -> Boolean = { true }
     var rayHit: RayTraceResult? = null
+    val frames = mutableListOf<DisplayEditorAxesFrame>()
     private val screens = mutableListOf<Pair<PaperDialogScreen, Any>>()
     private val dialogs = spyk(testDialogs(plugin) { screen, registration -> screens += screen to registration })
     val axes = mockk<DisplayEditorAxes>(relaxed = true) {
         every { closeAsync() } returns CompletableFuture.completedFuture(null)
+        every { update(any(), any()) } answers { frames += secondArg<DisplayEditorAxesFrame>() }
     }
     val editor: BuilderDisplayEditor
 
@@ -464,6 +591,24 @@ private class DisplayFixture(paper: MockBukkitTestRuntime) : AutoCloseable {
     fun rightClick() {
         editor.tick()
         editor.onInteract(PlayerInteractEvent(player, Action.RIGHT_CLICK_AIR, player.inventory.itemInMainHand, null, BlockFace.SELF, EquipmentSlot.HAND))
+    }
+    fun lookAt(point: Vector3d) {
+        val at = player.eyeLocation
+        at.direction = Vector(point.x - at.x, point.y - at.y, point.z - at.z)
+        player.setRotation(at.yaw, at.pitch)
+    }
+    fun tip(display: Display, axis: DisplayEditorAxis): Vector3d {
+        val state = editor.capture(display)!!
+        val part = DisplayEditorAxesGeometry.frame(state.pose, state.content.mesh(), DisplayEditorAxis.FREE).parts[(axis.ordinal - 1) * 2 + 1]
+        return state.pose.position().add(part.x + part.width / 2.0, part.y + part.height / 2.0, part.z + part.depth / 2.0)
+    }
+    fun previewPose(): DisplayEditorPose {
+        val preview = displays().single { !it.isPersistent }
+        val native = preview.transformation
+        val matrix = org.joml.Matrix4f().translate(native.translation).rotate(native.leftRotation).scale(native.scale).rotate(native.rightRotation).translate(.5f, .5f, .5f)
+        val centre = matrix.getTranslation(org.joml.Vector3f())
+        matrix.setTranslation(0f, 0f, 0f)
+        return DisplayEditorPose(preview.location.x + centre.x, preview.location.y + centre.y, preview.location.z + centre.z).withMatrix(matrix)
     }
     fun swap() = PlayerSwapHandItemsEvent(player, player.inventory.itemInMainHand, player.inventory.itemInOffHand).also(editor::onSwap)
     fun actionKey(action: String): String {

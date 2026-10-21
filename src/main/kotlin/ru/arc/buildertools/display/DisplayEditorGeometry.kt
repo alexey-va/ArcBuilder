@@ -34,6 +34,14 @@ internal data class DisplayEditorScale(val x: Float, val y: Float, val z: Float)
     fun values() = listOf(x, y, z)
 }
 
+internal data class DisplayEditorAxisGesture(
+    val axis: DisplayEditorAxis,
+    val centre: Vector3d,
+    val normal: Vector3d,
+    val initial: Double,
+    val scaleSpan: Double,
+)
+
 internal object DisplayEditorGeometry {
     const val RANGE = 12.0
     const val MAX_EXTENT = 8.0
@@ -56,6 +64,40 @@ internal object DisplayEditorGeometry {
 
     fun withoutRotation(pose: DisplayEditorPose): DisplayEditorPose = scale(pose).let {
         pose.withMatrix(Matrix4f().scaling(it.x, it.y, it.z))
+    }
+
+    fun axisVector(axis: DisplayEditorAxis): Vector3d = Vector3d().setComponent(axis.ordinal - 1, 1.0)
+
+    /** A fixed plane containing the world axis. Near-parallel views pause instead of amplifying noise. */
+    fun axisGesture(pose: DisplayEditorPose, axis: DisplayEditorAxis, origin: Vector3d, direction: Vector3d): DisplayEditorAxisGesture? {
+        if (axis == DisplayEditorAxis.FREE) return null
+        val unit = axisVector(axis)
+        val normal = Vector3d(direction).fma(-direction.dot(unit), unit)
+        if (normal.lengthSquared() < .15 * .15) return null
+        normal.normalize()
+        val draft = DisplayEditorAxisGesture(axis, pose.position(), normal, 0.0, .25)
+        val coordinate = axisCoordinate(draft, origin, direction) ?: return null
+        return draft.copy(initial = coordinate, scaleSpan = max(abs(coordinate), .25))
+    }
+
+    fun axisDisplacement(gesture: DisplayEditorAxisGesture, origin: Vector3d, direction: Vector3d): Double? =
+        axisCoordinate(gesture, origin, direction)?.minus(gesture.initial)
+
+    private fun axisCoordinate(gesture: DisplayEditorAxisGesture, origin: Vector3d, direction: Vector3d): Double? {
+        if (!origin.isFinite || !direction.isFinite || abs(direction.lengthSquared() - 1.0) > 1e-5) return null
+        val unit = axisVector(gesture.axis)
+        if (1 - direction.dot(unit).let { it * it } < .15 * .15) return null
+        val denominator = direction.dot(gesture.normal)
+        if (denominator < .15) return null
+        val distance = Vector3d(gesture.centre).sub(origin).dot(gesture.normal) / denominator
+        if (!distance.isFinite() || distance !in 0.0..RANGE) return null
+        return Vector3d(origin).fma(distance, direction).sub(gesture.centre).dot(unit).takeIf { it.isFinite() }
+    }
+
+    fun worldScale(pose: DisplayEditorPose, axis: DisplayEditorAxis, factor: Float): DisplayEditorPose {
+        val scaling = org.joml.Vector3f(1f)
+        if (axis == DisplayEditorAxis.FREE) scaling.set(factor) else scaling.setComponent(axis.ordinal - 1, factor)
+        return pose.withMatrix(Matrix4f().scaling(scaling).mul(pose.matrix()))
     }
 
     fun corners(pose: DisplayEditorPose, mesh: DisplayEditorMesh): List<Vector3d> {

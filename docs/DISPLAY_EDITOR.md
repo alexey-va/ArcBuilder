@@ -14,6 +14,8 @@ item stays in the inventory. Displays have no item collection or conversion path
 | Input | Result |
 | --- | --- |
 | Right-click an editor object | Select and start the current transform |
+| Aim at an exposed axis line / endpoint of the selection | Highlight that handle |
+| Right-click the highlighted axis | Grab that world X / Y / Z axis in the current mode |
 | Move the mouse | Move, rotate or resize the private draft |
 | Right-click again | Validate and save the draft |
 | Left-click | Cancel the gesture; a second click clears selection |
@@ -26,8 +28,20 @@ item stays in the inventory. Displays have no item collection or conversion path
 | Change hotbar slot while no gesture is active | End the editor session |
 
 In free Rotate, horizontal mouse movement controls yaw and vertical movement
-controls pitch. In Scale, looking upward enlarges and downward shrinks. The
-surface magnet takes precedence over a constrained movement axis.
+controls pitch. In ordinary Scale, looking upward enlarges and downward shrinks.
+When Scale starts from an axis handle, pull away from the centre to enlarge that
+world direction and back toward the centre to shrink it. A rotated or non-uniform
+model stretches along the displayed world axis; the other world coordinates and
+the visual centre remain fixed. This differs intentionally from the menu's local
+model-axis sliders.
+
+A grabbed movement handle stays on its axis, including while Shift is held.
+Surface magnet remains available for ordinary dragging, including an axis chosen
+through the menu. The wheel adjusts a grabbed movement handle along its axis and
+fine-tunes grabbed scale. Nearly head-on views pause pointer movement and show a
+hint to look from the side or use the wheel. Resuming rebases to the last accepted
+draft, retaining wheel adjustments without a cursor jump. Right-click during an
+active gesture always saves it; it never picks a different handle.
 
 The menu also changes axes, duplicates the selection, edits its text, confirms
 deletion and undoes up to 20 committed changes in the current session.
@@ -123,14 +137,24 @@ Transforms permit scales 0.05–4, a maximum eight-block envelope per axis, at m
 729 footprint cells and 20-block corner reach. Full footprint protection runs
 only on final actions. Per-tick previews check the source/destination centre and
 loaded bounds; the existing runtime tick owns the bounded 16-session loop. Idle
-sessions expire after ten minutes. A private cyan outline uses at most 36 dust
-points every four ticks. The world axes themselves are six stable, private
+sessions expire after ten minutes. The editor emits no particles. Its world
+axes are six stable, private
 packet BlockDisplay handles: red X, green Y and blue Z rods with endpoint caps.
 The constrained axis is thicker; every rod extends beyond the transformed
 object's positive envelope so large opaque objects do not hide the entire guide.
 With no selection, a small triad near the aim point provides an orientation
-reference without implying a selected object. The previous particle axes are
-removed.
+reference without implying a selected object. Both the particle axes and the
+former cyan particle outline are removed.
+
+Axis picking uses the same canonical six Display boxes, with a fixed 0.075-block
+aim tolerance. Only the outer portion beyond the selected object's transformed
+envelope and the endpoint caps are interactive. Hover makes the matching line
+and cap thicker with a pale glow; this visual enlargement never changes the hit
+test, avoiding feedback flicker. The idle triad is never a target. Native block
+collision, the selected object's transformed mesh, the loaded-ray preflight and
+12-block reach bound picking. The click recomputes the current source and ray,
+then rechecks ownership, selection lock and complete source access before making
+a private draft. No native entity hitbox or additional world scan is used.
 
 One standard Core `PaperPacketDisplays` owner manages at most 96 handles across
 the 16 editor sessions. The existing editor tick produces geometry; Core owns
@@ -154,6 +178,11 @@ Rotated non-uniform geometry tests verify that local resizing and each reset
 preserve the centre and the other transform property. Packet-handle tests check
 private audiences, stable identity, world-change cleanup and the actual drain
 future without claiming network delivery.
+Handle regressions cover exposed / hidden / idle / distant targets, stable aim
+tolerance, constrained dragging, outward/inward scale, world-axis stretch of a
+rotated non-uniform model, commit / cancel / undo, changed source / obstruction /
+access, Shift retaining the movement axis and valid → paused → resumed pointer
+movement with intervening wheel changes.
 Shape tests cover all slab variants, generated/handheld items, special-model and
 custom-data fallbacks. Controller tests check the saved native slab top against
 a ceiling and the generated diamond face against a wall after Shift snapping.
