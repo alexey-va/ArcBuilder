@@ -63,6 +63,7 @@ internal class BuilderCrownController(
     private val maximumChanges: Int,
     private val maximumScanVolume: Long = 1_000_000L,
     private val host: BuilderCrownHost,
+    private val inputSuppressed: (Player) -> Boolean = { false },
 ) : Listener, AutoCloseable {
     private val brushKey = NamespacedKey(plugin, "crown_brush")
     private val sessions = BuilderCrownSessions()
@@ -199,6 +200,7 @@ internal class BuilderCrownController(
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onInteract(event: PlayerInteractEvent) {
+        if (inputSuppressed(event.player)) return
         val item = event.item ?: return
         if (!isBrush(item)) return
         val player = event.player

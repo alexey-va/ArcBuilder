@@ -576,6 +576,19 @@ class BuilderToolsDomainTest : FunSpec({
         umbrella.children.containsKey("arcbuild.deconstruct.without-tool") shouldBe false
     }
 
+    test("display editor is independently granted without the builder umbrella") {
+        val description = checkNotNull(javaClass.classLoader.getResourceAsStream("plugin.yml"))
+            .use(::PluginDescriptionFile)
+        description.permissions.single { it.name == "arcbuild.use" }.children.containsKey("arcbuild.display") shouldBe false
+        description.permissions.single { it.name == "arcbuild.display" }.default shouldBe org.bukkit.permissions.PermissionDefault.FALSE
+        BuilderPermissionPolicy.canEditDisplays(setOf("arcbuild.use")::contains) shouldBe false
+        BuilderPermissionPolicy.canEditDisplays(setOf("arcbuild.display.admin")::contains) shouldBe false
+        BuilderPermissionPolicy.canEditDisplays(setOf("arcbuild.display")::contains) shouldBe true
+        BuilderPermissionPolicy.canUseAny(setOf("arcbuild.display")::contains) shouldBe true
+        BuilderPermissionPolicy.canUse(BuilderFeature.FILL, setOf("arcbuild.display")::contains) shouldBe false
+        BuilderPermissionPolicy.canUseBook(setOf("arcbuild.display")::contains) shouldBe false
+    }
+
     test("build-book create permission grants the declared sell and use children") {
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.createSimplePlugin("BuilderPermissionContract")

@@ -30,6 +30,24 @@ import ru.ruscrafting.builder.paper.ArcBuilderPlugin
 import java.util.Locale
 
 class BuilderCommandBoundaryMockBukkitTest : FunSpec({
+    test("display editor completion requires its separate permission and works without umbrella") {
+        withCommandFixture { fixture ->
+            val builder = fixture.player("OrdinaryBuilder")
+            fixture.grant(builder, "arcbuild.use")
+            fixture.tab(builder, "dis") shouldBe listOf("disconnect")
+            fixture.tab(builder, "display", "") shouldBe emptyList()
+            fixture.assertRejected(builder, "нет доступа") {
+                fixture.execute(builder, "display", "create", "block")
+            }
+
+            val decorator = fixture.player("DisplayDecorator")
+            fixture.grant(decorator, "arcbuild.display")
+            fixture.tab(decorator, "dis") shouldBe listOf("display")
+            fixture.tab(decorator, "fill", "") shouldBe emptyList()
+            fixture.tab(decorator, "display", "").isNotEmpty() shouldBe true
+        }
+    }
+
     test("system book completions work for admin-only players and console through command boundary") {
         withCommandFixture(listOf(
             "atelier-house.schem", "minecolonies/medieval/house.schem",

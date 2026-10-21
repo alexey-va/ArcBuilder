@@ -39,6 +39,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import ru.arc.ARC
+import ru.arc.buildertools.display.BuilderDisplayEditor
 import ru.arc.autobuild.BuildBookCodec
 import ru.arc.autobuild.BuildBookData
 import ru.arc.autobuild.BuildBookSettings
@@ -584,6 +585,7 @@ internal class BuilderToolsRuntime(
     private var selectionActionPanel: BuilderSelectionActionPanel? = null
     private var materialPicker: BuilderMaterialPicker? = null
     private var crownSelectionDialog: BuilderCrownSelectionDialog? = null
+    private var entityEditor: BuilderDisplayEditor? = null
     private val selectionPanelPages = mutableMapOf<UUID, Int>()
     private val materialScans = mutableMapOf<UUID, Any>()
     private val panelPlanSummaries = mutableMapOf<UUID, Pair<UUID, Component>>()
@@ -734,6 +736,7 @@ internal class BuilderToolsRuntime(
             ).also { initializedPreviews = it }
             crown = BuilderCrownController(
                 plugin = plugin,
+                inputSuppressed = { entityEditor?.isEditing(it) == true },
                 messages = messages,
                 safety = safety,
                 selections = selections,
@@ -946,9 +949,24 @@ internal class BuilderToolsRuntime(
                 plugin, config.selectionPanelSettings(), messages, ::selectionPanelView, ::onSelectionPanelAction,
                 onSelectionGlowSuppression = this.displayRenderer::suppressSelectionGlow,
             )
+            entityEditor = BuilderDisplayEditor(
+                plugin = plugin,
+                text = { player, key, values ->
+                    messages.render(key, locale(player), values.mapValues { messages.literal(it.value) })
+                },
+                canBuild = { player, block ->
+                    runCatching {
+                        ensureAvailable(player)
+                        if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
+                        // Decorations often occupy air: request the placement flag explicitly.
+                        ensureMutable(player, block, Material.STONE)
+                    }.isSuccess
+                },
+            )
             checkNotNull(taskScope.runTimer(1L, 1L) {
                 selectionActionPanel?.tick()
                 tickSelectionTargets()
+                entityEditor?.tick()
             }) {
                 "Builder selection action panel task was not scheduled"
             }
@@ -963,6 +981,7 @@ internal class BuilderToolsRuntime(
             attempt { HandlerList.unregisterAll(this) }
             attempt { selectionActionPanel?.close() }
             attempt { crownSelectionDialog?.close() }
+            attempt { entityEditor?.close() }
             attempt { materialPicker?.close() }
             attempt { initializedPlayerRecoveries?.close() }
             attempt { initializedBooks?.close() }
@@ -1094,6 +1113,7 @@ internal class BuilderToolsRuntime(
 
     private fun canUseSelectionPanel(player: Player): Boolean =
         !closed && player.isOnline && !recovering && !recoveryBlocked &&
+            entityEditor?.isEditing(player) != true &&
             isSelector(player.inventory.itemInMainHand) && hasUsePermission(player) &&
             BuilderGameModePolicy.allows(player.gameMode) && config.allowsWorld(player.world.name) &&
             !playerRecoveries.contains(player.uniqueId) && !books.health().recoveryBlocked
@@ -1454,6 +1474,7 @@ internal class BuilderToolsRuntime(
         }
         val root = BuilderRootCommand.parse(args.firstOrNull()) ?: return emptyList()
         if (!rootCommandAvailable(sender, root)) return emptyList()
+        if (root == BuilderRootCommand.DISPLAY) return entityEditor?.tabComplete(args.drop(1)).orEmpty()
         if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)
         if (root == BuilderRootCommand.REPLACE) {
             if (args.size !in 2..4) return emptyList()
@@ -1514,6 +1535,9 @@ internal class BuilderToolsRuntime(
 
     private fun handleBuilder(player: Player, args: Array<out String>) {
         val root = BuilderRootCommand.parse(args.firstOrNull()) ?: BuilderRootCommand.HELP
+        if (root != BuilderRootCommand.DISPLAY && entityEditor?.hasSession(player) == true) {
+            entityEditor?.command(player, listOf("exit"))
+        }
         if (root == BuilderRootCommand.PROJECTS) {
             if (!hasUsePermission(player)) throw BuilderUserFailure("errors.no-permission")
             constructionProjectsMenu.open(player)
@@ -1570,6 +1594,10 @@ internal class BuilderToolsRuntime(
             }
             BuilderRootCommand.DECONSTRUCT -> startPlanning(player) { current -> deconstructionController.plan(player, current) }
             BuilderRootCommand.CROWN -> crown.handle(player, args.drop(1))
+            BuilderRootCommand.DISPLAY -> {
+                if (!BuilderPermissionPolicy.canEditDisplays(player::hasPermission)) throw BuilderUserFailure("errors.no-permission")
+                checkNotNull(entityEditor).command(player, args.drop(1))
+            }
             BuilderRootCommand.CONFIRM -> when (args.getOrNull(1)?.lowercase(Locale.ROOT)) {
                 null -> confirm(player)
                 "buy" -> confirm(player, buyMissing = true)
@@ -1617,6 +1645,7 @@ internal class BuilderToolsRuntime(
         BuilderRootCommand.PASTE -> BuilderPermissionPolicy.canUse(BuilderFeature.PASTE, player::hasPermission)
         BuilderRootCommand.DECONSTRUCT -> BuilderPermissionPolicy.canUse(BuilderFeature.DECONSTRUCT, player::hasPermission)
         BuilderRootCommand.CROWN -> BuilderPermissionPolicy.canUse(BuilderFeature.CROWN, player::hasPermission)
+        BuilderRootCommand.DISPLAY -> BuilderPermissionPolicy.canEditDisplays(player::hasPermission)
         BuilderRootCommand.BOOK -> BuilderPermissionPolicy.canUseBook(player::hasPermission)
         else -> true
     }
@@ -3825,6 +3854,7 @@ internal class BuilderToolsRuntime(
             }
             return
         }
+        if (entityEditor?.isEditing(player) == true) return
         val item = event.item ?: return
         if (event.hand == EquipmentSlot.HAND) {
             BuildBookCodec.read(item)?.let { data ->
@@ -4206,6 +4236,7 @@ internal class BuilderToolsRuntime(
         attempt { HandlerList.unregisterAll(this) }
         attempt { selectionActionPanel?.close() }
         attempt { crownSelectionDialog?.close() }
+        attempt { entityEditor?.close() }
         attempt { materialPicker?.close() }
         materialScans.clear()
         panelPlanSummaries.clear()

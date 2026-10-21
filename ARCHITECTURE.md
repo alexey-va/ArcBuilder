@@ -39,12 +39,26 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 | `copy`, `paste` | `BuilderClipboardController` | `PASTE` for paste | `arcbuild.copy`, `arcbuild.paste` |
 | `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
 | `crown` | `BuilderCrownController` | `CROWN` | `arcbuild.crown` |
+| `display` | `display/BuilderDisplayEditor` | separate decorative entity edits | explicit `arcbuild.display` |
 | `book` | `BuilderBookLifecycle` and its coordinators | `BUILD_BOOK` when building | book permissions |
 | `confirm`, `cancel`, `undo`, `status` | `BuilderToolsRuntime` | `UNDO` for undo | existing operation context |
 
 `BuilderPermissionPolicy.kt` is the canonical mapping between features and
 permissions. `arcbuild.use` is the umbrella permission; size and hourly tiers
 are resolved there as well.
+
+The display editor deliberately sits outside the umbrella permission. Its
+permanent decorative entities are native Paper Displays with editor and owner
+PDC markers; it never adopts foreign plugin displays. `arcbuild.display.admin`
+only overrides ownership of editor-created objects and still requires
+`arcbuild.display` and ordinary build access. The runtime supplies the existing
+loaded-chunk, range, world border, game-mode, world and Lands protection checks.
+The controller owns entity picking, editing sessions, provisional private
+previews and their cleanup; runtime shutdown closes it, preserving committed
+decorations. The runtime tick drives it alongside the existing selection panel.
+Active editor input suppresses the ordinary selector and crown brush paths.
+There is no building-material transaction or inventory redemption: zero-cost
+decoration is assessed in `docs/display-editor-economy-20261021.md`.
 
 `BuilderPlanningHost` is the shared runtime preflight and plan boundary for
 the fill, replace, and fence-disconnect controllers.

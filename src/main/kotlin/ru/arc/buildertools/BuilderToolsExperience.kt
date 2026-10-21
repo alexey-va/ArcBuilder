@@ -36,6 +36,7 @@ internal enum class BuilderRootCommand(
     PASTE("paste"),
     DECONSTRUCT("deconstruct"),
     CROWN("crown"),
+    DISPLAY("display"),
     CONFIRM("confirm"),
     CANCEL("cancel", safeDuringOperation = true),
     UNDO("undo"),

@@ -24,6 +24,7 @@ class BuilderToolsExperienceTest : FunSpec({
             "paste",
             "deconstruct",
             "crown",
+            "display",
             "confirm",
             "cancel",
             "undo",

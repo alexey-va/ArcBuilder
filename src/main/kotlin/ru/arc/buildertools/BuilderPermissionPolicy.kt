@@ -18,6 +18,7 @@ internal enum class BuilderFeature(
 internal object BuilderPermissionPolicy {
     private const val umbrellaPermission = "arcbuild.use"
     private const val deconstructWithoutToolPermission = "arcbuild.deconstruct.without-tool"
+    private const val displayEditorPermission = "arcbuild.display"
     private val bookEntryPermissions = setOf(
         "arcbuild.book.create",
         "arcbuild.book.sell",
@@ -29,7 +30,10 @@ internal object BuilderPermissionPolicy {
     fun canUseAny(hasPermission: (String) -> Boolean): Boolean =
         hasPermission(umbrellaPermission) ||
             BuilderFeature.entries.any { feature -> canUse(feature, hasPermission) } ||
-            bookEntryPermissions.any(hasPermission)
+            bookEntryPermissions.any(hasPermission) || canEditDisplays(hasPermission)
+
+    /** Free decorative entities require their own explicit grant, including for builders. */
+    fun canEditDisplays(hasPermission: (String) -> Boolean): Boolean = hasPermission(displayEditorPermission)
 
     fun canUseBook(hasPermission: (String) -> Boolean): Boolean =
         hasPermission(umbrellaPermission) || bookEntryPermissions.any(hasPermission)

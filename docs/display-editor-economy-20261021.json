@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "title": "ArcBuilder free decorative display editor",
+  "assumptions": [
+    "Source change only; feature was previously absent. No live state or measured income is claimed.",
+    "One hypothetical participant and 1/100/10000 creation events per day are arithmetic stress scenarios, not telemetry or server capacity.",
+    "vault, tokens and inventory_items are separate units; visual content copies are not inventory items or redeemable rewards.",
+    "Free access is granted explicitly through arcbuild.display. Existing construction materials, SELL-to-contract transition and earning multipliers are unchanged."
+  ],
+  "participants": [
+    1,
+    1,
+    1
+  ],
+  "currencies": {
+    "vault": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "display_creation",
+          "kind": "mint",
+          "source": "src/main/kotlin/ru/arc/buildertools/display/BuilderDisplayEditor.kt",
+          "basis": "Permanent decorative Displays have no item redemption, drops, currency payout or inventory grant; editor mode uses an existing held item.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "tokens": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "display_creation",
+          "kind": "mint",
+          "source": "src/main/kotlin/ru/arc/buildertools/display/BuilderDisplayEditor.kt",
+          "basis": "Permanent decorative Displays have no item redemption, drops, currency payout or inventory grant; editor mode uses an existing held item.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "inventory_items": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "display_creation",
+          "kind": "mint",
+          "source": "src/main/kotlin/ru/arc/buildertools/display/BuilderDisplayEditor.kt",
+          "basis": "Permanent decorative Displays have no item redemption, drops, currency payout or inventory grant; editor mode uses an existing held item.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
