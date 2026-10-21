@@ -124,14 +124,18 @@ glyphs:
 
 surfaces:
   hud:
-    - id: placement-assist-ready
-      actionbar: builder:assist.ready
+    - id: placement-assist-line-ready
+      actionbar: builder:assist.line-ready
+      placeholders: {orientation: 'восток'}
+    - id: placement-assist-plane-ready
+      actionbar: builder:assist.plane-ready
+      placeholders: {orientation: 'пол Y', coordinate: '64'}
     - id: placement-assist-occupied
-      actionbar: builder:assist.blocked-occupied
+      actionbar: builder:assist.occupied
     - id: placement-assist-protected
-      actionbar: builder:assist.blocked-protected
+      actionbar: builder:assist.protected
     - id: placement-assist-collision
-      actionbar: builder:assist.blocked-collision
+      actionbar: builder:assist.collision
     - id: placement-assist-refused
       actionbar: builder:assist.refused
     - id: book-draft-hold-hint

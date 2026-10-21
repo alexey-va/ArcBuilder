@@ -342,12 +342,26 @@ locales:
     assist:
       enabled: "<prefix><#72ebc5>Помощник строительства включён. <click:run_command:'/builder assist off'><underlined>Выключить</underlined></click>"
       disabled: "<prefix><#e8dfd2>Помощник строительства выключен."
-      usage: "<prefix><#e8dfd2>/builder assist [on|off] — включить или выключить помощник."
-      hint: "<#e8dfd2>Поставь два обычных цельных блока подряд. Затем смотри в мятную рамку и нажимай ПКМ для продолжения ряда. Shift сбрасывает ряд. Ступени, плиты и особые предметы ставятся как обычно."
-      ready: "<#72ebc5>Продолжить ряд <#e8dfd2>· ПКМ <#8c8c8c>· Shift — сброс"
-      blocked-occupied: "<#ffae64>Клетка занята <#8c8c8c>· Shift — сброс ряда"
-      blocked-protected: "<#ffae64>Здесь строительство недоступно <#8c8c8c>· Shift — сброс ряда"
-      blocked-collision: "<#ffae64>Отойди от следующей клетки <#8c8c8c>· Shift — сброс ряда"
+      controls: "<prefix><#e8dfd2>/builder assist line — ряд; plane — плоскость; reset — новая опора; on / off — включить / выключить."
+      line-hint: "<#e8dfd2>Режим «Ряд»: поставь два обычных цельных блока рядом. Дальше смотри в сторону мятной клетки и нажимай ПКМ — направление сохранится. Можно присесть для моста. <click:run_command:'/builder assist reset'><underlined>Новая опора</underlined></click> · <click:run_command:'/builder assist plane'><underlined>Плоскость</underlined></click>. Ступени, плиты и особые предметы ставятся как обычно."
+      plane-hint: "<#e8dfd2>Режим «Плоскость»: поставь обычный цельный блок сверху опоры для пола или сбоку для стены. Смотри вдоль выбранной плоскости и нажимай ПКМ: мятная клетка примыкает к существующему блоку. Можно присесть. <click:run_command:'/builder assist reset'><underlined>Новая опора</underlined></click> · <click:run_command:'/builder assist line'><underlined>Ряд</underlined></click>. Ступени, плиты и особые предметы ставятся как обычно."
+      reset: "<prefix><#e8dfd2>Фиксация сброшена. Следующая обычная установка выберет новую опору."
+      line-ready: "<#72ebc5>Продолжить ряд · <orientation> <#e8dfd2>· ПКМ"
+      plane-ready: "<#72ebc5>Плоскость · <orientation> <coordinate> <#e8dfd2>· ПКМ"
+      occupied: "<#ffae64>Клетка занята <#8c8c8c>· /builder assist reset — новая опора"
+      protected: "<#ffae64>Здесь строительство недоступно <#8c8c8c>· /builder assist reset"
+      collision: "<#ffae64>Отойди от выбранной клетки <#8c8c8c>· /builder assist reset"
+      direction:
+        north: "север"
+        south: "юг"
+        west: "запад"
+        east: "восток"
+        up: "вверх"
+        down: "вниз"
+      plane:
+        floor: "пол Y"
+        x: "стена X"
+        z: "стена Z"
       refused: "<#ffae64>Блок не установлен: место или действие недоступно."
       unavailable: "<prefix><#ffae64>Помощник сейчас недоступен. Можно продолжить обычную установку блоков."
     display-editor:
@@ -508,7 +522,7 @@ locales:
       cancel: '<#e8dfd2>Назад'
     help:
       - "<prefix><#e6fff3>Инструменты строителя"
-      - "<#d48763>/builder assist [on|off] <#e6fff3>— личный помощник для рядов цельных блоков"
+      - "<#d48763>/builder assist line|plane <#e6fff3>— зафиксировать ряд или плоскость; reset — новая опора; off — выключить"
       - "<#d48763>/builder display <#e6fff3>— редактор декораций (отдельное право)"
       - "<#8c8c8c>   <#d48763>/builder wand <#e6fff3>— выделить область"
       - "<#8c8c8c>   <#d48763>/builder fill [блок] <#e6fff3>— заполнить пустоты"
@@ -747,7 +761,20 @@ locales:
         <prefix><#2bba43><hover:show_text:'Временная копия выделенных блоков с точкой привязки.'>Чертёж</hover> <#8c8c8c>— <#e6fff3><count> блоков
         <#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки не попали в чертёж.'>Пропущено безопасно</hover>: <#969696><skipped>
         <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Вставить здесь]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать книгу]</click>
+      saved-cursor: |-
+
+        <prefix><#2bba43><hover:show_text:'Временная копия выделенных блоков с точкой привязки.'>Чертёж</hover> <#8c8c8c>— <#e6fff3><count> блоков
+        <#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки не попали в чертёж.'>Пропущено безопасно</hover>: <#969696><skipped>
+        <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Разместить чертёж]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать книгу]</click>
       retained: "<#d48763>Чертёж сохранён <#8c8c8c>— <#e6fff3>можно вставить снова"
+      moving: |-
+        <prefix><#ffb142>Превью следует за курсором. <#e6fff3>Зелёная рамка — точка привязки чертежа.
+        <#e6fff3>ЛКМ или ПКМ — зафиксировать; Shift — выбрать воздух. Затем подтвердите вставку.
+        <click:run_command:'/builder paste left'><#92bed8>[↶ 90°]</click>  <click:run_command:'/builder paste right'><#92bed8>[↷ 90°]</click>  <click:run_command:'/builder cancel'><#e6fff3>[Отмена]</click>
+      moving-actionbar: "<#ffb142>Чертёж за курсором <#e6fff3>· ЛКМ / ПКМ — зафиксировать · Shift — воздух"
+      aim: "<#ffb142>Наведите курсор на блок <#e6fff3>· Shift — выбрать воздух"
+      locked: "<#a8ef71>Позиция зафиксирована <#e6fff3>· Проверяем блоки и материалы…"
+      fixed-actions: "<click:run_command:'/builder paste left'><#92bed8>[↶ 90°]</click>  <click:run_command:'/builder paste right'><#92bed8>[↷ 90°]</click>  <click:run_command:'/builder paste'><#92bed8>[Переместить]</click>"
     book:
       system-issue:
         directory-suggestion: "<#e6fff3>Папка · <#d48763>/ <#e6fff3>— открыть"
@@ -1423,7 +1450,8 @@ locales:
       fill: "<hover:show_text:'Заполняет пустые и заменяемые места выбранным блоком.'>Заполнение</hover>"
       replace: "<hover:show_text:'Меняет в выделении только указанный старый блок на новый.'>Замена блоков</hover>"
       fence_disconnect: "<hover:show_text:'Убирает текущие соединения заборов и оград; последующее обновление соседей может соединить их снова.'>Разъединение заборов и оград</hover>"
-      paste: "<hover:show_text:'Размещает сохранённый чертёж относительно вашей текущей позиции.'>Вставка чертежа</hover>"
+      paste: "<hover:show_text:'Привязывает чертёж к блоку под курсором. Клик фиксирует позицию; подтверждение размещает блоки.'>Вставка чертежа</hover>"
+      paste-cursor: "<hover:show_text:'Привязывает чертёж к блоку под курсором. Клик фиксирует позицию; подтверждение размещает блоки.'>Вставка чертежа</hover>"
       build_book: "<hover:show_text:'Запускает постоянный проект по одноразовой книге и принимает материалы постепенно.'>Строительство по книге</hover>"
       deconstruct: "<hover:show_text:'Снимает безопасные блоки выделения и возвращает полученные предметы.'>Демонтаж</hover>"
       crown: "<hover:show_text:'Создаёт сгенерированную листву дерева вокруг выбранной опоры.'>Крона</hover>"
@@ -1432,12 +1460,26 @@ locales:
     assist:
       enabled: "<prefix><#72ebc5>Placement assistant enabled. <click:run_command:'/builder assist off'><underlined>Disable</underlined></click>"
       disabled: "<prefix><#e8dfd2>Placement assistant disabled."
-      usage: "<prefix><#e8dfd2>/builder assist [on|off] — enable or disable your placement assistant."
-      hint: "<#e8dfd2>Place two ordinary full blocks in a row. Then aim into the mint frame and right-click to continue. Sneak resets the line. Stairs, slabs and special items keep their usual placement."
-      ready: "<#72ebc5>Continue row <#e8dfd2>· Right-click <#8c8c8c>· Sneak to reset"
-      blocked-occupied: "<#ffae64>Cell occupied <#8c8c8c>· Sneak to reset"
-      blocked-protected: "<#ffae64>Building is unavailable here <#8c8c8c>· Sneak to reset"
-      blocked-collision: "<#ffae64>Move out of the next cell <#8c8c8c>· Sneak to reset"
+      controls: "<prefix><#e8dfd2>/builder assist line — row; plane — floor or wall; reset — new anchor; on / off — enable / disable."
+      line-hint: "<#e8dfd2>Line mode: place two adjacent ordinary full blocks. Then look towards the mint cell and right-click: the direction stays locked. Sneaking for bridges keeps the lock. <click:run_command:'/builder assist reset'><underlined>New anchor</underlined></click> · <click:run_command:'/builder assist plane'><underlined>Plane mode</underlined></click>. Stairs, slabs and special items keep their usual placement."
+      plane-hint: "<#e8dfd2>Plane mode: place an ordinary full block above a support for a floor, or on its side for a wall. Look along the chosen plane and right-click: the mint cell joins an existing block. Sneaking keeps the lock. <click:run_command:'/builder assist reset'><underlined>New anchor</underlined></click> · <click:run_command:'/builder assist line'><underlined>Line mode</underlined></click>. Stairs, slabs and special items keep their usual placement."
+      reset: "<prefix><#e8dfd2>Lock cleared. Your next ordinary placement will choose a new anchor."
+      line-ready: "<#72ebc5>Continue row · <orientation> <#e8dfd2>· Right-click"
+      plane-ready: "<#72ebc5>Plane · <orientation> <coordinate> <#e8dfd2>· Right-click"
+      occupied: "<#ffae64>Cell occupied <#8c8c8c>· /builder assist reset — new anchor"
+      protected: "<#ffae64>Building is unavailable here <#8c8c8c>· /builder assist reset"
+      collision: "<#ffae64>Move out of the selected cell <#8c8c8c>· /builder assist reset"
+      direction:
+        north: "north"
+        south: "south"
+        west: "west"
+        east: "east"
+        up: "up"
+        down: "down"
+      plane:
+        floor: "floor Y"
+        x: "wall X"
+        z: "wall Z"
       refused: "<#ffae64>Block not placed: the position or action is unavailable."
       unavailable: "<prefix><#ffae64>The placement assistant is unavailable. You can keep placing blocks normally."
     display-editor:
@@ -1598,7 +1640,7 @@ locales:
       cancel: '<#e8dfd2>Back'
     help:
       - "<prefix><white>Builder tools"
-      - "<white>/builder assist [on|off] <#e8dfd2>— personal helper for rows of full blocks"
+      - "<white>/builder assist line|plane <#e8dfd2>— lock a row or plane; reset — new anchor; off — disable"
       - "<white>/builder display <#e8dfd2>— decoration editor (separate permission)"
       - "<dark_gray>   <white>/builder wand <gray>— prepare the selector"
       - "<dark_gray>   <white>/builder fill [block] <gray>— fill using your materials"
@@ -1819,7 +1861,20 @@ locales:
         <prefix><green><hover:show_text:'A temporary copy of selected blocks with an anchor point.'>Blueprint</hover> <dark_gray>— <white><count> blocks
         <dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks were excluded.'>Skipped safely</hover>: <gray><skipped>
         <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Paste here]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create book]</click>
+      saved-cursor: |-
+
+        <prefix><green><hover:show_text:'A temporary copy of selected blocks with an anchor point.'>Blueprint</hover> <dark_gray>— <white><count> blocks
+        <dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks were excluded.'>Skipped safely</hover>: <gray><skipped>
+        <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Position blueprint]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create book]</click>
       retained: "<aqua>Blueprint retained <dark_gray>— <white>you can paste it again"
+      moving: |-
+        <prefix><#ffb142>The preview follows your cursor. <#e6fff3>The green outline marks the blueprint origin.
+        <#e6fff3>Left or right click to fix its position; Shift targets air. Confirm the paste afterwards.
+        <click:run_command:'/builder paste left'><#92bed8>[↶ 90°]</click>  <click:run_command:'/builder paste right'><#92bed8>[↷ 90°]</click>  <click:run_command:'/builder cancel'><#e6fff3>[Cancel]</click>
+      moving-actionbar: "<#ffb142>Cursor blueprint <#e6fff3>· Left / right click — fix position · Shift — air"
+      aim: "<#ffb142>Aim at a block <#e6fff3>· Shift targets air"
+      locked: "<#a8ef71>Position fixed <#e6fff3>· Checking blocks and materials…"
+      fixed-actions: "<click:run_command:'/builder paste left'><#92bed8>[↶ 90°]</click>  <click:run_command:'/builder paste right'><#92bed8>[↷ 90°]</click>  <click:run_command:'/builder paste'><#92bed8>[Move]</click>"
     book:
       system-issue:
         directory-suggestion: "<#e6fff3>Folder · <#d48763>/ <#e6fff3>— open"
@@ -2477,7 +2532,8 @@ locales:
       fill: "<hover:show_text:'Fills empty and replaceable positions with the selected block.'>Fill</hover>"
       replace: "<hover:show_text:'Changes only the selected source block into the target block.'>Block replacement</hover>"
       fence_disconnect: "<hover:show_text:'Clears current fence and wall connections; later neighbor updates may reconnect them.'>Fence and wall disconnection</hover>"
-      paste: "<hover:show_text:'Places the saved blueprint relative to your current position.'>Blueprint paste</hover>"
+      paste: "<hover:show_text:'Attaches the blueprint to the aimed cell. Click to fix its position, then confirm to place blocks.'>Blueprint paste</hover>"
+      paste-cursor: "<hover:show_text:'Attaches the blueprint to the aimed cell. Click to fix its position, then confirm to place blocks.'>Blueprint paste</hover>"
       build_book: "<hover:show_text:'Starts a persistent single-use book project that accepts materials gradually.'>Book construction</hover>"
       deconstruct: "<hover:show_text:'Removes safe selected blocks and returns their items.'>Deconstruction</hover>"
       crown: "<hover:show_text:'Generates tree foliage around the selected anchor.'>Crown</hover>"

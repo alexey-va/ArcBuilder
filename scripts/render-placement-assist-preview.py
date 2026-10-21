@@ -29,14 +29,26 @@ template = (renderer / "workshop-preview.template.html").read_text()
 template = template.replace("Мебельная мастерская", "Помощник строительства")
 template = template.replace("Состояние мастерской", "Состояние рамки")
 template = template.replace("Техническое превью: станки, этапы и готовая мебель; пол условный, без мира и NPC",
-    "Офлайн-превью одной клетки из кода ArcBuilder; пол условный, нативный glow не воспроизводится")
+    "Офлайн: ряд без точного прицела, пол и стена из геометрии ArcBuilder; нативный glow не воспроизводится")
+template = template.replace('data-view="front" aria-pressed="true"', 'data-view="front" aria-pressed="false"')
+template = template.replace('data-view="player" aria-pressed="false"', 'data-view="player" aria-pressed="true"')
+template = template.replace('<div id="viewport"></div>', '<div id="viewport"></div><div class="aim-marker" aria-hidden="true"></div>')
+template = template.replace('</style>', '''
+    .aim-marker{display:none;position:absolute;left:50%;top:50%;z-index:2;width:15px;height:15px;transform:translate(-50%,-50%);pointer-events:none}
+    .aim-marker::before,.aim-marker::after{content:"";position:absolute;background:#fff;box-shadow:0 0 1px 1px #232c2d}
+    .aim-marker::before{left:7px;top:0;width:1px;height:15px}.aim-marker::after{top:7px;left:0;height:1px;width:15px}
+    body:has([data-view="player"][aria-pressed="true"]) .aim-marker{display:block}
+  </style>''')
 (output / "template.html").write_text(template)
 subprocess.run(["node", str(renderer / "build-workshop-preview.mjs"), "--scene", str(scene),
     "--palette", str(output / "palette.json"), "--template", str(output / "template.html"),
     "--output", str(output / "index.html")], check=True)
 sources = ["src/main/kotlin/ru/arc/buildertools/BuilderPlacementAssistGeometry.kt",
+    "src/main/kotlin/ru/arc/buildertools/BuilderDisplayGeometry.kt",
+    "src/main/kotlin/ru/arc/buildertools/BuilderPlacementAssist.kt",
     "src/main/kotlin/ru/arc/buildertools/BuilderBlockDisplayRenderer.kt",
-    "src/test/kotlin/ru/arc/buildertools/BuilderPlacementAssistPreviewTest.kt"]
+    "src/test/kotlin/ru/arc/buildertools/BuilderPlacementAssistPreviewTest.kt",
+    "scripts/render-placement-assist-preview.py"]
 (output / "provenance.json").write_text(json.dumps({
     "kind": "offline source-derived geometry and pinned vanilla models; not native-client acceptance",
     "clientSha1": client_sha1,

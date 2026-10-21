@@ -70,9 +70,15 @@ class BuilderConstructionSiteDisplayLayoutTest : StringSpec({
         model.edges.count { it.scaleX > .08f } shouldBe 4
         model.edges.count { it.scaleY > .08f } shouldBe 4
         model.edges.count { it.scaleZ > .08f } shouldBe 4
-        model.edges.filter { it.scaleX > .08f }.map(BuilderDisplayEdge::scaleX).distinct() shouldBe listOf(8f)
-        model.edges.filter { it.scaleY > .08f }.map(BuilderDisplayEdge::scaleY).distinct() shouldBe listOf(8f)
-        model.edges.filter { it.scaleZ > .08f }.map(BuilderDisplayEdge::scaleZ).distinct() shouldBe listOf(11f)
+        model.edges.filter { it.scaleX > .08f }.map(BuilderDisplayEdge::scaleX).distinct() shouldBe listOf(8.08f)
+        model.edges.filter { it.scaleY > .08f }.map(BuilderDisplayEdge::scaleY).distinct() shouldBe listOf(7.92f)
+        model.edges.filter { it.scaleZ > .08f }.map(BuilderDisplayEdge::scaleZ).distinct() shouldBe listOf(10.92f)
+        model.edges.minOf { it.x } shouldBe (-3.04 plusOrMinus .00001)
+        model.edges.maxOf { it.x + it.scaleX } shouldBe (5.04 plusOrMinus .00001)
+        model.edges.minOf { it.y } shouldBe (43.96 plusOrMinus .00001)
+        model.edges.maxOf { it.y + it.scaleY } shouldBe (52.04 plusOrMinus .00001)
+        model.edges.minOf { it.z } shouldBe (-2.04 plusOrMinus .00001)
+        model.edges.maxOf { it.z + it.scaleZ } shouldBe (9.04 plusOrMinus .00001)
         model.panelX shouldBe (1.0 plusOrMinus .00001)
         model.panelY shouldBe (46.5 plusOrMinus .00001)
         model.panelZ shouldBe (9.75 plusOrMinus .00001)

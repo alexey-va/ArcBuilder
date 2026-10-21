@@ -46,10 +46,13 @@ class BuilderClipboardControllerTest : FunSpec({
                 val clipboard = tasks.finish(controller.copy(player))
                 clipboard.blocks.single().blockData shouldBe Material.STONE.createBlockData().asString
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
-                val paste = controller.planPaste(player)
+                val placement = controller.placement(player, BuilderBlockPos(world.uid, 8, 65, 9))
+                player.setRotation(100f, 20f)
+                val paste = controller.planPaste(player, placement)
                 harness.mutableBlocks shouldBe 0
                 val plan = tasks.finish(paste)
-                plan.changes.single().position shouldBe BuilderBlockPos(world.uid, 10, 64, 10)
+                plan.changes.single().position shouldBe BuilderBlockPos(world.uid, 8, 65, 7)
+                world.getBlockAt(8, 65, 7).type shouldBe Material.AIR
                 plan.costs.single().amount shouldBe 1
                 tasks.workerRuns shouldBe 4
             }
@@ -128,17 +131,17 @@ class BuilderClipboardControllerTest : FunSpec({
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
 
                 player.gameMode = GameMode.SURVIVAL
-                val survival = controller.planPaste(player).awaitBuilderPlanning()
+                val survival = controller.planPaste(player, controller.placement(player, BuilderBlockPos(world.uid, 10, 64, 12))).awaitBuilderPlanning()
                 survival.kind shouldBe BuilderPlanKind.PASTE
                 survival.changes.size shouldBe 2
                 survival.changes.single { it.position.x == 11 }.afterBlockData shouldBe slab.asString
                 survival.costs.sumOf { it.amount } shouldBe 3
 
                 player.gameMode = GameMode.CREATIVE
-                val creative = controller.planPaste(player).awaitBuilderPlanning()
+                val creative = controller.planPaste(player, controller.placement(player, BuilderBlockPos(world.uid, 10, 64, 12))).awaitBuilderPlanning()
                 creative.changes.size shouldBe 2
                 creative.costs shouldBe emptyList()
-                harness.pastePermissions shouldBe 2
+                harness.pastePermissions shouldBe 4
                 harness.mutableBlocks shouldBe 4
                 harness.placementMaterials shouldContainExactly
                     listOf(Material.STONE, Material.OAK_SLAB, Material.STONE, Material.OAK_SLAB)
@@ -171,7 +174,7 @@ class BuilderClipboardControllerTest : FunSpec({
                 clipboard.skippedUnsafeBlocks shouldBe 0
 
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
-                val plan = controller.planPaste(player).awaitBuilderPlanning()
+                val plan = controller.planPaste(player, controller.placement(player, BuilderBlockPos(world.uid, 10, 64, 12))).awaitBuilderPlanning()
                 plan.changes.size shouldBe 2
                 BuilderItemCodec.decode(plan.costs.single()).let { (item, amount) ->
                     item.type shouldBe Material.OAK_DOOR
@@ -197,7 +200,7 @@ class BuilderClipboardControllerTest : FunSpec({
                 player.teleport(Location(world, 10.5, 64.0, 12.5))
                 world.getBlockAt(10, 64, 10).type = Material.DEEPSLATE
 
-                val plan = controller.planPaste(player).awaitBuilderPlanning()
+                val plan = controller.planPaste(player, controller.placement(player, BuilderBlockPos(world.uid, 10, 64, 12))).awaitBuilderPlanning()
                 plan.changes.single().beforeBlockData shouldBe Material.DEEPSLATE.createBlockData().asString
                 plan.changes.single().afterBlockData shouldBe Material.STONE.createBlockData().asString
                 BuilderItemCodec.decode(plan.rewards.single()).let { (item, amount) ->
@@ -228,7 +231,7 @@ class BuilderClipboardControllerTest : FunSpec({
                 world.getBlockAt(10, 64, 10).type = Material.DEEPSLATE
                 world.getBlockAt(11, 64, 10).type = Material.CHEST
 
-                val plan = controller.planPaste(player).awaitBuilderPlanning()
+                val plan = controller.planPaste(player, controller.placement(player, BuilderBlockPos(world.uid, 10, 64, 12))).awaitBuilderPlanning()
                 plan.changes.size shouldBe 1
                 plan.changes.single().position.x shouldBe 10
                 plan.skippedUnsafeBlocks shouldBe 1

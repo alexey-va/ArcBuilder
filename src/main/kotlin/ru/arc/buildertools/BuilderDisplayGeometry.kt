@@ -59,16 +59,19 @@ internal object BuilderDisplayGeometry {
         val maxX = positions.maxOf { it.x } + 1.0
         val maxY = positions.maxOf { it.y } + 1.0
         val maxZ = positions.maxOf { it.z } + 1.0
+        require(thickness < minOf(maxX - minX, maxY - minY, maxZ - minZ))
         val half = thickness / 2.0
         return buildList(12) {
+            // X rails own all eight corners. The Y/Z rails meet their inner faces
+            // with butt joints, keeping the same silhouette without self-overlap.
             for (y in listOf(minY, maxY)) for (z in listOf(minZ, maxZ)) {
-                add(BuilderDisplayEdge(minX, y - half, z - half, (maxX - minX).toFloat(), thickness, thickness))
+                add(BuilderDisplayEdge(minX - half, y - half, z - half, (maxX - minX + thickness).toFloat(), thickness, thickness))
             }
             for (x in listOf(minX, maxX)) for (z in listOf(minZ, maxZ)) {
-                add(BuilderDisplayEdge(x - half, minY, z - half, thickness, (maxY - minY).toFloat(), thickness))
+                add(BuilderDisplayEdge(x - half, minY + half, z - half, thickness, (maxY - minY - thickness).toFloat(), thickness))
             }
             for (x in listOf(minX, maxX)) for (y in listOf(minY, maxY)) {
-                add(BuilderDisplayEdge(x - half, y - half, minZ, thickness, thickness, (maxZ - minZ).toFloat()))
+                add(BuilderDisplayEdge(x - half, y - half, minZ + half, thickness, thickness, (maxZ - minZ - thickness).toFloat()))
             }
         }
     }

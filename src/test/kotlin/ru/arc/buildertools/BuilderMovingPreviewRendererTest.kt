@@ -26,6 +26,74 @@ import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
 
 class BuilderMovingPreviewRendererTest : FunSpec({
+    test("paste publishes native clipboard states and origin together and freeze fences a pending cursor pose") {
+        withMovingPreview { fixture ->
+            for (x in -1..3) for (z in -1..0) fixture.world.loadChunk(x, z)
+            val clipboard = BuilderClipboard((0 until 64).map {
+                BuilderClipboardBlock(it, 0, 0, if (it % 2 == 0) "minecraft:stone" else "minecraft:oak_planks")
+            }, 64, 1, 1, 1, Long.MAX_VALUE)
+            val model = BuilderPastePreviewModel.create(clipboard, 0)
+            val first = BuilderBlockPos(fixture.world.uid, 0, 64, 0)
+            var displayed: BuilderBlockPos? = null
+            fixture.renderer.paste(fixture.player, model, first) { displayed = it }
+            displayed shouldBe null
+            fixture.drain()
+            displayed shouldBe first
+            fixture.visibleBlocks() shouldBe (0..31).toList()
+            fixture.blockStateConversions.any { it.material == Material.OAK_PLANKS } shouldBe true
+            fixture.active.values.count { it.glowRgb == 0x00ff00 } shouldBe 12
+            fixture.active.values.filter { it.glowRgb == 0x00ff00 }.map {
+                BuilderDisplayEdge(it.x, it.y, it.z, it.scaleX, it.scaleY, it.scaleZ)
+            }.toSet() shouldBe BuilderDisplayGeometry.originMarker(first).toSet()
+            val original = fixture.active.toMap()
+
+            fixture.renderer.paste(fixture.player, model, first.copy(x = 3)) { displayed = it }
+            displayed shouldBe first
+            fixture.renderer.freezePaste(fixture.player.uniqueId)
+            fixture.drain()
+            fixture.active shouldBe original
+            displayed shouldBe first
+
+            val next = first.copy(x = 4)
+            fixture.renderer.paste(fixture.player, model, next) { displayed = it }
+            fixture.drain()
+            displayed shouldBe next
+            fixture.world.entities.filterIsInstance<BlockDisplay>().size shouldBe 0
+            fixture.renderer.clearPaste(fixture.player.uniqueId)
+            fixture.drain()
+            fixture.active shouldBe emptyMap()
+        }
+    }
+
+    test("fixed paste keeps its moving scene until the protected plan publishes then retains the exact origin") {
+        withMovingPreview { fixture ->
+            for (x in -1..0) for (z in -1..0) fixture.world.loadChunk(x, z)
+            val clipboard = BuilderClipboard(listOf(BuilderClipboardBlock(0, 0, 0, "minecraft:stone")),
+                1, 1, 1, 1, Long.MAX_VALUE)
+            val anchor = BuilderBlockPos(fixture.world.uid, 2, 64, 0)
+            fixture.renderer.paste(fixture.player, BuilderPastePreviewModel.create(clipboard, 0), anchor) { }
+            fixture.drain()
+            val original = fixture.active.toMap()
+            val plan = BuilderPlan(UUID.randomUUID(), fixture.player.uniqueId, BuilderPlanKind.PASTE,
+                listOf(BuilderBlockChange(anchor, "minecraft:air", "minecraft:stone")), emptyList(), emptyList(),
+                createdAtMillis = 1, expiresAtMillis = Long.MAX_VALUE)
+            fixture.renderer.freezePaste(fixture.player.uniqueId)
+            fixture.renderer.plan(fixture.player, plan)
+            fixture.renderer.fixedPaste(fixture.player, anchor)
+            fixture.active shouldBe original
+            fixture.drain()
+            fixture.active.values.any { it.glowRgb == 0xffb142 } shouldBe false
+            fixture.active.values.count { it.glowRgb == 0x00ff00 } shouldBe 12
+            fixture.active.values.filter { it.glowRgb == 0x00ff00 }.map {
+                BuilderDisplayEdge(it.x, it.y, it.z, it.scaleX, it.scaleY, it.scaleZ)
+            }.toSet() shouldBe BuilderDisplayGeometry.originMarker(anchor).toSet()
+            fixture.visibleBlocks() shouldBe listOf(2)
+            fixture.renderer.clearPlan(fixture.player.uniqueId)
+            fixture.renderer.clearPaste(fixture.player.uniqueId)
+            fixture.active shouldBe emptyMap()
+        }
+    }
+
     for (book in listOf(false, true)) {
         test("${if (book) "book" else "plan"} window follows sub-block movement without resending retained blocks") {
             withMovingPreview { fixture ->
@@ -289,10 +357,15 @@ private fun withMovingPreview(previewLimit: Int = 32, test: (MovingPreviewFixtur
                 val messages = mockk<LocalizedMiniMessage>(relaxed = true)
                 every { messages.render(any(), any(), any()) } returns Component.empty()
                 val scheduler = TestTaskScheduler()
+                // Cell outlines straddle x/z = 0: their negative edges belong to the neighbouring chunks.
+                val visibleChunks = buildSet {
+                    for (x in -1..128) for (z in -1..0) add((x.toLong() and 0xffffffffL) or (z.toLong() shl 32))
+                }
                 LifecycleTaskScope(scheduler = scheduler).use { tasks ->
                     BuilderBlockDisplayRenderer(
                         plugin, previewLimit, 1f, false, 64.0, 20L, messages, tasks,
-                        packets = packets, sentChunks = { (0L..128L).toSet() },
+                        packets = packets, sentChunks = { visibleChunks },
+                        blockDataRotation = BuilderBlockDataRotation { data, _ -> data },
                     ).use { renderer ->
                         test(MovingPreviewFixture(world, otherWorld, player, scheduler, renderer, sent, active, conversions))
                     }

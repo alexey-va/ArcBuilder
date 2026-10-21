@@ -43,6 +43,10 @@ internal interface BuilderDisplayRenderer : BuildBookPreviewBridge, AutoCloseabl
     fun clearSelectionTarget(playerId: UUID) = Unit
     fun placementAssist(player: Player, position: BuilderBlockPos, blocked: Boolean) = Unit
     fun clearPlacementAssist(playerId: UUID) = Unit
+    fun paste(player: Player, model: BuilderPastePreviewModel, anchor: BuilderBlockPos, displayed: (BuilderBlockPos) -> Unit) = Unit
+    fun freezePaste(playerId: UUID) = Unit
+    fun fixedPaste(player: Player, anchor: BuilderBlockPos) = Unit
+    fun clearPaste(playerId: UUID) = Unit
     fun suppressSelectionGlow(playerId: UUID, suppressed: Boolean) = Unit
     fun clearSelection(playerId: UUID)
     fun plan(player: Player, plan: BuilderPlan)
@@ -106,8 +110,9 @@ internal class BuilderBlockDisplayRenderer(
     private val packets: BuilderPreviewPacketTransport = PacketEventsBuilderPreviewTransport(plugin),
     private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
     planningTasks: BuilderPlanningTasks? = null,
+    private val blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
 ) : BuilderDisplayRenderer, Listener {
-    private enum class Layer { SELECTION, TARGET, ASSIST, PLAN, BOOK }
+    private enum class Layer { SELECTION, TARGET, ASSIST, PASTE, PASTE_ORIGIN, PLAN, BOOK }
 
     private data class DisplaySpec(
         val x: Double,
@@ -159,6 +164,8 @@ internal class BuilderBlockDisplayRenderer(
     private var suppressedSelectionGlow = mutableSetOf<UUID>()
     private var movingPreviews = mutableMapOf<Pair<UUID, Layer>, MovingPreview>()
     private var pendingPlans = mutableMapOf<UUID, PlanCalculation>()
+    private val pasteModels = mutableMapOf<UUID, BuilderPastePreviewModel>()
+    private val fixedPasteOrigins = mutableMapOf<UUID, BuilderBlockPos>()
     private var bookSites = mutableMapOf<UUID, ConstructionSite>()
     private var bookBossBars = mutableMapOf<UUID, BossBar>()
     private var viewerRefresh: ScheduledTask? = null
@@ -200,11 +207,14 @@ internal class BuilderBlockDisplayRenderer(
         val layer: Layer,
         val sourceId: UUID?,
         points: BuilderPreviewPointSnapshot,
-        private val decorations: List<DisplaySpec>,
-        private val createSpec: (Int) -> DisplaySpec?,
+        private val decorations: (BuilderBlockPos?) -> List<DisplaySpec>,
+        private var origin: BuilderBlockPos? = null,
+        private val onRendered: (BuilderBlockPos?) -> Unit = {},
+        private val createSpec: (Int, BuilderBlockPos?) -> DisplaySpec?,
     ) : AutoCloseable {
         private var selected: List<Int>? = null
         private var specs = emptyMap<Int, DisplaySpec?>()
+        private var specOrigin: BuilderBlockPos? = null
         private var suspended = false
         private var failed = false
         private var rendered = false
@@ -234,7 +244,14 @@ internal class BuilderBlockDisplayRenderer(
             }
             suspended = false
             val eye = player.eyeLocation
-            window.update(BuilderPreviewPoint(eye.x, eye.y, eye.z))
+            window.update(BuilderPreviewPoint(eye.x - (origin?.x ?: 0), eye.y - (origin?.y ?: 0), eye.z - (origin?.z ?: 0)))
+        }
+
+        fun move(anchor: BuilderBlockPos) {
+            if (origin == anchor) return
+            origin = anchor
+            update()
+            if (!suspended) render(refresh = true)
         }
 
         fun refreshSurface() {
@@ -267,6 +284,7 @@ internal class BuilderBlockDisplayRenderer(
             val previous = scenes[key]?.takeIf { it.worldId == worldId }
             if (previous == null) remove(player.uniqueId, layer)
             val previousSpecs = specs
+            val renderOrigin = origin
             val nextSpecs = LinkedHashMap<Int, DisplaySpec?>()
             val byKey = LinkedHashMap<DisplayKey, DisplaySpec>()
             val keys = ArrayList<DisplayKey>()
@@ -280,12 +298,13 @@ internal class BuilderBlockDisplayRenderer(
             planningWork.capture(::current) {
                 if (cursor < indices.size) {
                     val index = indices[cursor++]
-                    val spec = if (!refresh && previousSpecs.containsKey(index)) previousSpecs[index] else createSpec(index)
+                    val spec = if (!refresh && specOrigin == renderOrigin && previousSpecs.containsKey(index)) previousSpecs[index]
+                        else createSpec(index, renderOrigin)
                     nextSpecs[index] = spec
                     retain(spec)
                     false
                 } else {
-                    decorations.forEach(::retain) // Fixed cuboid/origin edges, at most 24 specs.
+                    decorations(renderOrigin).forEach(::retain) // Cuboid/origin edges, at most 24 specs.
                     true
                 }
             }.thenCompose {
@@ -314,6 +333,8 @@ internal class BuilderBlockDisplayRenderer(
                                 syncScene(key)
                             }
                             specs = nextSpecs
+                            specOrigin = renderOrigin
+                            onRendered(renderOrigin)
                             true
                         }
                     }
@@ -415,6 +436,68 @@ internal class BuilderBlockDisplayRenderer(
         remove(playerId, Layer.SELECTION)
     }
 
+    override fun paste(
+        player: Player,
+        model: BuilderPastePreviewModel,
+        anchor: BuilderBlockPos,
+        displayed: (BuilderBlockPos) -> Unit,
+    ) {
+        if (closed || player.world.uid != anchor.worldId) return
+        val key = player.uniqueId to Layer.PASTE
+        if (pasteModels[player.uniqueId] === model) {
+            movingPreviews[key]?.let { it.move(anchor); return }
+        }
+        movingPreviews.remove(key)?.close()
+        pasteModels[player.uniqueId] = model
+        val rotatedData = mutableMapOf<String, BlockData>()
+        movingPreviews[key] = MovingPreview(
+            player, anchor.worldId, Layer.PASTE, null, model.points,
+            decorations = { current ->
+                val offset = checkNotNull(current)
+                edgeSpecs(model.bounds.map { edge -> edge.copy(x = edge.x + offset.x, y = edge.y + offset.y,
+                    z = edge.z + offset.z) }, Material.ORANGE_STAINED_GLASS, Color.fromRGB(255, 177, 66)) +
+                    edgeSpecs(BuilderDisplayGeometry.originMarker(offset), Material.LIME_CONCRETE, Color.LIME)
+            },
+            origin = anchor,
+            onRendered = { displayed(checkNotNull(it)) },
+        ) { index, current ->
+            val offset = checkNotNull(current)
+            val copied = model.blocks[index]
+            val x = Math.addExact(offset.x, copied.dx)
+            val y = Math.addExact(offset.y, copied.dy)
+            val z = Math.addExact(offset.z, copied.dz)
+            val world = player.world
+            if (y !in world.minHeight until world.maxHeight || !world.isChunkLoaded(x shr 4, z shr 4) ||
+                !world.worldBorder.isInside(Location(world, x + .5, y + .5, z + .5))
+            ) null else {
+                val data = rotatedData.getOrPut(copied.blockData) {
+                    blockDataRotation.rotate(Bukkit.createBlockData(copied.blockData), model.rotation)
+                }
+                previewTransform(world, x, y, z, data)?.let { transform ->
+                    DisplaySpec(x + transform.offset.toDouble(), y + transform.offset.toDouble(), z + transform.offset.toDouble(),
+                        data, transform.scale, transform.scale, transform.scale, glow = Color.fromRGB(255, 177, 66))
+                }
+            }
+        }.also(MovingPreview::update)
+    }
+
+    override fun freezePaste(playerId: UUID) {
+        movingPreviews.remove(playerId to Layer.PASTE)?.close()
+    }
+
+    override fun fixedPaste(player: Player, anchor: BuilderBlockPos) {
+        freezePaste(player.uniqueId)
+        fixedPasteOrigins[player.uniqueId] = anchor
+    }
+
+    override fun clearPaste(playerId: UUID) {
+        pasteModels.remove(playerId)
+        fixedPasteOrigins.remove(playerId)
+        movingPreviews.remove(playerId to Layer.PASTE)?.close()
+        remove(playerId, Layer.PASTE)
+        remove(playerId, Layer.PASTE_ORIGIN)
+    }
+
     override fun plan(player: Player, plan: BuilderPlan) {
         if (closed) return
         if (plan.changes.firstOrNull()?.position?.worldId != player.world.uid) {
@@ -465,8 +548,15 @@ internal class BuilderBlockDisplayRenderer(
         val blockStates = mutableMapOf<String, String>()
         movingPreviews[key] = MovingPreview(
             player, player.world.uid, Layer.PLAN, plan.id, geometry.points,
-            edgeSpecs(geometry.bounds, Material.MAGENTA_STAINED_GLASS, Color.fromRGB(197, 116, 255)),
-        ) { index ->
+            { edgeSpecs(geometry.bounds, Material.MAGENTA_STAINED_GLASS, Color.fromRGB(197, 116, 255)) },
+            onRendered = {
+                if (plan.kind == BuilderPlanKind.PASTE) fixedPasteOrigins[player.uniqueId]?.let { anchor ->
+                    clearPaste(player.uniqueId)
+                    replace(player, Layer.PASTE_ORIGIN,
+                        edgeSpecs(BuilderDisplayGeometry.originMarker(anchor), Material.LIME_CONCRETE, Color.LIME))
+                }
+            },
+        ) { index, _ ->
             val change = plan.changes[index]
             val after = Bukkit.createBlockData(change.afterBlockData)
             val removal = after.material.isAir
@@ -596,8 +686,8 @@ internal class BuilderBlockDisplayRenderer(
         movingPreviews[key] = MovingPreview(
             site.player, site.world.uid, Layer.BOOK, null,
             BuilderPreviewPointSnapshot.copyOf(model.bounds.map { BuilderPreviewPoint(it.x + .5, it.y + .5, it.z + .5) }),
-            decorations,
-        ) { index ->
+            { decorations },
+        ) { index, _ ->
             val block = model.blocks[index]
             val position = model.bounds[index]
             previewTransform(site.world, position.x, position.y, position.z, block.blockData)?.let { transform ->
@@ -825,6 +915,8 @@ internal class BuilderBlockDisplayRenderer(
 
     override fun clearPlayer(playerId: UUID) {
         pendingPlans.remove(playerId)
+        pasteModels.remove(playerId)
+        fixedPasteOrigins.remove(playerId)
         suppressedSelectionGlow.remove(playerId)
         movingPreviews.keys.filter { it.first == playerId }.forEach { movingPreviews.remove(it)?.close() }
         Layer.entries.forEach { remove(playerId, it) }
@@ -864,6 +956,8 @@ internal class BuilderBlockDisplayRenderer(
         scenes.clear()
         movingPreviews.clear()
         pendingPlans.clear()
+        pasteModels.clear()
+        fixedPasteOrigins.clear()
         suppressedSelectionGlow.clear()
         val nativeFailure = failure
         val packetDrain = runCatching { packets.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) }

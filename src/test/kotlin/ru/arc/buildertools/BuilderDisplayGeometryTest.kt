@@ -6,6 +6,8 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.floats.plusOrMinus
 import io.kotest.matchers.shouldBe
 import java.util.UUID
+import kotlin.math.max
+import kotlin.math.min
 
 class BuilderDisplayGeometryTest : StringSpec({
     "selection bounds are exactly twelve straight axis-aligned edges" {
@@ -21,9 +23,9 @@ class BuilderDisplayGeometryTest : StringSpec({
         edges.count { it.scaleX > .035f && it.scaleY == .035f && it.scaleZ == .035f } shouldBe 4
         edges.count { it.scaleX == .035f && it.scaleY > .035f && it.scaleZ == .035f } shouldBe 4
         edges.count { it.scaleX == .035f && it.scaleY == .035f && it.scaleZ > .035f } shouldBe 4
-        edges.filter { it.scaleX > .035f }.map { it.scaleX }.distinct() shouldBe listOf(6f)
-        edges.filter { it.scaleY > .035f }.map { it.scaleY }.distinct() shouldBe listOf(4f)
-        edges.filter { it.scaleZ > .035f }.map { it.scaleZ }.distinct() shouldBe listOf(3f)
+        edges.filter { it.scaleX > .035f }.map { it.scaleX }.distinct() shouldBe listOf(6.035f)
+        edges.filter { it.scaleY > .035f }.map { it.scaleY }.distinct() shouldBe listOf(3.965f)
+        edges.filter { it.scaleZ > .035f }.map { it.scaleZ }.distinct() shouldBe listOf(2.965f)
     }
 
     "empty scenes create no border displays" {
@@ -58,12 +60,33 @@ class BuilderDisplayGeometryTest : StringSpec({
                 Triple(edge.y, edge.scaleY, 64.0),
                 Triple(edge.z, edge.scaleZ, -7.0),
             )
-            axes.count { (start, scale, min) ->
-                scale == 1f && start == min
-            } shouldBe 1
+            axes.count { (_, scale, _) -> scale > .9f } shouldBe 1
             axes.count { (start, scale, min) ->
                 scale == .08f && (start < min || start + scale > min + 1.0)
             } shouldBe 2
+        }
+        edges.count { it.scaleX == 1.08f } shouldBe 4
+        edges.count { it.scaleY == .92f || it.scaleZ == .92f } shouldBe 8
+    }
+
+    "bounds and thick origin frames meet at corners without overlapping bar volumes" {
+        val world = UUID.randomUUID()
+        val first = BuilderBlockPos(world, -2, 64, -7)
+        for (positions in listOf(listOf(first), listOf(first, first.copy(x = 3, y = 67, z = -5)))) {
+            for (thickness in listOf(.035f, .08f, .25f)) {
+                val edges = BuilderDisplayGeometry.bounds(positions, thickness)
+                edges shouldHaveSize 12
+                for (i in edges.indices) for (j in i + 1 until edges.size) {
+                    val a = edges[i]
+                    val b = edges[j]
+                    val overlaps = listOf(
+                        min(a.x + a.scaleX, b.x + b.scaleX) - max(a.x, b.x),
+                        min(a.y + a.scaleY, b.y + b.scaleY) - max(a.y, b.y),
+                        min(a.z + a.scaleZ, b.z + b.scaleZ) - max(a.z, b.z),
+                    )
+                    overlaps.all { it > 1e-6 } shouldBe false
+                }
+            }
         }
     }
 

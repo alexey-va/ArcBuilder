@@ -11,18 +11,26 @@ The plugin uses arc-core 2.7.18 and requires ARC for its shared visual packet bu
 
 ## Player flow
 
-- `/builder assist` toggles a personal placement helper; `/builder assist on`
-  and `/builder assist off` set it explicitly. Any player can change this
-  preference without builder-tool permissions, and it survives reconnects.
-  Hold an ordinary full-cube block without custom item data. Place two
-  neighbouring blocks in a straight line normally, then aim at the
-  outlined next cell and use the held block to continue the row, including
-  from an air click beside the edge. Sneaking or changing the held slot resets
-  the line for ordinary placement. The private display outline never changes
-  blocks on its own. Each continuation uses the normal server placement path,
-  preserving inventory costs, collision, protection plugins and block physics;
-  the vanilla client's repeat delay still applies. Slabs, stairs, containers and
-  custom items continue to use ordinary vanilla placement.
+- `/builder assist line` locks a row after two adjacent ordinary placements.
+  Look towards the next mint cell and right-click: you can miss its exact face
+  while the earned direction stays fixed. `/builder assist plane` locks a floor
+  or wall after the first placement: place above a support for a floor, or on
+  its side for a wall. Your view selects nearby cells on that fixed plane,
+  each adjoining a safe existing full block. An occupied projected cell stops
+  placement. The action bar shows the row direction or the plane coordinate.
+  Sneaking keeps the lock for bridges; `/builder assist reset` chooses a fresh
+  anchor. Looking substantially away restores ordinary interaction.
+  `/builder assist` toggles the helper; `on` and `off` set it explicitly without
+  changing the selected mode. Every player can change this personal preference
+  without builder-tool permissions. Preference and mode survive reconnects;
+  the geometric lock clears on item/slot, world and gameplay-context changes.
+  Hold an ordinary full-cube block without custom item data. Both air clicks and
+  clicks on the ordinary background can place the highlighted cell, with one
+  assisted native attempt per server tick and no timer-driven placement.
+  Each continuation uses the normal server placement path, preserving inventory
+  costs, collision, protection plugins and physics within ordinary reach and
+  sight. Slabs, stairs, containers and custom items retain vanilla placement.
+  The vanilla client's repeat delay still applies.
 - `/builder wand` gives selection guidance. Left click selects point 1; right
   click selects point 2. Distinct straight BlockDisplay outlines remain visible
   until the selection is cleared or expires.
@@ -58,8 +66,11 @@ The plugin uses arc-core 2.7.18 and requires ARC for its shared visual packet bu
   Survival consumes the new blocks and returns the old ones; creative does not
   exchange inventory.
 - `/builder copy` stores the build relative to the player's position and facing.
-  `/builder paste` previews it at the player's current position; rotation can be
-  adjusted before confirmation.
+  `/builder paste` attaches a private preview to the aimed cell, which becomes
+  the copied origin. Shift targets adjacent or free air just like the selector.
+  A fresh left/right click fixes the displayed placement; `/builder confirm`
+  then applies the checked plan. `/builder paste left|right` rotates around the
+  same origin, including after it has been fixed.
 - Fill, paste, deconstruction, crowns, and books silently skip containers,
   technical blocks, custom Slimefun/ItemsAdder blocks, and other unsafe state.
   Reward-bearing ore blocks (every `*_ORE` block plus ancient debris) are also

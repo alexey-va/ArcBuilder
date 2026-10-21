@@ -1,6 +1,8 @@
 # Placement assistant preview
 
-The focused export uses `BuilderPlacementAssistAppearance.edges()` and its actual ready/blocked materials. Each state contains the same twelve display bars and two ordinary placed blocks. This is an offline geometry and vanilla-texture check; Minecraft glow, glass blending, input timing and actual world lighting still require a native client.
+The focused export uses `BuilderPlacementAssistAppearance.edges()` and its actual ready/blocked materials. Four fixtures show a locked row while the crosshair misses the next cell, a floor, a wall and a blocked row. Line selection comes from the production `last + direction` lock; plane cells come from the production projection and bounded candidate geometry with ordinary adjacent supports. Each state contains exactly twelve display bars and its supporting blocks.
+
+The player camera preserves each fixture's actual gaze; it is not recentered on the frame. A small crosshair is a viewer diagnostic for that gaze. Front, side and top views inspect the same geometry. This is an offline geometry and vanilla-texture check; Minecraft glow, glass blending, input timing, native prediction reconciliation and actual world lighting still require a native client. The source export is not evidence that a vanilla client accepted the interaction.
 
 Generate the scene, then render it with the shared location-atelier renderer:
 

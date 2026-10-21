@@ -176,6 +176,7 @@ internal class BuilderToolsRuntime(
         taskScope,
         movementPeriodTicks = config.previewMovementPeriodTicks,
         planningTasks = planningTasks,
+        blockDataRotation = blockDataRotation,
     )
     internal val closeCompletion = CompletableFuture<Unit>()
     private val capturedMaximumRange = config.maximumRange
@@ -298,6 +299,26 @@ internal class BuilderToolsRuntime(
             )
 
             override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
+        },
+    )
+    private val pastePreview = BuilderPastePreview(
+        clipboard = clipboardController,
+        renderer = this.displayRenderer,
+        tasks = planningTasks,
+        target = { selectionTargetResolver(it, config.maximumRange) },
+        allowed = { player ->
+            !operationLocks.isPlayerLocked(player.uniqueId) && entityEditor?.isEditing(player) != true &&
+                runCatching {
+                    ensureAvailable(player)
+                    ensureFeaturePermission(player, BuilderFeature.PASTE)
+                }.isSuccess
+        },
+        onLock = ::prepareLockedPaste,
+        onClear = ::clearLockedPastePlan,
+        onFailure = ::reportPlanningFailure,
+        hint = { player, key ->
+            if (key == "clipboard.moving") send(player, key)
+            else player.sendActionBar(messages.render(key, locale(player)))
         },
     )
     private val deconstructionController = BuilderDeconstructionController(
@@ -728,6 +749,7 @@ internal class BuilderToolsRuntime(
                     bookPreviewPresentation.clearConfirmation(playerId)
                 },
                 onExpired = { playerId ->
+                    pastePreview.clear(playerId)
                     shop.clear(playerId)
                     crown.clearAnchor(playerId)
                 },
@@ -737,7 +759,7 @@ internal class BuilderToolsRuntime(
             ).also { initializedPreviews = it }
             crown = BuilderCrownController(
                 plugin = plugin,
-                inputSuppressed = { entityEditor?.isEditing(it) == true },
+                inputSuppressed = { entityEditor?.isEditing(it) == true || pastePreview.isActive(it.uniqueId) },
                 messages = messages,
                 safety = safety,
                 selections = selections,
@@ -971,16 +993,19 @@ internal class BuilderToolsRuntime(
                 taskScope = taskScope,
                 isContextAllowed = { player ->
                     !closed && !player.isDead && entityEditor?.isEditing(player) != true &&
+                        !pastePreview.isActive(player.uniqueId) &&
                         !operationLocks.isPlayerLocked(player.uniqueId) &&
                         runCatching { ensureOperationalContext(player) }.isSuccess
                 },
                 canBuild = { player, block, material ->
                     runCatching { ensureMutable(player, block, material) }.isSuccess
                 },
+                canUseSupport = { block -> safety.isSafeExisting(block) },
                 sendMessage = sendPlayerMessage,
             )
             checkNotNull(taskScope.runTimer(1L, 1L) {
                 selectionActionPanel?.tick()
+                pastePreview.tick()
                 tickSelectionTargets()
                 entityEditor?.tick()
                 placementAssist?.tick()
@@ -996,6 +1021,7 @@ internal class BuilderToolsRuntime(
                 }
             }
             attempt { HandlerList.unregisterAll(this) }
+            attempt { pastePreview.close() }
             attempt { selectionActionPanel?.close() }
             attempt { crownSelectionDialog?.close() }
             attempt { entityEditor?.close() }
@@ -1133,6 +1159,7 @@ internal class BuilderToolsRuntime(
 
     private fun canUseSelectionPanel(player: Player): Boolean =
         !closed && player.isOnline && !recovering && !recoveryBlocked &&
+            !pastePreview.capturesInput(player.uniqueId) &&
             entityEditor?.isEditing(player) != true &&
             isSelector(player.inventory.itemInMainHand) && hasUsePermission(player) &&
             BuilderGameModePolicy.allows(player.gameMode) && config.allowsWorld(player.world.name) &&
@@ -1342,6 +1369,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun dismissSelectionControls(playerId: UUID) {
+        pastePreview.clear(playerId)
         clearSelectionTarget(playerId)
         materialScans.remove(playerId)
         selectionPanelPages.remove(playerId)
@@ -1420,6 +1448,7 @@ internal class BuilderToolsRuntime(
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onBookGameModeChange(event: org.bukkit.event.player.PlayerGameModeChangeEvent) {
         invalidatePendingBookRequests(event.player.uniqueId)
+        pastePreview.clear(event.player.uniqueId)
     }
 
     private fun openFillMaterialPicker(player: Player) {
@@ -1498,7 +1527,7 @@ internal class BuilderToolsRuntime(
         if (root != BuilderRootCommand.ASSIST && !hasUsePermission(sender)) return emptyList()
         if (!rootCommandAvailable(sender, root)) return emptyList()
         if (root == BuilderRootCommand.ASSIST) {
-            return if (args.size == 2) filterPrefix(listOf("on", "off"), args[1]) else emptyList()
+            return if (args.size == 2) filterPrefix(listOf("on", "off", "line", "plane", "reset"), args[1]) else emptyList()
         }
         if (root == BuilderRootCommand.DISPLAY) return entityEditor?.tabComplete(args.drop(1)).orEmpty()
         if (root == BuilderRootCommand.CROWN) return crown.tabComplete(args)
@@ -1565,6 +1594,8 @@ internal class BuilderToolsRuntime(
             checkNotNull(placementAssist).command(player, args.drop(1))
             return
         }
+        if (root !in setOf(BuilderRootCommand.PASTE, BuilderRootCommand.CONFIRM, BuilderRootCommand.CANCEL,
+                BuilderRootCommand.STATUS, BuilderRootCommand.HELP)) pastePreview.clear(player.uniqueId)
         if (root != BuilderRootCommand.DISPLAY && entityEditor?.hasSession(player) == true) {
             entityEditor?.command(player, listOf("exit"))
         }
@@ -1597,7 +1628,7 @@ internal class BuilderToolsRuntime(
             BuilderRootCommand.COPY -> {
                 requestPlanning(player, { current -> clipboardController.copy(player, current) }) { copied -> send(
                     player,
-                    "clipboard.saved",
+                    "clipboard.saved-cursor",
                     mapOf(
                         "count" to messages.literal(copied.blocks.size),
                         "skipped" to messages.literal(copied.skippedUnsafeBlocks),
@@ -1614,13 +1645,22 @@ internal class BuilderToolsRuntime(
                 else -> books.handleCommand(player, args.drop(1))
             }
             BuilderRootCommand.PASTE -> {
-                when (args.getOrNull(1)?.lowercase(Locale.ROOT)) {
-                    null -> Unit
-                    "rotate", "right" -> clipboardController.rotate(player.uniqueId, 90)
-                    "left" -> clipboardController.rotate(player.uniqueId, -90)
+                val rotation = when (args.getOrNull(1)?.lowercase(Locale.ROOT)) {
+                    null -> 0
+                    "rotate", "right" -> 90
+                    "left" -> -90
                     else -> throw BuilderUserFailure("errors.material")
                 }
-                startPlanning(player) { current -> clipboardController.planPaste(player, current) }
+                ensureFeaturePermission(player, BuilderFeature.PASTE)
+                if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
+                if (rotation == 0 || !pastePreview.rotate(player, rotation)) {
+                    if (rotation != 0) clipboardController.rotate(player.uniqueId, rotation)
+                    bookRequests.invalidate(player.uniqueId)
+                    discardPendingPlan(player.uniqueId)
+                    placementAssist?.clearPlayer(player.uniqueId)
+                    dismissSelectionControls(player.uniqueId)
+                    pastePreview.begin(player)
+                }
             }
             BuilderRootCommand.DECONSTRUCT -> startPlanning(player) { current -> deconstructionController.plan(player, current) }
             BuilderRootCommand.CROWN -> crown.handle(player, args.drop(1))
@@ -2031,6 +2071,33 @@ internal class BuilderToolsRuntime(
         if (confirmImmediately) confirmImmediately(player, plan) else preparePlan(player, plan)
     })
 
+    private fun prepareLockedPaste(player: Player, placement: BuilderPastePlacement, current: () -> Boolean) {
+        previews.discard(player.uniqueId)
+        shop.clear(player.uniqueId)
+        requestPlanning(player,
+            request = { requestCurrent -> clipboardController.planPaste(player, placement) { current() && requestCurrent() } },
+            failed = { failure ->
+                if (current()) pastePreview.clear(player.uniqueId)
+                reportPlanningFailure(player, failure)
+            },
+            ready = { plan ->
+                requireCurrentBuilderPlanning(current)
+                try {
+                    preparePlan(player, plan)
+                    pastePreview.prepared(player.uniqueId, placement, plan.id)
+                    send(player, "clipboard.fixed-actions")
+                } catch (failure: Throwable) {
+                    pastePreview.clear(player.uniqueId)
+                    throw failure
+                }
+            },
+        )
+    }
+
+    private fun clearLockedPastePlan(playerId: UUID, planId: UUID?) {
+        if (planId != null && previews.plan(playerId)?.id == planId) discardPendingPlan(playerId)
+    }
+
     private fun reportPlanningFailure(player: Player, raw: Throwable?) {
         var failure = raw ?: return
         while (failure is CompletionException && failure.cause != null) failure = checkNotNull(failure.cause)
@@ -2408,6 +2475,7 @@ internal class BuilderToolsRuntime(
         if (updatesPhysics(plan)) physicsUpdater.validate()
         if (!operationLocks.tryLock(plan)) throw BuilderUserFailure("errors.busy")
         previews.remove(player.uniqueId, pending)
+        pastePreview.clear(player.uniqueId)
         shop.clear(player.uniqueId)
         crown.clearAnchor(player.uniqueId)
         val instanceId = plan.bookInstanceId
@@ -3265,6 +3333,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun cancelPlan(player: Player) {
+        val movingPaste = pastePreview.clear(player.uniqueId)
         val loading = bookRequests.invalidate(player.uniqueId)
         val quoting = books.invalidateSchematicRequests(player.uniqueId)
         books.cancelPreviewActivation(player.uniqueId)
@@ -3291,7 +3360,7 @@ internal class BuilderToolsRuntime(
         } else if (BuildingManager.closePreview(player.uniqueId)) {
             bookPreviewPresentation.clearPlayer(player.uniqueId)
             send(player, "book.preview-cancelled")
-        } else if (loading || quoting) {
+        } else if (loading || quoting || movingPaste) {
             bookPreviewPresentation.clearPlayer(player.uniqueId)
             send(player, "plan.cancelled")
         } else {
@@ -3345,6 +3414,7 @@ internal class BuilderToolsRuntime(
         val selection = selectionOrNull(player)
         val selectionPoints = selections.points(player.uniqueId, player.world.uid)
         when {
+            pastePreview.capturesInput(player.uniqueId) -> send(player, "clipboard.moving")
             active != null -> send(player, "status.plan", mapOf("kind" to kindLabel(player, active.record.plan.kind), "count" to messages.literal(active.appliedChanges), "total" to messages.literal(active.record.plan.changes.size)))
             construction != null -> send(
                 player,
@@ -3635,12 +3705,14 @@ internal class BuilderToolsRuntime(
         }
 
     private fun kindLabel(player: Player, kind: BuilderPlanKind): Component =
-        messages.render("kinds.${kind.name.lowercase(Locale.ROOT)}", locale(player))
+        messages.render(if (kind == BuilderPlanKind.PASTE) "kinds.paste-cursor"
+            else "kinds.${kind.name.lowercase(Locale.ROOT)}", locale(player))
 
     private fun constructionStateLabel(player: Player, state: BuilderConstructionProjectState): Component =
         messages.render("construction.states.${state.name.lowercase(Locale.ROOT)}", locale(player))
 
     private fun discardPendingPlan(playerId: UUID) {
+        pastePreview.clear(playerId)
         previews.plan(playerId)?.let { plan -> plannedConstructionProjects.remove(plan.id) }
         previews.discard(playerId)
         shop.clear(playerId)
@@ -3883,6 +3955,14 @@ internal class BuilderToolsRuntime(
                         .outcome("rejected", "player_lock")
                 }
             }
+            return
+        }
+        if (event.action in listOf(
+                org.bukkit.event.block.Action.LEFT_CLICK_AIR, org.bukkit.event.block.Action.LEFT_CLICK_BLOCK,
+                org.bukkit.event.block.Action.RIGHT_CLICK_AIR, org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK,
+            ) && pastePreview.capturesInput(player.uniqueId)) {
+            event.isCancelled = true
+            runBuilderAction(player) { pastePreview.click(player, event.hand == EquipmentSlot.HAND) }
             return
         }
         if (entityEditor?.isEditing(player) == true) return
@@ -4154,6 +4234,7 @@ internal class BuilderToolsRuntime(
 
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
+        pastePreview.clear(event.player.uniqueId)
         selectionTargets.remove(event.player.uniqueId)
         selectionTargetFailures.remove(event.player.uniqueId)
         bookRequests.invalidate(event.player.uniqueId)
@@ -4265,6 +4346,7 @@ internal class BuilderToolsRuntime(
         }
         attempt(::publishRuntimeHealth)
         attempt { HandlerList.unregisterAll(this) }
+        attempt { pastePreview.close() }
         attempt { selectionActionPanel?.close() }
         attempt { crownSelectionDialog?.close() }
         attempt { entityEditor?.close() }

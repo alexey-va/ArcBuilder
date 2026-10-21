@@ -40,7 +40,7 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 | `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
 | `crown` | `BuilderCrownController` | `CROWN` | `arcbuild.crown` |
 | `display` | `display/BuilderDisplayEditor` | separate decorative entity edits | explicit `arcbuild.display` |
-| `assist [on\|off]` | `BuilderPlacementAssist` | native single-block placement | personal preference; no builder permission |
+| `assist [on\|off\|line\|plane\|reset]` | `BuilderPlacementAssist` | native single-block placement | personal preference; no builder permission |
 | `book` | `BuilderBookLifecycle` and its coordinators | `BUILD_BOOK` when building | book permissions |
 | `confirm`, `cancel`, `undo`, `status` | `BuilderToolsRuntime` | `UNDO` for undo | existing operation context |
 
@@ -66,30 +66,60 @@ the fill, replace, and fence-disconnect controllers.
 
 ## Personal placement assistant
 
-`BuilderPlacementAssist` owns the player opt-in preference, transient straight
-line and next-cell targeting. `/builder assist [on|off]` changes only that
-preference before the general builder permission and operation gates, so players
-can change it without builder-tool permissions. Existing global recovery and
-durable player-lease input isolation remains authoritative. Actual targeting and use still require the ordinary
-game mode, world, recovery, operation-lock, range, loaded-chunk, border and build
-protection checks. Active display-editor input takes priority.
+`BuilderPlacementAssist` owns persistent opt-in and mode preferences plus a
+transient geometric constraint. `assist [on|off|line|plane|reset]` is available
+without builder permissions. `line` and `plane` enable their mode; `on` retains
+it; `reset` discards only the constraint. Existing recovery and durable
+player-lease input isolation remains authoritative. Actual targeting and use
+require the ordinary game mode, world, recovery, operation-lock, range,
+loaded-chunk, border and protection checks. Display-editor and moving paste
+input take priority and clear transient assistance.
 
-The first implementation assists ordinary full-cube block items without custom
-metadata; partial shapes, containers and custom items retain vanilla placement.
-Two adjacent successful normal block placements establish the line. Only a new
-main-hand use action aimed at the next cell may continue it; the tick callback
-refreshes the personal display, never places blocks. A narrow adapter bound to
-Paper 1.21.11 invokes the normal native use-item-on handler on the owning thread.
-The native path remains responsible for placement events, cancellation,
-collision, item consumption and physics; the helper does not implement a second
-block or inventory transaction and does not create bulk-operation undo records.
-Input admission retains the native prediction sequence and fences connection,
-item, slot, world and lifecycle state before use.
+In line mode, two adjacent successful normal placements earn a cardinal
+direction. Thereafter only the next cell advances `last + direction`;
+incidental placements never reorient it. A 40-degree view sector keeps that cell
+selected without requiring its exact face under the crosshair. Plane mode
+records the first normal placement's support face: vertical normals fix Y for
+a floor, horizontal normals fix X or Z for a wall. The eye ray projects onto the
+plane through that cell's centre. At most nine local cells within 1.25 blocks
+of the projection are considered in nearest-first, coordinate-stable order.
+An occupied projected cell stops instead of searching unrelated holes. Each
+offered cell needs an adjacent native support face in the same plane.
 
-Transient targeting and displays clear on disable, invalid context, sneak,
-slot changes, teleport, world change, death, disconnect and runtime close.
-The persistent preference is separate from the line, so a reconnect or reload
-requires a fresh normal line before assistance can place another block.
+The shared resolver produces both preview and input targets. Current and
+packet-derived aim must resolve the same target, support and face. Separate
+loaded-chunk-safe sight checks trace to the real target volume; actual native
+support-face reach, world borders and player collision remain bounded. Arbitrary
+plane supports pass the existing custom-block safety policy, full-cube shape and
+non-interactable checks. Normal gaze at an interactive or integrated custom block
+does not publish an offer. Partial shapes, containers and custom item stacks
+retain ordinary vanilla behavior.
+
+Only fresh main-hand `USE_ITEM` or matching `PLAYER_BLOCK_PLACEMENT` input may
+claim an immutable offer. Admission removes it atomically; there is at most one
+cancelled pending input and one assisted native attempt per player per runtime
+tick. Success does not publish a successor until the next tick, so a vanilla
+use-on/air fallback burst cannot place twice. Ticks only refresh the private
+twelve-edge display and localized direction/plane HUD. Sneaking preserves the
+constraint; slot/item changes, inventory opening, teleport, world/context exits,
+death, disconnect, disable and close clear it while retaining preferences.
+
+The cached Paper 1.21.11 native adapter invokes `handleUseItemOn` synchronously
+on the owning thread with the native timestamp. Placement events, cancellation,
+debit, collision and physics remain native; the helper never manually changes
+blocks or inventory and does not create bulk undo records. Connection, item,
+slot, world and lock identity are checked again before dispatch. Every cancelled
+sequence is acknowledged on its captured connection; redirected use-on inputs
+also receive authoritative inventory and original clicked/adjacent block state
+from the owning thread, with connection/world/loaded-coordinate fences. Packet
+capture is serialized with close so pending corrections drain without native
+placement or a future scheduled callback.
+
+The earned line and `last + direction` principle is grounded in
+[Pro Placer 1.21.11, commit cc3bfe5](https://github.com/Fuzss/pro-placer/blob/cc3bfe5680d1200f41600b6d5ea1213b7b4add0b/Common/src/main/java/fuzs/proplacer/client/handler/AbstractFastBlockHandler.java).
+The plane mode and forgiving view sector are ArcBuilder behavior. The upstream
+client's key-release detection, per-tick native calls and repeat-delay override
+are not available to a server-only plugin.
 
 ## Selection and preview
 
@@ -419,7 +449,21 @@ Replacing with air remains unsupported; removal belongs to `deconstruct`.
 
 `BuilderClipboardController` copies only safe blocks, stores coordinates
 relative to the selected cuboid and the player's anchor, rotates cloned block
-data, and plans paste at the player's current block position.
+data, and plans paste from an explicit immutable anchor and rotation.
+`BuilderPastePreview` owns the separate MOVING, PLANNING and FIXED input states.
+The moving anchor uses `BuilderSelectionTarget`, including Shift adjacent/free-air
+targeting. Initial facing plus explicit left/right rotation chooses orientation;
+aiming alone does not rotate the clipboard. The private PASTE layer reuses the
+async nearest-block window and shared native capture budget, with relative
+geometry prepared off-thread once per rotation. Only the bounded displayed
+window is translated on target changes. Its origin callback identifies the
+last complete published scene; a fresh main-hand click locks exactly that
+anchor and rotation before one full protected/material-aware paste plan.
+Moving input suppresses selection corners, crown brush and native placement
+assistance. The launch gesture cannot lock the scene in the same tick. Context
+exits and cancellation fence deferred work and clear only that paste session;
+the clipboard remains available until its ordinary TTL. After fixation, the
+existing plan, repricing and explicit confirmation transaction remains authoritative.
 
 The book subsystem is larger and should be entered through
 `BuilderBookLifecycle.kt`:

@@ -10,7 +10,7 @@ Standalone Kotlin/Paper plugin for survival-friendly Builder Tools and construct
 - Never require WorldGuard. Lands is optional and wilderness/global land is buildable; inside a Land, use Lands' real build permission.
 - Unsafe containers, Bedrock, Slimefun, ItemsAdder custom blocks, and tile entities are skipped and summarized once; ordinary falling blocks are safe.
 - All previews are player-only native BlockDisplay scenes with explicit cleanup. Selection, clipboard, and operation bounds use distinct stable colors.
-- Copy stores the player's anchor relative to the selected cuboid. Paste anchors at the player's current block position, applies rotation around that anchor, then previews before confirmation.
+- Copy stores the player's anchor relative to the selected cuboid. Paste follows the selector cursor (including Shift targeting), uses that cell as its origin, and applies rotation around it. A fresh click locks the displayed placement before the existing explicit confirmation.
 - Player-facing text belongs in `modules/builder-tools.yml`; GUI item text is non-italic.
   Keep compact domain terms and summary metrics visually short, but explain
   every potentially unfamiliar term or value with localized MiniMessage hover

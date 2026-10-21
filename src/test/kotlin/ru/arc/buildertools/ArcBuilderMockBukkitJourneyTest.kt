@@ -838,6 +838,83 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("panel paste follows the cursor and its launch and fixing clicks never alter selection or world") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("CursorPaste", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, .5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            journey.command(player, "builder copy") shouldBe true
+            player.inventory.addItem(ItemStack(Material.STONE, 2))
+            val selection = journey.renderer.selections[player.uniqueId]
+            val firstAnchor = BuilderBlockPos(world.uid, 4, 65, 5)
+            journey.targetCells[player.uniqueId] = firstAnchor
+            journey.selectionPanelAction(player, BuilderPanelAction.PASTE)
+            journey.clickPaste(player) // Same-tick remainder of the panel activation cannot fix the placement.
+            journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
+            journey.awaitPaste(player)
+            journey.renderer.pastes[player.uniqueId]?.second shouldBe firstAnchor
+            journey.amount(player, Material.STONE) shouldBe 2
+
+            val shiftedAnchor = firstAnchor.copy(x = 5, y = 66)
+            player.isSneaking = true
+            journey.targetCells[player.uniqueId] = shiftedAnchor // Same resolver seam covers the Shift air cell.
+            journey.paper.performTicks(1)
+            journey.renderer.pastes[player.uniqueId]?.second shouldBe shiftedAnchor
+            journey.clickPaste(player, EquipmentSlot.OFF_HAND)
+            journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
+            journey.fixPaste(player)
+            val fixed = checkNotNull(journey.renderer.plans[player.uniqueId])
+            fixed.changes.single().position shouldBe BuilderBlockPos(world.uid, 5, 66, 2)
+            journey.renderer.selections[player.uniqueId] shouldBe selection
+            world.getBlockAt(5, 66, 2).type shouldBe Material.AIR
+            journey.amount(player, Material.STONE) shouldBe 2
+
+            journey.targetCells[player.uniqueId] = firstAnchor.copy(x = 11)
+            player.setRotation(140f, 20f)
+            journey.paper.performTicks(3)
+            checkNotNull(journey.renderer.plans[player.uniqueId]).id shouldBe fixed.id
+            journey.command(player, "builder paste right")
+            val rotated = checkNotNull(journey.renderer.plans[player.uniqueId])
+            rotated.changes.single().position shouldBe BuilderBlockPos(world.uid, 8, 66, 5)
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(8, 66, 5).type == Material.STONE }
+            world.getBlockAt(5, 66, 2).type shouldBe Material.AIR
+            journey.amount(player, Material.STONE) shouldBe 1
+            journey.renderer.selections[player.uniqueId] shouldBe selection
+        }
+    }
+
+    test("command paste with a normal held block consumes input and cancellation retains the clipboard") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("PlainBlockPaste", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, .5, 64.0, 3.5, 0f, 0f))
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand")
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            journey.command(player, "builder copy")
+            player.inventory.setItemInMainHand(ItemStack(Material.STONE, 4))
+            val anchor = BuilderBlockPos(world.uid, 3, 64, 5)
+            journey.targetCells[player.uniqueId] = anchor
+            player.performCommand("builder paste") shouldBe true
+            player.performCommand("builder cancel") shouldBe true
+            journey.paper.performTicks(5)
+            journey.renderer.pastes.containsKey(player.uniqueId) shouldBe false
+            journey.renderer.plans.containsKey(player.uniqueId) shouldBe false
+            journey.paste(player, anchor)
+            world.getBlockAt(3, 64, 2).type shouldBe Material.AIR
+            player.inventory.itemInMainHand.amount shouldBe 4
+            player.performCommand("builder confirm")
+            journey.awaitSettled(player) { world.getBlockAt(3, 64, 2).type == Material.STONE }
+            player.inventory.itemInMainHand.amount shouldBe 3
+        }
+    }
+
     test("survival copy paste and undo omit technical hearts while preserving their target cells") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("SurvivalBuilder", GameMode.SURVIVAL)
@@ -875,7 +952,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.teleport(Location(world, 10.5, 64.0, 13.5, 0f, 0f))
             val heartTarget = world.getBlockAt(12, 64, 10).also { it.type = Material.BEDROCK }
 
-            journey.command(player, "builder paste") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 10, 64, 13)) shouldBe true
             world.getBlockAt(10, 64, 10).type shouldBe Material.AIR
             world.getBlockAt(11, 64, 10).type shouldBe Material.AIR
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
@@ -928,7 +1005,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.command(player, "builder copy") shouldBe true
 
             player.teleport(Location(world, 10.5, 64.0, 10.5, 0f, 0f))
-            journey.command(player, "builder paste right") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 10, 64, 10), "right") shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             world.getBlockAt(13, 64, 10).type shouldBe Material.AIR
             world.getBlockAt(13, 64, 11).type shouldBe Material.AIR
@@ -965,7 +1042,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             BlockBreakEvent(world.getBlockAt(4, 64, 0), player).also(journey.paper::callEvent).isCancelled shouldBe false
 
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            journey.command(player, "builder paste") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 10, 64, 3)) shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
@@ -988,7 +1065,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             world.getBlockAt(11, 64, 0).type = Material.CHEST
             player.inventory.addItem(ItemStack(Material.STONE))
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            journey.command(player, "builder paste") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 10, 64, 3)) shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 1
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
@@ -996,7 +1073,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
 
             player.inventory.addItem(ItemStack(Material.STONE), ItemStack(Material.OAK_PLANKS))
             player.teleport(Location(world, 14.5, 64.0, 3.5, 0f, 0f))
-            journey.command(player, "builder paste") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 14, 64, 3)) shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) {
@@ -1024,7 +1101,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.addItem(ItemStack(Material.OAK_DOOR))
 
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            journey.command(player, "builder paste") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 10, 64, 3)) shouldBe true
             checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) {
@@ -1048,7 +1125,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
             journey.command(player, "builder copy") shouldBe true
             player.teleport(Location(world, 10.5, 64.0, 3.5, 0f, 0f))
-            journey.command(player, "builder paste") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 10, 64, 3)) shouldBe true
 
             player.gameMode = GameMode.SURVIVAL
             player.performCommand("builder confirm") shouldBe true
@@ -1058,7 +1135,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             BlockBreakEvent(world.getBlockAt(4, 64, 0), player).also(journey.paper::callEvent).isCancelled shouldBe false
 
             player.gameMode = GameMode.CREATIVE
-            journey.command(player, "builder paste") shouldBe true
+            journey.paste(player, BuilderBlockPos(world.uid, 10, 64, 3)) shouldBe true
             player.performCommand("builder confirm") shouldBe true
             journey.awaitSettled(player) { world.getBlockAt(10, 64, 0).type == Material.STONE }
         }
@@ -1659,7 +1736,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.select(owner, world, owner.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
             journey.command(owner, "builder copy") shouldBe true
             owner.teleport(Location(world, 5.5, 64.0, 3.5, 0f, 0f))
-            journey.command(owner, "builder paste") shouldBe true
+            journey.paste(owner, BuilderBlockPos(world.uid, 5, 64, 3)) shouldBe true
 
             journey.renderer.selections.containsKey(owner.uniqueId) shouldBe true
             journey.renderer.plans.containsKey(owner.uniqueId) shouldBe true
@@ -1726,7 +1803,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             listOf(10.5, 14.5, 18.5).forEach { x ->
                 player.teleport(Location(world, x, 64.0, 3.5, 0f, 0f))
                 if (x == 14.5) world.getBlockAt(14, 64, 0).type = Material.DEEPSLATE
-                journey.command(player, "builder paste") shouldBe true
+                journey.paste(player, BuilderBlockPos(world.uid, x.toInt(), 64, 3)) shouldBe true
                 player.performCommand("builder confirm") shouldBe true
                 journey.awaitSettled(player) {
                     world.getBlockAt(x.toInt(), 64, 0).type == Material.STONE &&
@@ -1875,6 +1952,34 @@ private class ArcBuilderJourney private constructor(
         val accepted = player.performCommand(command)
         awaitPlanning()
         return accepted
+    }
+
+    /** Existing mutation journeys now explicitly pass through moving, fresh-click lock, and plan. */
+    fun paste(player: Player, anchor: BuilderBlockPos, rotation: String = ""): Boolean {
+        targetCells[player.uniqueId] = anchor
+        val accepted = command(player, "builder paste $rotation".trim())
+        renderer.plans.containsKey(player.uniqueId) shouldBe false
+        awaitPaste(player)
+        fixPaste(player)
+        return accepted
+    }
+
+    fun awaitPaste(player: Player) {
+        await("published moving clipboard preview") { renderer.pastes.containsKey(player.uniqueId) }
+    }
+
+    fun fixPaste(player: Player) {
+        paper.performTicks(1)
+        clickPaste(player)
+        awaitPlanning()
+    }
+
+    @Suppress("DEPRECATION")
+    fun clickPaste(player: Player, hand: EquipmentSlot = EquipmentSlot.HAND) {
+        val event = PlayerInteractEvent(player, Action.RIGHT_CLICK_AIR, player.inventory.itemInMainHand,
+            null, BlockFace.SELF, hand)
+        paper.callEvent(event)
+        event.isCancelled shouldBe true
     }
 
     private fun awaitPlanning() {
@@ -2256,6 +2361,7 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
     val selections = mutableMapOf<UUID, RecordedSelection>()
     val plans = mutableMapOf<UUID, BuilderPlan>()
     val targets = mutableMapOf<UUID, BuilderBlockPos>()
+    val pastes = mutableMapOf<UUID, Pair<BuilderPastePreviewModel, BuilderBlockPos>>()
     private val books = mutableSetOf<UUID>()
     var selectionRenders = 0
         private set
@@ -2279,6 +2385,13 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
         targets.remove(playerId)
     }
 
+    override fun paste(player: Player, model: BuilderPastePreviewModel, anchor: BuilderBlockPos, displayed: (BuilderBlockPos) -> Unit) {
+        pastes[player.uniqueId] = model to anchor
+        displayed(anchor)
+    }
+
+    override fun clearPaste(playerId: UUID) { pastes.remove(playerId) }
+
     override fun plan(player: Player, plan: BuilderPlan) {
         plans[player.uniqueId] = plan
     }
@@ -2292,6 +2405,7 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
         plans.remove(playerId)
         books.remove(playerId)
         targets.remove(playerId)
+        pastes.remove(playerId)
     }
 
     override fun open(site: ConstructionSite) {
@@ -2311,6 +2425,7 @@ private class RecordingBuilderDisplayRenderer : BuilderDisplayRenderer {
         plans.clear()
         books.clear()
         targets.clear()
+        pastes.clear()
     }
 }
 

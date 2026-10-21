@@ -149,22 +149,34 @@ internal class BuilderClipboardController(
         }
     }
 
-    fun planPaste(player: Player, isCurrent: () -> Boolean = { true }): CompletableFuture<BuilderPlan> {
+    fun placement(player: Player, anchor: BuilderBlockPos): BuilderPastePlacement {
         check(!closed) { "Builder clipboard controller is closed" }
         host.ensurePastePermission(player)
         val clipboard = current(player.uniqueId) ?: host.fail("errors.expired")
-        val anchor = BuilderBlockPos(player.world.uid, player.location.blockX, player.location.blockY, player.location.blockZ)
+        require(anchor.worldId == player.world.uid)
+        return BuilderPastePlacement(clipboard, anchor, normalizeRotation(
+            rotationFromYaw(player.yaw) - clipboard.sourceRotation + rotationAdjustments.getOrDefault(player.uniqueId, 0),
+        ))
+    }
+
+    fun planPaste(
+        player: Player,
+        placement: BuilderPastePlacement,
+        isCurrent: () -> Boolean = { true },
+    ): CompletableFuture<BuilderPlan> {
+        check(!closed) { "Builder clipboard controller is closed" }
+        host.ensurePastePermission(player)
+        val clipboard = current(player.uniqueId) ?: host.fail("errors.expired")
+        if (clipboard !== placement.clipboard) host.fail("errors.expired")
+        val anchor = placement.anchor.validated()
+        if (anchor.worldId != player.world.uid) host.fail("errors.world-not-allowed")
         val world = player.world
         val playerId = player.uniqueId
         val gameMode = player.gameMode
         val usesInventory = BuilderGameModePolicy.usesInventory(gameMode)
-        val adjustment = rotationAdjustments.getOrDefault(playerId, 0)
-        val rotation = normalizeRotation(
-            rotationFromYaw(player.yaw) - clipboard.sourceRotation + adjustment,
-        )
+        val rotation = placement.rotation
         val current = { isCurrent() && !closed && player.isOnline && player.world.uid == anchor.worldId &&
-            player.gameMode == gameMode && this.current(playerId) === clipboard &&
-            rotationAdjustments.getOrDefault(playerId, 0) == adjustment }
+            player.gameMode == gameMode && this.current(playerId) === clipboard }
         val costs = mutableListOf<BuilderItemAmount>()
         val rewards = mutableListOf<BuilderItemAmount>()
         val prototypes = BuilderItemCodec.PrototypeCache()
@@ -172,15 +184,7 @@ internal class BuilderClipboardController(
         val changes = mutableListOf<BuilderBlockChange>()
         var skippedUnsafe = 0
         return host.compute {
-            clipboard.blocks.map { copied ->
-                val (rotatedX, rotatedZ) = rotate(copied.dx - clipboard.originDx, copied.dz - clipboard.originDz, rotation)
-                BuilderBlockPos(
-                    worldId = anchor.worldId,
-                    x = Math.addExact(anchor.x, rotatedX),
-                    y = Math.addExact(anchor.y, copied.dy - clipboard.originDy),
-                    z = Math.addExact(anchor.z, rotatedZ),
-                ).validated() to copied.blockData
-            }
+            placement.targets()
         }.thenCompose { targets ->
             host.onMain {
                 val positions = targets.iterator()
@@ -270,13 +274,6 @@ internal class BuilderClipboardController(
             adjusted <= 225 -> 180
             else -> 270
         }
-    }
-
-    private fun rotate(x: Int, z: Int, rotation: Int): Pair<Int, Int> = when (normalizeRotation(rotation)) {
-        90 -> -z to x
-        180 -> -x to -z
-        270 -> z to -x
-        else -> x to z
     }
 
     private fun normalizeRotation(rotation: Int): Int = ((rotation % 360) + 360) % 360
