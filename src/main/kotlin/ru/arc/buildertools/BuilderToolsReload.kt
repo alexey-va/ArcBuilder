@@ -318,6 +318,7 @@ internal object BuilderToolsReloadPreflight {
         "enabled" to YamlValueType.BOOLEAN,
         "allowed-worlds" to YamlValueType.STRING_LIST,
         "default-locale" to YamlValueType.STRING,
+        "presentation.font" to YamlValueType.STRING,
         "locale.follow-client" to YamlValueType.BOOLEAN,
         "storage.schematics-root" to YamlValueType.STRING,
         "limits.max-changes" to YamlValueType.INT,
@@ -448,7 +449,7 @@ internal object BuilderToolsReloadPreflight {
     )
 
     private val RUNTIME_OVERRIDE_TYPES = BUILDER_TYPES.filterKeys {
-        it == "enabled" || it == "allowed-worlds" || it == "storage.schematics-root" ||
+        it == "enabled" || it == "allowed-worlds" || it == "storage.schematics-root" || it == "presentation.font" ||
             it == "book-contracts.enabled" || it == "book-contracts.construction-markup-percent" ||
             it == "book-contracts.max-issue-price" || it.startsWith("book-contracts.mysql.")
     }

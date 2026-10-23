@@ -2,6 +2,7 @@ package ru.arc.buildertools.display
 
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.TextDecoration
+import ru.arc.buildertools.BuilderDialogPresentation
 import ru.arc.paper.menu.PaperDialogActionId
 import ru.arc.paper.menu.PaperDialogBody
 import ru.arc.paper.menu.PaperDialogButton
@@ -24,11 +25,14 @@ internal object DisplayEditorMenu {
         selectedText: Boolean,
         canUndo: Boolean,
         selection: Component?,
+        presentation: BuilderDialogPresentation = BuilderDialogPresentation(),
         action: (String) -> Unit,
     ): PaperDialogScreen = PaperDialogScreen(
         id = "builder.display-editor",
         title = text("title"),
-        body = listOfNotNull(PaperDialogBody(text("intro"), 400), selection?.let { PaperDialogBody(it, 400) }, PaperDialogBody(text("controls"), 400)),
+        body = listOfNotNull(presentation.paragraph(text("intro"), 400),
+            selection?.let { PaperDialogBody(it, 400) }, presentation.divider(400),
+            presentation.callout(text("controls"), 400)),
         buttons = buildList {
             add(button("block", text("create-block"), text("create-block-help"), action))
             add(button("item", text("create-item"), text("create-item-help"), action))
@@ -59,13 +63,15 @@ internal object DisplayEditorMenu {
         chooseAxis: (DisplayEditorAxis, DisplayEditorScale?) -> Unit,
         applyScale: (DisplayEditorScale?) -> Unit,
         reset: (Boolean) -> Unit,
+        presentation: BuilderDialogPresentation = BuilderDialogPresentation(),
     ) = PaperDialogScreen(
         id = "builder.display-editor.axes",
         title = text("axis-title"),
         body = listOfNotNull(
-            PaperDialogBody(text("axis-body"), 380),
+            presentation.paragraph(text("axis-body"), 380),
             selection?.let { PaperDialogBody(it, 380) },
-            PaperDialogBody(text(if (scale == null) "scale-select-first" else "scale-body"), 380),
+            presentation.divider(380),
+            presentation.callout(text(if (scale == null) "scale-select-first" else "scale-body"), 380),
             feedback?.let { PaperDialogBody(it, 380) },
         ),
         numberInputs = scale?.values()?.mapIndexed { index, value ->

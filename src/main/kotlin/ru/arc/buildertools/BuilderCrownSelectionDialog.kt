@@ -4,7 +4,6 @@ import net.kyori.adventure.text.Component
 import org.bukkit.Material
 import org.bukkit.entity.Player
 import ru.arc.paper.menu.PaperDialogActionId
-import ru.arc.paper.menu.PaperDialogBody
 import ru.arc.paper.menu.PaperDialogButton
 import ru.arc.paper.menu.PaperDialogClickContext
 import ru.arc.paper.menu.PaperDialogInputId
@@ -23,6 +22,7 @@ internal class BuilderCrownSelectionDialog(
     private val leafMaterials: List<Material>,
     private val isCurrent: (Player, BuilderSelection, UUID?) -> Boolean,
     private val onPreview: (Player, BuilderSelection, UUID?, BuilderCrownSelectionOptions) -> Boolean,
+    private val presentation: BuilderDialogPresentation = BuilderDialogPresentation(),
 ) : AutoCloseable {
     private class Session(
         val selection: BuilderSelection,
@@ -159,7 +159,7 @@ internal class BuilderCrownSelectionDialog(
             id = SETUP_SCREEN_ID,
             title = text("title"),
             body = listOf(
-                PaperDialogBody(
+                presentation.callout(
                     text(
                         "body",
                         mapOf(
@@ -169,6 +169,7 @@ internal class BuilderCrownSelectionDialog(
                             "thickness" to Component.text(session.options.thickness),
                         ),
                     ),
+                    400,
                 ),
             ),
             numberInputs = listOf(

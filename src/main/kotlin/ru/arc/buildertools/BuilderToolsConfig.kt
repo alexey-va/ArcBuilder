@@ -1,5 +1,6 @@
 package ru.arc.buildertools
 
+import net.kyori.adventure.key.Key
 import org.bukkit.Material
 import ru.arc.ARC
 import ru.arc.config.Config
@@ -20,6 +21,8 @@ class BuilderToolsConfig(
     private val config: Config,
     private val runtimeOverride: Config? = null,
 ) {
+    val dialogDecorationFont: String
+        get() = (runtimeOverride?.stringOrNull("presentation.font") ?: config.string("presentation.font", "")).trim()
     val enabled: Boolean get() = runtimeOverride?.bool("enabled", config.bool("enabled", false)) ?: config.bool("enabled", false)
     val allowedWorlds: Set<String>
         get() = (runtimeOverride?.stringListOrNull("allowed-worlds") ?: config.stringList("allowed-worlds"))
@@ -200,6 +203,9 @@ class BuilderToolsConfig(
         }
         require(schematicsRoot.isNotBlank() && schematicsRoot.length <= 512 && schematicsRoot.none(Char::isISOControl)) {
             "Builder-tools schematic root is invalid"
+        }
+        require(dialogDecorationFont.isEmpty() || (':' in dialogDecorationFont && Key.parseable(dialogDecorationFont))) {
+            "Builder-tools presentation.font must be a namespaced font key or empty"
         }
         require(maxChanges in 1..BuilderPlan.ABSOLUTE_MAX_IMMEDIATE_CHANGES) {
             "Builder-tools immediate max-changes is invalid"

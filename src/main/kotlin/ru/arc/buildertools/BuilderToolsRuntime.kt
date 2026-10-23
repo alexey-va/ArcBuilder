@@ -967,6 +967,7 @@ internal class BuilderToolsRuntime(
                 leafMaterials = Material.entries.filter(safety::isLeaf).sortedBy(Material::name),
                 isCurrent = ::crownSelectionDialogCurrent,
                 onPreview = ::prepareSelectionCrown,
+                presentation = BuilderDialogPresentation(config.dialogDecorationFont),
             )
             selectionActionPanel = BuilderSelectionActionPanel(
                 plugin, config.selectionPanelSettings(), messages, ::selectionPanelView, ::onSelectionPanelAction,
@@ -974,6 +975,7 @@ internal class BuilderToolsRuntime(
             )
             entityEditor = BuilderDisplayEditor(
                 plugin = plugin,
+                presentation = BuilderDialogPresentation(config.dialogDecorationFont),
                 text = { player, key, values ->
                     messages.render(key, locale(player), values.mapValues { messages.literal(it.value) })
                 },

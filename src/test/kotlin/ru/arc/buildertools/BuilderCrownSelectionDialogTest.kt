@@ -11,6 +11,12 @@ import io.papermc.paper.connection.PlayerGameConnection
 import io.papermc.paper.dialog.DialogResponseView
 import io.papermc.paper.event.player.PlayerCustomClickEvent
 import net.kyori.adventure.key.Key
+import net.kyori.adventure.text.Component
+import org.bukkit.configuration.file.YamlConfiguration
+import ru.arc.buildertools.display.DisplayEditorMenu
+import ru.arc.buildertools.display.DisplayEditorMode
+import ru.arc.buildertools.display.DisplayEditorAxis
+import ru.arc.buildertools.display.DisplayEditorScale
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Material
 import org.bukkit.entity.Player
@@ -24,6 +30,67 @@ import java.util.Locale
 import kotlin.Function3
 
 class BuilderCrownSelectionDialogTest : FunSpec({
+    test("dialogue text ornaments preserve localized editor controls and export actual Core screens") {
+        val configuration = checkNotNull(javaClass.getResourceAsStream("/modules/builder-tools.yml")).reader().use(YamlConfiguration::loadConfiguration)
+        val messages = LocalizedMiniMessage(catalogs = listOf("ru", "en").associateWith { locale ->
+            object : LocaleCatalog {
+                override fun scalar(path: String) = configuration.getString("locales.$locale.$path")
+                override fun lines(path: String) = configuration.getStringList("locales.$locale.$path")
+            }
+        }, defaultLocale = { "ru" })
+        MockBukkitTestRuntime.open().use { paper ->
+            val player = spyk(paper.addPlayer("DialogueEditor"))
+            val plugin = paper.createSimplePlugin("BuilderDialogPreview")
+            val world = paper.addSimpleWorld("dialogue-preview")
+            try {
+                for (locale in listOf("ru", "en")) for (font in listOf("", "arc:dialog_ui")) {
+                    BuilderLocalePolicy.configure(defaultLocaleTag = locale, followClientLocale = false)
+                    val presentation = BuilderDialogPresentation(font)
+                    CrownDialogHarness(plugin, player, messages, presentation).use { harness ->
+                        fun text(key: String) = messages.render("display-editor.$key", locale)
+                        fun decorated(screen: PaperDialogScreen) = screen.body.joinToString {
+                            PlainTextComponentSerializer.plainText().serialize(it.text)
+                        }.codePoints().anyMatch { it in 0xF9000..0xF9FFF }
+                        val suffix = "${if (font.isEmpty()) "plain-" else ""}$locale"
+                        for (long in listOf(false, true)) {
+                            val state = if (long) "long-" else ""
+                            val selection = messages.render("display-editor.selected-object", locale, mapOf(
+                                "kind" to messages.render("display-editor.kind-text", locale),
+                                "x" to Component.text(if (long) "12345.5" else "12.5"),
+                                "y" to Component.text(if (long) "319.5" else "65.5"),
+                                "z" to Component.text(if (long) "-12345.5" else "-3.5"),
+                            ))
+                            val root = DisplayEditorMenu.root(::text, DisplayEditorMode.ROTATE, true, true, true, selection, presentation) {}
+                            root.buttons.map { it.id.value } shouldBe listOf("block", "item", "text", "move", "rotate", "scale",
+                                "axis", "enter", "exit", "duplicate", "delete", "edit_text", "undo")
+                            decorated(root) shouldBe font.isNotEmpty()
+                            harness.show(root)
+                            exportBuilderDialog("editor-$state$suffix", harness.screen())
+                            val axes = DisplayEditorMenu.axes(::text, DisplayEditorAxis.Y, DisplayEditorScale(1.234f, .05f, 4f),
+                                selection, null, { _, _ -> }, {}, {}, presentation)
+                            axes.numberInputs.map { it.initial } shouldBe listOf(123f, 5f, 400f)
+                            axes.buttons.map { it.id.value } shouldBe listOf("axis_free", "axis_x", "axis_y", "axis_z",
+                                "apply_scale", "reset_scale", "reset_rotation")
+                            decorated(axes) shouldBe font.isNotEmpty()
+                            harness.show(axes)
+                            exportBuilderDialog("axes-$state$suffix", harness.screen())
+                            val region = BuilderSelection(BuilderBlockPos(world.uid, 0, 64, 0),
+                                BuilderBlockPos(world.uid, if (long) 127 else 4, if (long) 319 else 64, if (long) 127 else 0))
+                            harness.open(region) { _, _, _ -> false }
+                            val crown = harness.screen()
+                            crown.numberInputs.single().initial shouldBe 3f
+                            crown.buttons.map { it.id.value } shouldBe listOf("density_airy", "density_natural", "density_dense", "material", "preview")
+                            decorated(crown) shouldBe font.isNotEmpty()
+                            exportBuilderDialog("crown-$state$suffix", crown)
+                        }
+                    }
+                }
+            } finally {
+                BuilderLocalePolicy.configure(defaultLocaleTag = "ru", followClientLocale = false)
+            }
+        }
+    }
+
     test("native crown settings can revise density and leaf material before preview") {
         BuilderLocalePolicy.configure(defaultLocaleTag = "en", followClientLocale = false)
         try {
@@ -110,17 +177,19 @@ class BuilderCrownSelectionDialogTest : FunSpec({
 
 private data class UUIDAndSelection(val planId: java.util.UUID?, val selection: BuilderSelection)
 
-private class CrownDialogHarness(private val plugin: JavaPlugin, private val player: Player) : AutoCloseable {
+private class CrownDialogHarness(
+    private val plugin: JavaPlugin,
+    private val player: Player,
+    private val messages: LocalizedMiniMessage = LocalizedMiniMessage(
+        catalogs = mapOf("en" to CrownDialogCatalog()), defaultLocale = { "en" }),
+    presentation: BuilderDialogPresentation = BuilderDialogPresentation(),
+) : AutoCloseable {
     data class Presentation(val screen: PaperDialogScreen, val registration: Any)
 
     val presentations = mutableListOf<Presentation>()
     private val runtime = crownDialogTestRuntime(plugin) { _, screen, registration ->
         presentations += Presentation(screen, registration)
     }
-    private val messages = LocalizedMiniMessage(
-        catalogs = mapOf("en" to CrownDialogCatalog()),
-        defaultLocale = { "en" },
-    )
     private val picker = BuilderMaterialPicker(plugin, messages, runtime)
     private var currentGuard: () -> Boolean = { true }
     private var previewHandler: (BuilderSelection, java.util.UUID?, BuilderCrownSelectionOptions) -> Boolean =
@@ -132,6 +201,7 @@ private class CrownDialogHarness(private val plugin: JavaPlugin, private val pla
         leafMaterials = listOf(Material.OAK_LEAVES, Material.BIRCH_LEAVES),
         isCurrent = { _, _, _ -> currentGuard() },
         onPreview = { _, captured, planId, options -> previewHandler(captured, planId, options) },
+        presentation = presentation,
     )
 
     init {
@@ -150,6 +220,11 @@ private class CrownDialogHarness(private val plugin: JavaPlugin, private val pla
     }
 
     fun screen(): PaperDialogScreen = presentations.last().screen
+
+    fun show(screen: PaperDialogScreen) {
+        runtime.beginFlow(player)
+        runtime.open(player, screen)
+    }
 
     fun click(action: String, thickness: Float? = null) = clickKey(key(action), thickness)
 

@@ -2,6 +2,9 @@
 enabled: false
 allowed-worlds: []
 default-locale: ru
+presentation:
+  # Set to arc:dialog_ui only on a server whose resource pack provides the dialogue library.
+  font: ''
 locale:
   # false keeps the configured language even when the client uses another language.
   follow-client: false

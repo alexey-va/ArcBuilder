@@ -45,6 +45,7 @@ import org.joml.Matrix4f
 import org.joml.Vector3d
 import org.joml.Vector3f
 import ru.arc.buildertools.BuilderMaterialArguments
+import ru.arc.buildertools.BuilderDialogPresentation
 import ru.arc.paper.menu.DialogTextLayout
 import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.menu.PaperDialogScreen
@@ -73,6 +74,7 @@ internal class BuilderDisplayEditor(
         world.spawn(at, type) { configure(it) }
     },
     private val axes: DisplayEditorAxes = DisplayEditorAxes(plugin),
+    private val presentation: BuilderDialogPresentation = BuilderDialogPresentation(),
 ) : Listener, AutoCloseable {
     internal enum class Kind { BLOCK, ITEM, TEXT }
 
@@ -507,6 +509,7 @@ internal class BuilderDisplayEditor(
         show(player, session, { fresh -> DisplayEditorMenu.root(
             { tr(player, it) }, session.mode, selected != null, selected is TextDisplay, session.undo.isNotEmpty(),
             selected?.let(::capture)?.let { selectionLabel(player, it) },
+            presentation = presentation,
         ) { action -> if (fresh()) when (action) {
             "block" -> createBlock(player, session, null)
             "item" -> createItem(player, session, null)
@@ -531,6 +534,7 @@ internal class BuilderDisplayEditor(
         show(player, session, { fresh ->
             DisplayEditorMenu.axes(
                 { tr(player, it) }, session.axis, scale, before?.let { selectionLabel(player, it) }, feedback?.let { tr(player, it) },
+                presentation = presentation,
                 chooseAxis = { axis, values -> if (fresh()) {
                     setAxis(player, session, axis)
                     openAxes(player, session, scaleDraft = values ?: scale)

@@ -38,6 +38,28 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         plain.serialize(candidate.messages().render("selection-panel.actions.next-page", "ru")) shouldBe ">"
     }
 
+    test("dialogue font is an explicit validated runtime override and can be opted out") {
+        val root = configRoot()
+        BuilderToolsReloadPreflight.load(root).dialogDecorationFont shouldBe ""
+        val base = Config(root, "modules/builder-tools.yml")
+        base.setString("presentation.font", "arc:dialog_ui")
+        base.saveStrict()
+        BuilderToolsReloadPreflight.load(root).dialogDecorationFont shouldBe "arc:dialog_ui"
+        val override = Config(root, "modules/builder-tools-runtime.yml")
+        override.setString("presentation.font", "")
+        override.saveStrict()
+        BuilderToolsReloadPreflight.load(root).dialogDecorationFont shouldBe ""
+        override.setString("presentation.font", "arc:dialog_ui")
+        override.saveStrict()
+        BuilderToolsReloadPreflight.load(root).dialogDecorationFont shouldBe "arc:dialog_ui"
+        override.setString("presentation.font", "invalid font")
+        override.saveStrict()
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }.message.orEmpty() shouldContain "presentation.font"
+        override.setInt("presentation.font", 7)
+        override.saveStrict()
+        shouldThrowAny { BuilderToolsReloadPreflight.load(root) }.message.orEmpty() shouldContain "presentation.font"
+    }
+
     test("appearance-only classification includes all other YAML values and preserves old ARGB during merge") {
         val root = configRoot()
         val original = BuilderToolsReloadPreflight.prepare(root)
