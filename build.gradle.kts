@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.97"
+version = "1.0.98"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -36,14 +36,14 @@ kotlin { jvmToolchain(25) }
 
 dependencies {
     implementation(kotlin("stdlib"))
-    implementation("ru.ruscrafting.arc:arc-core:2.7.42")
-    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.42")
-    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.42")
-    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.42")
-    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.42")
+    implementation("ru.ruscrafting.arc:arc-core:2.7.55")
+    implementation("ru.ruscrafting.arc:arc-core-logging:2.7.55")
+    implementation("ru.ruscrafting.arc:arc-core-menu:2.7.55")
+    implementation("ru.ruscrafting.arc:arc-core-paper:2.7.55")
+    implementation("ru.ruscrafting.arc:arc-core-paper-menu:2.7.55")
     implementation("org.snakeyaml:snakeyaml-engine:3.0.1")
-    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.42")
-    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.42")
+    implementation("ru.ruscrafting.arc:arc-core-sql:2.7.55")
+    compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.55")
     compileOnly("ru.ruscrafting.arc:arc-onboarding-api:0.1.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
@@ -71,8 +71,8 @@ dependencies {
     testImplementation("fr.maxlego08.menu:zmenu-api:1.1.1.9")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.42")
-    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.42")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.55")
+    testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.55")
     testImplementation("ru.ruscrafting.arc:arc-onboarding-api:0.1.0")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.Slimefun:Slimefun4:4.10")
@@ -83,7 +83,7 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.0.3")
 
     "integrationTestImplementation"(sourceSets.test.get().output)
-    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.42")
+    "integrationTestImplementation"("ru.ruscrafting.arc:arc-core-integration-testing:2.7.55")
     configurations["integrationTestImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["integrationTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
 }
