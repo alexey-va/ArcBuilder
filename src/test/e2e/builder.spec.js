@@ -15,15 +15,15 @@ async function commands(server, player, commands) {
   await expect(player).toHaveReceivedMessage(marker);
 }
 
-async function assertWorld(server, player, material) {
+async function assertWorld(server, player, material, secondMaterial = material) {
   const marker = `world-${randomUUID()}`;
-  server.execute(`minecraft:execute if block 0 64 0 ${material} if block 1 64 0 ${material} run tellraw ${player.username} {"text":"${marker}"}`);
+  server.execute(`minecraft:execute if block 0 64 0 ${material} if block 1 64 0 ${secondMaterial} run tellraw ${player.username} {"text":"${marker}"}`);
   await expect(player).toHaveReceivedMessage(marker);
 }
 
-async function clientBlocks(player, material, signal) {
-  await waitUntil(() => [0, 1].every(x => player.bot.blockAt(player.bot.entity.position.clone().set(x, 64, 0))?.name === material), {
-    signal, timeout: 10000, message: `${player.username} did not receive ${material} blocks`,
+async function clientBlocks(player, material, signal, secondMaterial = material) {
+  await waitUntil(() => [material, secondMaterial].every((expected, x) => player.bot.blockAt(player.bot.entity.position.clone().set(x, 64, 0))?.name === expected), {
+    signal, timeout: 10000, message: `${player.username} did not receive ${material}, ${secondMaterial} blocks`,
   });
 }
 
@@ -130,6 +130,37 @@ test('cancelled replacement rejects a stale confirmation without consuming or re
   await clientBlocks(player, 'oak_planks', signal);
   assert.equal(itemCount(player, 'diamond_block'), 2);
   assert.equal(itemCount(player, 'oak_planks'), 0);
+});
+
+test('replacement rejects a world change after preview without partial writes or material exchange', async ({ player, server, signal }) => {
+  await selectReplacement(player, server, signal);
+  player.chat('/builder replace oak_planks diamond_block');
+  await expect(player).toHaveReceivedMessage('[▶ Build]');
+
+  // Change the second block so validation must reject the whole two-block plan.
+  await commands(server, player, ['minecraft:setblock 1 64 0 birch_planks']);
+  await clientBlocks(player, 'oak_planks', signal, 'birch_planks');
+  const rejectedSince = player.messageBuffer.length;
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('The plan or clipboard expired.', { since: rejectedSince });
+  await assertWorld(server, player, 'oak_planks', 'birch_planks');
+  await clientBlocks(player, 'oak_planks', signal, 'birch_planks');
+  assert.equal(itemCount(player, 'diamond_block'), 2);
+  assert.equal(itemCount(player, 'oak_planks'), 0);
+  assert.equal(itemCount(player, 'birch_planks'), 0);
+  const undoSince = player.messageBuffer.length;
+  player.chat('/builder undo');
+  await expect(player).toHaveReceivedMessage('There is no completed operation available to undo.', { since: undoSince });
+
+  const retrySince = player.messageBuffer.length;
+  player.chat('/builder replace oak_planks diamond_block');
+  await expect(player).toHaveReceivedMessage('[▶ Build]', { since: retrySince });
+  player.chat('/builder confirm');
+  await expect(player).toHaveReceivedMessage('completed: 1 blocks.', { since: retrySince });
+  await assertWorld(server, player, 'diamond_block', 'birch_planks');
+  await clientBlocks(player, 'diamond_block', signal, 'birch_planks');
+  await waitUntil(() => itemCount(player, 'diamond_block') === 1 && itemCount(player, 'oak_planks') === 1, { signal });
+  assert.equal(itemCount(player, 'birch_planks'), 0);
 });
 
 test('air replacement costs target blocks, creates no source reward and restores air on undo', async ({ player, server, signal }) => {
