@@ -41,6 +41,14 @@ import ru.arc.paper.menu.PaperMenuRuntime
 import ru.arc.paper.display.PacketDisplayAudienceGroup
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.paper.api.ArcSchematicSnapshot
+import ru.arc.paper.actionpanel.ActionPanelController
+import ru.arc.paper.actionpanel.ActionPanelFollowSettings
+import ru.arc.paper.actionpanel.ActionPanelFrame
+import ru.arc.paper.actionpanel.ActionPanelInputProfile
+import ru.arc.paper.actionpanel.ActionPanelOptions
+import ru.arc.paper.actionpanel.ActionPanelPlacement
+import ru.arc.paper.actionpanel.ActionPanelPoint
+import ru.arc.paper.actionpanel.PaperActionPanels
 import ru.arc.paper.scene.PaperSpatialControls
 import ru.arc.paper.scene.PaperSpatialSpace
 import ru.arc.paper.scene.SceneAudience
@@ -70,10 +78,27 @@ internal data class BuilderBookPreviewConfirmation(
     val issuePriceMinor: Long = 0L,
 )
 
+/** Immutable offered state; a queued click cannot apply a quote or transform that replaced it. */
+internal data class BuilderBookWorldContext(
+    val session: Any,
+    val site: ConstructionSite,
+    val view: ArcSchematicSnapshot,
+    val origin: BuilderBlockPos,
+    val book: BuildBookData,
+    val rotation: Int,
+    val mirrored: Boolean,
+    val snapshot: ConstructionSiteSnapshot?,
+    val confirmation: BuilderBookPreviewConfirmation?,
+    val preparation: Any?,
+    val failed: Boolean,
+)
+
 internal interface BuilderBookPreviewPresentationHost {
     fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment): ConstructionSite?
     fun prepare(player: Player, site: ConstructionSite, complete: (BuilderBookPreviewConfirmation?) -> Unit)
     fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation?
+    /** World controls need stable readiness/price, not the inventory's material list. */
+    fun currentWorldConfirmation(player: Player): BuilderBookPreviewConfirmation? = currentConfirmation(player)
     fun confirm(player: Player, complete: (Boolean) -> Unit)
     fun complete(player: Player, kind: BuilderBookPreviewConfirmationKind)
     fun restore(player: Player, snapshot: ConstructionSiteSnapshot): ConstructionSite?
@@ -98,6 +123,8 @@ internal class BuilderBookPreviewPresentation(
     private val space: PaperSpatialSpace = PaperSpatialSpace(),
     private val planningTasks: BuilderPlanningTasks,
     private var panelAppearance: BuilderPlaqueAppearance = BuilderPlaqueAppearance(panelBackgroundColor, glowColor = panelGlowColor),
+    private val worldControlsEnabled: Boolean = true,
+    private val plaqueFollowPlayer: Boolean = true,
 ) : BuildBookPreviewBridge, Listener, AutoCloseable {
     private class PanelSource(
         val site: ConstructionSite,
@@ -116,6 +143,10 @@ internal class BuilderBookPreviewPresentation(
         val plaque: BuilderWorldPlaque,
         val audience: PacketDisplayAudienceGroup,
         var source: PanelSource,
+        var geometry: BuilderBookPlaqueGeometry,
+        var face: BuilderConstructionSitePanelFace,
+        var placement: BuilderSitePanelPlacement,
+        var controlFace: BuilderConstructionSitePanelFace? = null,
     )
 
     private var panels = mutableMapOf<UUID, PanelScene>()
@@ -127,6 +158,9 @@ internal class BuilderBookPreviewPresentation(
     private var preparing = mutableMapOf<UUID, Any>()
     private var displayedConfirmations = mutableMapOf<UUID, BuilderBookPreviewConfirmation>()
     private var confirmationInventories = mutableMapOf<UUID, org.bukkit.inventory.Inventory>()
+    private val worldSessions = mutableMapOf<UUID, Any>()
+    private val worldFailures = mutableSetOf<UUID>()
+    private val fallbackHints = mutableMapOf<UUID, Int>()
     private val menuConfiguration = loadMenuConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
     private val menuItems = PaperMenuItemFactory(
@@ -143,6 +177,7 @@ internal class BuilderBookPreviewPresentation(
             val panel = panels[UUID.fromString(scene.value)] ?: return null
             val site = panel.site
             if (closed || !site.player.isOnline || site.player.world.uid != site.world.uid ||
+                (worldControlsEnabled && player.uniqueId == site.player.uniqueId) ||
                 BuilderBookPreviewAccess.level(site.player.uniqueId, player.uniqueId,
                     player.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)) == BuilderBookPreviewAccessLevel.NONE
             ) return null
@@ -171,9 +206,111 @@ internal class BuilderBookPreviewPresentation(
                 accepted, reason.name.lowercase(), previewId = "${context.player.uniqueId}:${context.expiresAtMillis}")
         }
     })
+    private val worldController = object : ActionPanelController<BuilderBookWorldContext, BuilderBookWorldAction>() {
+        override fun frame(player: Player) = worldFrame(player)
+        override fun activate(player: Player, context: BuilderBookWorldContext, action: BuilderBookWorldAction) =
+            activateWorld(player, context, action)
+    }
+    private val worldPanels = PaperActionPanels(plugin, displays, worldController)
 
     init {
         Bukkit.getPluginManager().registerEvents(this, plugin)
+    }
+
+    fun tick() {
+        if (closed) return
+        if (plaqueFollowPlayer) panels.values.toList().forEach { scene ->
+            runCatching { movePlaque(scene) }.onFailure { removePanel(scene.site.player.uniqueId) }
+        }
+        if (worldControlsEnabled) worldPanels.tick()
+        if (worldControlsEnabled) placementSites.values.forEach { site ->
+            val player = site.player
+            if (menuFallback(player)) {
+                val now = Bukkit.getCurrentTick()
+                if (now - (fallbackHints[player.uniqueId] ?: (now - 20)) >= 20) {
+                    player.sendActionBar(messages.render("book.world-controls.near-preview", locale(player)))
+                    fallbackHints[player.uniqueId] = now
+                }
+            } else fallbackHints.remove(player.uniqueId)
+        }
+    }
+
+    fun intercept(player: Player, allowMenuFallback: Boolean = false): Boolean {
+        if (closed || !worldControlsEnabled) return false
+        if (worldPanels.intercept(player)) return true
+        if (allowMenuFallback && menuFallback(player)) {
+            openPlacementForOwner(player, checkNotNull(placementSites[player.uniqueId]))
+            return true
+        }
+        return false
+    }
+
+    private fun controlPlacement(player: Player): BuilderBookPlaqueGeometry.Controls? {
+        val scene = panels[player.uniqueId] ?: return null
+        val site = placementSites[player.uniqueId] ?: return null
+        if (site.transforming || scene.site !== site || site.view !== scene.source.view || site.adjustedCenter.let {
+            it.blockX != scene.source.origin.x || it.blockY != scene.source.origin.y || it.blockZ != scene.source.origin.z
+        }) return null
+        return scene.geometry.controls(player.location.x, player.location.z, scene.controlFace).also { scene.controlFace = it?.face }
+    }
+
+    private fun menuFallback(player: Player): Boolean = !closed && worldControlsEnabled && player.isOnline &&
+        !player.isDead && player.openInventory.type == org.bukkit.event.inventory.InventoryType.CRAFTING &&
+        placementSites[player.uniqueId]?.let { it.world.uid == player.world.uid && controlPlacement(player) == null } == true
+
+    internal fun worldFrame(player: Player): ActionPanelFrame<BuilderBookWorldContext, BuilderBookWorldAction>? {
+        if (closed || !worldControlsEnabled || !player.isOnline || player.isDead ||
+            player.openInventory.type != org.bukkit.event.inventory.InventoryType.CRAFTING) return null
+        val id = player.uniqueId
+        val site = placementSites[id] ?: return null
+        if (site.player.uniqueId != id || site.world.uid != player.world.uid || site.transforming) return null
+        val view = site.view ?: return null
+        val placement = controlPlacement(player) ?: return null
+        val origin = site.adjustedCenter.let { BuilderBlockPos(site.world.uid, it.blockX, it.blockY, it.blockZ) }
+        val confirmation = host.currentWorldConfirmation(player)
+        val context = BuilderBookWorldContext(worldSessions[id] ?: return null, site, view, origin, site.bookData,
+            site.rotation, site.mirrored, snapshots[id], confirmation, preparing[id], id in worldFailures)
+        val busy = context.preparation != null
+        val cooldown = confirmation?.cooldownRemaining?.takeUnless { it.isZero }
+        val primary = when {
+            busy -> "preparing"
+            !site.bookData.draft -> "continue"
+            confirmation == null -> "quote"
+            else -> "activate"
+        }
+        val values = mapOf(
+            "name" to messages.literal(BuildBookItems.compactTitle(site.bookData.title, 24)),
+            "price" to messages.literal(String.format(java.util.Locale.US, "%,.2f", BuilderMoney.decimal(confirmation?.issuePriceMinor ?: 0L))),
+            "hours" to messages.literal(cooldown?.toHours() ?: 0),
+            "minutes" to messages.literal(cooldown?.toMinutes()?.rem(60) ?: 0),
+        )
+        return ActionPanelFrame(context, ActionPanelPlacement.FollowTarget(site.world.uid, ActionPanelPoint(
+            placement.targetX,
+            origin.y + (view.minimum.y.toDouble() + view.maximum.y + 1) / 2,
+            placement.targetZ,
+        ), ActionPanelFollowSettings(placement.distance, 0.0, 0.0, if (placement.scale < 1.0) 0.0 else 1.25, .03)), BuilderBookWorldControls.layout(
+            { messages.render("book.world-controls.$it", locale(player), values) }, primary,
+            when { busy -> "preparing"; cooldown != null -> "cooldown"; context.failed -> "error"; else -> "hint" },
+            busy, cooldown == null, placement.scale,
+        ), true, ActionPanelOptions(ActionPanelInputProfile.ENTITY_BOTH, 4.0, false), null)
+    }
+
+    internal fun activateWorld(player: Player, context: BuilderBookWorldContext, action: BuilderBookWorldAction) {
+        val frame = worldFrame(player) ?: return
+        if (frame.context != context || frame.layout.buttons.none { it.action == action && it.visible && it.enabled }) return
+        when (action) {
+            BuilderBookWorldAction.PRIMARY -> {
+                // Core dispatches only an actually offered, still-current frame. Do not mark a price
+                // displayed when merely computing an inventory or a future world frame.
+                context.confirmation?.let { displayedConfirmations[player.uniqueId] = it }
+                confirmFromPlacement(player)
+            }
+            BuilderBookWorldAction.CANCEL -> cancel(player)
+            BuilderBookWorldAction.ROTATE -> adjust(player, BuildBookPreviewAdjustment.Rotate(90))
+            BuilderBookWorldAction.MIRROR -> adjust(player, BuildBookPreviewAdjustment.ToggleMirror)
+            BuilderBookWorldAction.RESET -> adjust(player, BuildBookPreviewAdjustment.Reset)
+            else -> adjust(player, BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.valueOf(action.name)))
+        }
     }
 
     fun openSelector(
@@ -226,18 +363,26 @@ internal class BuilderBookPreviewPresentation(
 
     override fun open(site: ConstructionSite) {
         if (closed) return
+        placementSites[site.player.uniqueId] = site
+        worldSessions[site.player.uniqueId] = Any()
+        worldFailures.remove(site.player.uniqueId)
         renderer.open(site)
         replacePanelSafely(site)
     }
 
     override fun refresh(site: ConstructionSite) {
         if (closed) return
+        placementSites[site.player.uniqueId] = site
         renderer.refresh(site)
         replacePanelSafely(site)
         menus.session(site.player)?.takeIf { it.menuId == PLACEMENT_MENU }?.requestRefresh()
     }
 
     override fun close(playerId: UUID) {
+        worldPanels.clear(playerId)
+        worldSessions.remove(playerId)
+        worldFailures.remove(playerId)
+        fallbackHints.remove(playerId)
         renderer.close(playerId)
         removePanel(playerId)
         placementSites.remove(playerId)
@@ -252,6 +397,7 @@ internal class BuilderBookPreviewPresentation(
         if (closed) return
         snapshots[site.player.uniqueId] = site.snapshot()
         placementSites[site.player.uniqueId] = site
+        worldSessions.getOrPut(site.player.uniqueId) { Any() }
         replacePanelSafely(site)
     }
 
@@ -261,6 +407,10 @@ internal class BuilderBookPreviewPresentation(
         if (snapshots.remove(playerId) == null) return
         confirmationInventories.remove(playerId)
         placementSites.remove(playerId)
+        worldSessions.remove(playerId)
+        worldFailures.remove(playerId)
+        worldPanels.clear(playerId)
+        fallbackHints.remove(playerId)
         removePanel(playerId)
         Bukkit.getPlayer(playerId)?.let(menus::session)?.close()
     }
@@ -294,9 +444,11 @@ internal class BuilderBookPreviewPresentation(
         val playerId = player.uniqueId
         val inventory = confirmationInventories[playerId] ?: return
         if (event.view.topInventory !== inventory) return
-        preparing.remove(playerId)
-        displayedConfirmations.remove(playerId)
         confirmationInventories.remove(playerId)
+        displayedConfirmations.remove(playerId)
+        if (worldControlsEnabled && !closed && player.isOnline && playerId in worldSessions &&
+            placementSites[playerId]?.player?.uniqueId == playerId) return
+        preparing.remove(playerId)
         val snapshot = snapshots.remove(playerId) ?: return
         if (closed || !player.isOnline) return
         host.restore(player, snapshot)?.let { placementSites[playerId] = it }
@@ -305,6 +457,7 @@ internal class BuilderBookPreviewPresentation(
     private fun adjust(player: Player, adjustment: BuildBookPreviewAdjustment) {
         val playerId = player.uniqueId
         if (playerId in preparing) return
+        worldFailures.remove(playerId)
         // Prepared construction no longer has a BuildingManager preview. Restore
         // it before editing, and detach the confirmation before discarding its plan.
         snapshots.remove(playerId)?.let { snapshot ->
@@ -318,6 +471,7 @@ internal class BuilderBookPreviewPresentation(
     }
 
     private fun cancel(player: Player) {
+        worldFailures.remove(player.uniqueId)
         preparing.remove(player.uniqueId)
         displayedConfirmations.remove(player.uniqueId)
         snapshots.remove(player.uniqueId)
@@ -331,6 +485,7 @@ internal class BuilderBookPreviewPresentation(
         val site = placementSites[playerId] ?: panels[playerId]?.site ?: return player.closeInventory()
         if (playerId in preparing) return
         if (site.transforming) return
+        worldFailures.remove(playerId)
         val preparation = Any()
         preparing[playerId] = preparation
         snapshots[playerId] = site.snapshot()
@@ -354,6 +509,7 @@ internal class BuilderBookPreviewPresentation(
                 if (closed || !player.isOnline) return@prepare
                 if (playerId !in snapshots) return@prepare
                 if (confirmation == null) {
+                    worldFailures.add(playerId)
                     snapshots.remove(playerId)
                     confirmationInventories.remove(playerId)
                     player.closeInventory()
@@ -397,6 +553,7 @@ internal class BuilderBookPreviewPresentation(
                 host.complete(player, confirmation.kind)
                 player.closeInventory()
             } else {
+                worldFailures.add(playerId)
                 menus.session(player)?.requestRefresh()
             }
         }
@@ -578,7 +735,8 @@ internal class BuilderBookPreviewPresentation(
         val origin = site.adjustedCenter.let { anchor ->
             BuilderBlockPos(site.world.uid, anchor.blockX, anchor.blockY, anchor.blockZ)
         }
-        val face = BuilderConstructionSiteDisplayLayout.nearestFace(
+        val face = (if (plaqueFollowPlayer) panels[ownerId]?.source?.face ?: pendingPanels[ownerId]?.face else null)
+            ?: BuilderConstructionSiteDisplayLayout.nearestFace(
             listOf(origin),
             site.player.location.x,
             site.player.location.z,
@@ -605,10 +763,10 @@ internal class BuilderBookPreviewPresentation(
         planningTasks.compute {
             val occupied = source.view.blocks().asSequence().filter { !it.isAir && !it.isBuilderIgnored }.map { block ->
                 BuilderBlockPos(origin.worldId, origin.x + block.position.x, origin.y + block.position.y, origin.z + block.position.z)
-            }
-            BuilderConstructionSiteDisplayLayout.panelPlacement(
-                listOf(origin), source.face, panelHeightOffset, panelFrontOffset,
-                occupiedPositions = occupied.asIterable(), panelWidth = BuilderWorldPlaque.visualWidth(panelLineWidth),
+            }.toList()
+            BuilderBookPlaqueGeometry.create(
+                origin, source.face, occupied, panelHeightOffset, panelFrontOffset,
+                panelWidth = BuilderWorldPlaque.visualWidth(panelLineWidth),
                 panelHeight = BuilderWorldPlaque.visualHeight(source.text, panelLineWidth),
             )
         }.whenComplete { panel, failure ->
@@ -618,7 +776,7 @@ internal class BuilderBookPreviewPresentation(
         }
     }
 
-    private fun completePanel(ownerId: UUID, source: PanelSource, panel: BuilderSitePanelPlacement?, failure: Throwable?) {
+    private fun completePanel(ownerId: UUID, source: PanelSource, panel: BuilderBookPlaqueGeometry?, failure: Throwable?) {
         if (calculatingPanels[ownerId] !== source) return
         try {
             if (!closed && pendingPanels[ownerId] === source) {
@@ -642,19 +800,19 @@ internal class BuilderBookPreviewPresentation(
         }
     }
 
-    private fun applyPanel(source: PanelSource, panel: BuilderSitePanelPlacement) {
+    private fun applyPanel(source: PanelSource, geometry: BuilderBookPlaqueGeometry) {
         val site = source.site
         val ownerId = site.player.uniqueId
         val existing = panels[ownerId] ?: run {
             val canView: (Player) -> Boolean = { viewer ->
-                viewer.uniqueId == ownerId || viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)
+                if (viewer.uniqueId == ownerId) !worldControlsEnabled else viewer.hasPermission(BUILDER_PREVIEW_ADMIN_PERMISSION)
             }
             val audience = displays.createAudienceGroup(canView)
             val plaque = BuilderWorldPlaque(displays, space, BuilderWorldPlaqueStyle(
                 panelInteractionWidth, panelInteractionHeight, panelLineWidth, panelBackgroundColor, panelGlowColor, viewRange,
                 panelAppearance,
             ), SceneAudience.Public(audience), canView)
-            PanelScene(site, SpatialSceneKey(ownerId.toString()), plaque, audience, source).also { created ->
+            PanelScene(site, SpatialSceneKey(ownerId.toString()), plaque, audience, source, geometry, source.face, geometry.fixed).also { created ->
                 panels[ownerId] = created
                 plaque.refreshWith {
                     if (panels[ownerId] === created && !closed) {
@@ -672,8 +830,28 @@ internal class BuilderBookPreviewPresentation(
         }
         existing.site = site
         existing.source = source
+        existing.geometry = geometry
+        existing.controlFace = null
+        val nearest = if (plaqueFollowPlayer) geometry.nearest(site.player.location.x, site.player.location.z, existing.face) else null
+        existing.face = nearest?.face ?: source.face
+        val panel = nearest?.placement ?: geometry.fixed
+        existing.placement = panel
         existing.plaque.update(Location(site.world, panel.x, panel.y, panel.z, panel.yaw, 0f), source.text)
         controls.apply(existing.key, existing.plaque.controls(site))
+    }
+
+    private fun movePlaque(scene: PanelScene) {
+        val player = scene.site.player
+        if (!player.isOnline || player.world.uid != scene.site.world.uid) return removePanel(player.uniqueId)
+        val nearest = scene.geometry.nearest(player.location.x, player.location.z, scene.face)
+        val next = nearest.placement
+        val old = scene.placement
+        if (next.yaw == old.yaw && kotlin.math.hypot(next.x - old.x, next.z - old.z) < .03) return
+        scene.face = nearest.face
+        scene.placement = next
+        scene.plaque.update(Location(scene.site.world, next.x, next.y, next.z, next.yaw, 0f), scene.source.text,
+            retainTranslatedClearance = next.yaw == old.yaw)
+        controls.apply(scene.key, scene.plaque.controls(scene.site))
     }
 
     private fun replacePanelSafely(site: ConstructionSite) {
@@ -729,6 +907,7 @@ internal class BuilderBookPreviewPresentation(
             }
         }
         attempt { controls.close() }
+        attempt { worldPanels.close() }
         panels.values.forEach { scene ->
             attempt { scene.plaque.close() }
             attempt { scene.audience.close() }
@@ -744,6 +923,9 @@ internal class BuilderBookPreviewPresentation(
         placementSites.clear()
         preparing.clear()
         displayedConfirmations.clear()
+        worldSessions.clear()
+        worldFailures.clear()
+        fallbackHints.clear()
         val nativeFailure = failure
         val packetDrain = runCatching { displays.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) }
         packetDrain.whenComplete { _, packetFailure ->

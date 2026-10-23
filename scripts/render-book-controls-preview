@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Focused, source-exported book control layout and perimeter trajectory; not a native client capture."""
+import argparse
+import hashlib
+import importlib.util
+import json
+import math
+from pathlib import Path
+import sys
+from PIL import Image, ImageDraw
+
+ROOT = Path(__file__).resolve().parents[1]
+p = argparse.ArgumentParser(description=__doc__)
+p.add_argument('--client-jar', type=Path, required=True)
+p.add_argument('--font-assets', type=Path)
+p.add_argument('--ops-root', type=Path, default=ROOT.parent.parent / 'mcserver')
+p.add_argument('--dump', type=Path, default=ROOT / 'build/reports/builder-book-controls')
+a = p.parse_args()
+helper = a.ops_root / '.agents/skills/draw-pixel-art-icons/scripts/minecraft_surface_core.py'
+spec = importlib.util.spec_from_file_location('minecraft_surface_core', helper)
+core = importlib.util.module_from_spec(spec); sys.modules[spec.name] = core; spec.loader.exec_module(core)
+glyphs, advances = core.load_font_glyphs(a.client_jar, faithful32=None, raster_scale=3, font_assets=a.font_assets)
+stack = core.FontStack(glyphs, advances, None, None, 0, 3)
+samples = json.loads((a.dump / 'layout.json').read_text())
+trajectory = json.loads((a.dump / 'trajectory.json').read_text())
+g = trajectory['geometry']
+metrics = []
+
+def painted_lines(item):
+    colors={'white':'#ffffff','gray':'#aaaaaa','dark_gray':'#555555','gold':'#ffaa00','aqua':'#55ffff','green':'#55ff55','red':'#ff5555'}
+    characters=[]
+    def visit(node,color='#ffffff'):
+        if isinstance(node,str): characters.extend((c,color) for c in node); return
+        if isinstance(node,list):
+            for child in node: visit(child,color)
+            return
+        color=colors.get(node.get('color'),node.get('color',color))
+        characters.extend((c,color) for c in node.get('text',''))
+        for child in node.get('extra',[]): visit(child,color)
+    visit(json.loads(item['component']))
+    lines=['']
+    for character,color in characters:
+        if character=='\n': lines.append('')
+        else: lines[-1]+='&'+color+character
+    return lines
+
+def panel(sample):
+    image = Image.new('RGBA', (960, 720), '#202c32')
+    draw = ImageDraw.Draw(image)
+    # Player-eye reference: 70-degree horizontal FOV; distance comes from the production layout export.
+    focal = 480 / math.tan(math.radians(35))
+    eye_z=sample['viewerZ']; distance=sample['distance']
+    def project(x,y,z):
+        return (480+(x-1)*focal/(z-eye_z), 360-(y-65.62)*focal/(z-eye_z))
+    # Wireframe uses the production cache's bounds. The schematic wall proxy is explicitly synthetic.
+    for z in (g['minZ'],g['maxZ']):
+        points=[project(g['minX'],64,z),project(g['maxX'],64,z),project(g['maxX'],69,z),project(g['minX'],69,z)]
+        draw.polygon(points, fill='#293c3e', outline='#517f79')
+    for x in (g['minX'],g['maxX']):
+        for y in (64,69): draw.line([project(x,y,g['minZ']),project(x,y,g['maxZ'])], fill='#6a9a8e',width=2)
+    px=focal/distance
+    for item in sample['buttons'] + sample['labels']:
+        rect=item['rect']; c=rect['center']; scale=item['scale']
+        lines=item['text'].split('\n'); painted=painted_lines(item); widths=[core.measured_width(line,advances) for line in lines]
+        for line in lines: core.ensure_renderable((line,),stack)
+        assert max(widths)<=item['lineWidth'], (item,max(widths))
+        world_w=(max(widths)+2)*.025*scale
+        world_h=len(lines)*10*.025*scale
+        assert world_w<=rect['width'] and world_h+item['baselineInset']<=rect['height']+.00001, (item,world_w,world_h)
+        metrics.append({'locale':sample['locale'],'key':item.get('action',item.get('key')),'widthPx':max(widths),'widthBlocks':world_w,'heightBlocks':world_h,'rect':rect})
+        texture=Image.new('RGBA',((max(widths)+2)*3,len(lines)*30),(22,29,34,210))
+        for row,line in enumerate(lines):
+            core.draw_text(texture,(round((max(widths)-widths[row])*1.5)+3,row*30),painted[row],stack)
+        texture=texture.resize((max(1,round(world_w*px)),max(1,round(world_h*px))),Image.Resampling.NEAREST)
+        left=round(480+c['x']*px-texture.width/2)
+        bottom=360-(sample['anchorY']+c['y']-rect['height']/2+item['baselineInset'])*px
+        image.alpha_composite(texture,(left,round(bottom-texture.height)))
+    draw=ImageDraw.Draw(image)
+    draw.rectangle((0,0,960,38),fill='#101820')
+    draw.text((16,11),'SOURCE EXPORT / '+sample['locale'].upper()+' '+sample['state'].upper()+f' / 70 deg player-eye / {distance:.2f} blocks / native font',fill='white')
+    draw.rectangle((0,688,960,720),fill='#101820')
+    draw.text((16,698),'Synthetic schematic bounds proxy. No native client, ray/input, glow or packet-timing acceptance.',fill='#b2c5d3')
+    return image.convert('RGB')
+
+for sample in samples: panel(sample).save(a.dump / ('controls-'+sample['locale']+'-'+sample['state']+'.png'))
+
+def motion(frame):
+    image=Image.new('RGB',(700,600),'#101820'); d=ImageDraw.Draw(image)
+    def at(x,z): return (350+x*23,300+z*23)
+    d.rectangle((*at(g['minX'],g['minZ']),*at(g['maxX'],g['maxZ'])), fill='#284747', outline='#66c4b7',width=2)
+    d.text((20,18),'SOURCE GEOMETRY / nearest boundary / 0.35 block corner hysteresis',fill='white')
+    for f in trajectory['frames']: d.ellipse((at(f['viewerX'],f['viewerZ'])[0]-1,at(f['viewerX'],f['viewerZ'])[1]-1,at(f['viewerX'],f['viewerZ'])[0]+1,at(f['viewerX'],f['viewerZ'])[1]+1),fill='#3e4e5b')
+    v=at(frame['viewerX'],frame['viewerZ']); pose=frame['placement']; q=at(pose['x'],pose['z'])
+    d.line((v,q),fill='#708899',width=1)
+    d.ellipse((v[0]-6,v[1]-6,v[0]+6,v[1]+6),fill='#f0f7ff')
+    # Plaque plane follows the exported yaw, no alternate placement algorithm here.
+    yaw=math.radians(pose['yaw']); dx=math.cos(yaw)*45; dz=math.sin(yaw)*45
+    d.line((q[0]-dx,q[1]-dz,q[0]+dx,q[1]+dz),fill='#ffb142',width=5)
+    d.text((20,550),f"tick {frame['tick']:03} / {frame['face']} / plaque ({pose['x']:.2f}, {pose['z']:.2f})",fill='#ffb142')
+    d.text((20,574),'Top view; exact production query positions. No world obstacle/native interpolation simulation.',fill='#b2c5d3')
+    return image
+frames=[motion(f) for f in trajectory['frames']]
+frames[0].save(a.dump/'perimeter-motion.gif',save_all=True,append_images=frames[1:],duration=80,loop=0,optimize=False)
+sheet=Image.new('RGB',(1400,1200),'#101820')
+for index,tick in enumerate((0,30,60,90)): sheet.paste(frames[tick],((index%2)*700,(index//2)*600))
+sheet.save(a.dump/'perimeter-contact-sheet.png')
+(a.dump/'font-bounds.json').write_text(json.dumps(metrics,indent=2))
+(a.dump/'provenance.json').write_text(json.dumps({'evidence':'Kotlin layout/trajectory export + pinned native font; synthetic schematic proxy, not native client acceptance','inputs':{str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in [a.client_jar,a.dump/'layout.json',a.dump/'trajectory.json',helper,Path(__file__)]}},indent=2))
+print(a.dump)

@@ -112,6 +112,7 @@ internal class BuilderBlockDisplayRenderer(
     private val sentChunks: (Player) -> Set<Long> = Player::getSentChunkKeys,
     planningTasks: BuilderPlanningTasks? = null,
     private val blockDataRotation: BuilderBlockDataRotation = PaperBuilderBlockDataRotation,
+    private val worldBookControlsEnabled: Boolean = false,
 ) : BuilderDisplayRenderer, Listener {
     private enum class Layer { SELECTION, TARGET, ASSIST, PASTE, PASTE_ORIGIN, PLAN, BOOK }
 
@@ -657,6 +658,7 @@ internal class BuilderBlockDisplayRenderer(
     }
 
     private fun showBookActionBar(site: ConstructionSite) {
+        if (worldBookControlsEnabled) return // The world controls own their hint, including the close-range menu fallback.
         site.player.sendActionBar(messages.render("book.preview.actionbar", BuilderLocalePolicy.localeTag(site.player)))
     }
 

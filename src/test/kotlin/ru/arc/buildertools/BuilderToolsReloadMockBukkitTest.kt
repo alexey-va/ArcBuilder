@@ -17,6 +17,51 @@ import java.security.MessageDigest
 import java.util.Locale
 
 class BuilderToolsReloadMockBukkitTest : FunSpec({
+    test("book placement switches refuse busy reload and reach the replacement presentation after draining") {
+        withReloadPlugin { paper, plugin ->
+            prepareEnabledReloadFixture(plugin)
+            val console = paper.server.consoleSender
+            val command = checkNotNull(plugin.getCommand("builder"))
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
+            awaitConsoleMessage(paper)
+            awaitBuilderUp(paper)
+            val active = checkNotNull(activeRuntime())
+            val previousPresentation = activeBookPreviewPresentation()
+            activeBookPreviewModes() shouldBe (true to true)
+            val world = paper.addSimpleWorld("book-mode-reload")
+            val player = paper.addPlayer("BookModeOwner")
+            val selections = BuilderToolsRuntime::class.java.getDeclaredField("selections").apply { isAccessible = true }
+                .get(active) as BuilderSelectionController
+            val corner = BuilderBlockPos(world.uid, 1, 64, 1)
+            selections.set(player.uniqueId, corner, true)
+            val override = Config(plugin.dataPath, "modules/builder-tools-runtime.yml")
+            override.setBoolean("preview.book-controls.enabled", false)
+            override.setBoolean("preview.book-plaque.follow-player", false)
+            override.saveStrict()
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
+            plain(awaitConsoleMessage(paper)) shouldBe plain(BuilderToolsConfiguration.current().messages.render("reload.busy", "ru"))
+            (activeRuntime() === active) shouldBe true
+            activeBookPreviewModes() shouldBe (true to true)
+            selections.first(player.uniqueId, world.uid) shouldBe corner
+
+            selections.clear(player.uniqueId)
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
+            plain(awaitConsoleMessage(paper)) shouldContain "применена без перезапуска"
+            awaitBuilderUp(paper)
+            (activeRuntime() === active) shouldBe false
+            activeBookPreviewModes() shouldBe (false to false)
+            BuilderBookPreviewPresentation::class.java.getDeclaredField("closed").apply { isAccessible = true }
+                .get(previousPresentation) shouldBe true
+            override.setBoolean("preview.book-controls.enabled", true)
+            override.setBoolean("preview.book-plaque.follow-player", true)
+            override.saveStrict()
+            BuilderToolsModule.onCommand(console, command, "builder", arrayOf("reload")) shouldBe true
+            plain(awaitConsoleMessage(paper)) shouldContain "применена без перезапуска"
+            awaitBuilderUp(paper)
+            activeBookPreviewModes() shouldBe (true to true)
+        }
+    }
+
     test("the actual reload command applies only appearance in place while a player selection remains open") {
         withReloadPlugin { paper, plugin ->
             prepareEnabledReloadFixture(plugin)
@@ -174,6 +219,17 @@ private fun activePanelSettings(): BuilderPanelSettings {
         .get(checkNotNull(activeRuntime()))
     return BuilderSelectionActionPanel::class.java.getDeclaredField("settings").apply { isAccessible = true }
         .get(checkNotNull(panel)) as BuilderPanelSettings
+}
+
+private fun activeBookPreviewPresentation(): BuilderBookPreviewPresentation =
+    BuilderToolsRuntime::class.java.getDeclaredField("bookPreviewPresentation").apply { isAccessible = true }
+        .get(checkNotNull(activeRuntime())) as BuilderBookPreviewPresentation
+
+private fun activeBookPreviewModes(): Pair<Boolean, Boolean> {
+    val presentation = activeBookPreviewPresentation()
+    fun mode(field: String) = BuilderBookPreviewPresentation::class.java.getDeclaredField(field)
+        .apply { isAccessible = true }.getBoolean(presentation)
+    return mode("worldControlsEnabled") to mode("plaqueFollowPlayer")
 }
 
 private fun plain(component: net.kyori.adventure.text.Component?): String =

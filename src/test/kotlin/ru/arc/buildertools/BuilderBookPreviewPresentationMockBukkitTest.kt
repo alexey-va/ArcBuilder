@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.spyk
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Color
 import org.bukkit.GameMode
@@ -39,6 +40,245 @@ import java.util.Locale
 import java.util.UUID
 
 class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
+    test("too-close and inside ghost fallback preserves the offered quote and opens only the explicit air gesture menu") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val world = paper.addSimpleWorld("book-near-ghost")
+                val player = paper.addPlayer("NearGhostOwner")
+                player.teleport(org.bukkit.Location(world, 1.0, 64.0, -7.0))
+                val site = previewSite(player, org.bukkit.Location(world, 0.0, 64.0, 0.0),
+                    BuildBookData("house.schem", "Дом", playerCreated = true, blueprintId = UUID.randomUUID()))
+                site.bookData.draft shouldBe true
+                every { site.view } returns schematicTestSnapshot(listOf(
+                    ArcSchematicBlock(ArcSchematicPoint(-4, 0, -3), "minecraft:stone", false, false),
+                    ArcSchematicBlock(ArcSchematicPoint(5, 4, -3), "minecraft:stone", false, false)))
+                val host = PreviewHost(site, BuilderBookPreviewConfirmation(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION,
+                    4, "Дом", Duration.ZERO, emptyList(), issuePriceMinor = 14_845))
+                previewPresentation(plugin, config, host, worldControlsEnabled = true).use { presentation ->
+                    presentation.open(site)
+                    presentation.retainConfirmation(site)
+                    val offered = checkNotNull(presentation.worldFrame(player)).context
+                    player.teleport(org.bukkit.Location(world, 1.0, 64.0, -4.0))
+                    val near = checkNotNull(presentation.worldFrame(player))
+                    (near.placement as ru.arc.paper.actionpanel.ActionPanelPlacement.FollowTarget).settings.distance shouldBe .85
+                    near.context shouldBe offered
+                    for (z in listOf(-3.05, -2.5)) {
+                        player.teleport(org.bukkit.Location(world, 1.0, 64.0, z))
+                        presentation.worldFrame(player) shouldBe null
+                        presentation.intercept(player) shouldBe false
+                        presentation.activateWorld(player, offered, BuilderBookWorldAction.PRIMARY)
+                        host.confirmCalls shouldBe 0
+                    }
+                    player.teleport(org.bukkit.Location(world, 1.0, 64.0, -7.0))
+                    checkNotNull(presentation.worldFrame(player)).context shouldBe offered
+                    player.teleport(org.bukkit.Location(world, 1.0, 64.0, -3.05))
+                    presentation.intercept(player, allowMenuFallback = true) shouldBe true
+                    plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "148.45"
+                    host.confirmCalls shouldBe 0
+                    host.restoreCalls shouldBe 0
+                    paper.callEvent(InventoryCloseEvent(player.openInventory))
+                    player.closeInventory()
+                    player.teleport(org.bukkit.Location(world, 1.0, 64.0, -7.0))
+                    checkNotNull(presentation.worldFrame(player)).context shouldBe offered
+                    host.currentConfirmation(player)?.issuePriceMinor shouldBe 14_845
+                    host.restoreCalls shouldBe 0
+                    host.confirmCalls shouldBe 0
+                }
+            } finally { ConfigManager.clear() }
+        }
+    }
+
+    test("published Core aims the offered world button before a block behind it and retains packet labels") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val realPlugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(realPlugin.dataPath, "builder-tools.yml")).validated()
+                val world = mockk<org.bukkit.World>(relaxed = true)
+                every { world.uid } returns UUID.randomUUID()
+                every { world.minHeight } returns -64
+                every { world.maxHeight } returns 320
+                every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
+                every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers {
+                    mockk<org.bukkit.block.Block> { every { collisionShape.boundingBoxes } returns emptyList() }
+                }
+                // A real block ray hit lies behind the label plane, never in front of it.
+                every { world.rayTraceBlocks(any<org.bukkit.Location>(), any<org.bukkit.util.Vector>(), any<Double>(),
+                    any<org.bukkit.FluidCollisionMode>(), any<Boolean>(), any<java.util.function.Predicate<org.bukkit.block.Block>>()) } answers {
+                    if (thirdArg<Double>() < 3.8) null else org.bukkit.util.RayTraceResult(
+                        firstArg<org.bukkit.Location>().toVector().add(secondArg<org.bukkit.util.Vector>().clone().multiply(3.8)))
+                }
+                every { world.spawn(any<org.bukkit.Location>(), eq(org.bukkit.entity.Interaction::class.java), any<Consumer<org.bukkit.entity.Interaction>>()) } answers {
+                    var location = firstArg<org.bukkit.Location>().clone()
+                    val interaction = mockk<org.bukkit.entity.Interaction>(relaxed = true)
+                    every { interaction.uniqueId } returns UUID.randomUUID()
+                    every { interaction.world } returns world
+                    every { interaction.location } answers { location.clone() }
+                    every { interaction.isValid } returns true
+                    every { interaction.teleport(any<org.bukkit.Location>()) } answers { location = firstArg<org.bukkit.Location>().clone(); true }
+                    thirdArg<Consumer<org.bukkit.entity.Interaction>>().accept(interaction)
+                    interaction
+                }
+                val player = mockk<org.bukkit.entity.Player>(relaxed = true)
+                val playerId = UUID.randomUUID()
+                val feet = org.bukkit.Location(world, .5, 64.0, -7.0)
+                var eye = feet.clone().add(0.0, 1.62, 0.0)
+                every { player.uniqueId } returns playerId
+                every { player.world } returns world
+                every { player.isOnline } returns true
+                every { player.isDead } returns false
+                every { player.isChunkSent(any<Long>()) } returns true
+                every { player.location } answers { feet.clone() }
+                every { player.eyeLocation } answers { eye.clone() }
+                every { player.openInventory.type } returns InventoryType.CRAFTING
+                val server = mockk<org.bukkit.Server>(relaxed = true)
+                every { server.onlinePlayers } returns listOf(player)
+                every { server.getPlayer(playerId) } returns player
+                val plugin = spyk(realPlugin)
+                every { plugin.server } returns server
+                val site = previewSite(player, org.bukkit.Location(world, .5, 64.0, 0.0), BuildBookData("house.schem", "Дом"))
+                val host = PreviewHost(site, BuilderBookPreviewConfirmation(BuilderBookPreviewConfirmationKind.CONSTRUCTION,
+                    4, "Дом", Duration.ZERO, emptyList()), hasCurrentConfirmation = false)
+                val packet = BuilderPlaqueDisplays()
+                previewPresentation(plugin, config, host, packet.owner, worldControlsEnabled = true).use { presentation ->
+                    presentation.open(site)
+                    presentation.tick()
+                    packet.texts.size shouldBe 16 // Two inspector plaque faces, eleven buttons, three labels.
+                    val right = packet.texts.single { plain(it.content) == "[ > ]" }
+                    val aim = right.location.clone().add(0.0, .1, 0.0)
+                    eye = feet.clone().add(0.0, 1.62, 0.0).apply { direction = aim.toVector().subtract(toVector()) }
+                    presentation.intercept(player) shouldBe true
+                    host.adjustments shouldBe listOf(BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.RIGHT))
+                    presentation.intercept(player) shouldBe true
+                    host.adjustments.size shouldBe 1 // Same-tick native/gesture duplicate belongs to Core's gate.
+                    presentation.tick()
+                    packet.texts.size shouldBe 16
+                    val old = checkNotNull(presentation.worldFrame(player)).context
+                    every { site.rotation } returns 90
+                    presentation.activateWorld(player, old, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 0
+                }
+            } finally { ConfigManager.clear() }
+        }
+    }
+
+    test("automatic world controls preserve all adjustments and require the exact offered draft price") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val world = paper.addSimpleWorld("world-book-controls")
+                val owner = paper.addPlayer("WorldBookOwner")
+                val inspector = paper.addPlayer("WorldBookInspector").also { it.addAttachment(plugin, BUILDER_PREVIEW_ADMIN_PERMISSION, true) }
+                owner.teleport(world.getBlockAt(0, 64, -7).location)
+                val site = previewSite(owner, world.getBlockAt(0, 64, 0).location, BuildBookData("house.schem", "Дом", playerCreated = true, blueprintId = UUID.randomUUID()))
+                val host = PreviewHost(site, BuilderBookPreviewConfirmation(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION,
+                    4, "Дом", Duration.ZERO, emptyList(), issuePriceMinor = 14_845), hasCurrentConfirmation = false, deferConfirmation = true)
+                val packet = BuilderPlaqueDisplays()
+                previewPresentation(plugin, config, host, packet.owner, worldControlsEnabled = true, plaqueFollowPlayer = true).use { presentation ->
+                    presentation.open(site)
+                    val initial = checkNotNull(presentation.worldFrame(owner))
+                    initial.layout.buttons.size shouldBe 11
+                    presentation.worldFrame(inspector) shouldBe null
+                    packet.audiencePredicates.single()(owner) shouldBe false
+                    packet.audiencePredicates.single()(inspector) shouldBe true
+                    val plain = PlainTextComponentSerializer.plainText()
+                    plain.serialize(initial.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.text) shouldBe
+                        "Рассчитать цену\nбез оплаты"
+                    for (action in listOf(BuilderBookWorldAction.LEFT, BuilderBookWorldAction.RIGHT, BuilderBookWorldAction.AWAY,
+                        BuilderBookWorldAction.TOWARD, BuilderBookWorldAction.UP, BuilderBookWorldAction.DOWN,
+                        BuilderBookWorldAction.ROTATE, BuilderBookWorldAction.MIRROR, BuilderBookWorldAction.RESET)) {
+                        presentation.activateWorld(owner, checkNotNull(presentation.worldFrame(owner)).context, action)
+                    }
+                    host.adjustments shouldBe listOf(BuildBookPreviewMove.LEFT, BuildBookPreviewMove.RIGHT, BuildBookPreviewMove.AWAY,
+                        BuildBookPreviewMove.TOWARD, BuildBookPreviewMove.UP, BuildBookPreviewMove.DOWN).map { BuildBookPreviewAdjustment.Move(it) } +
+                        listOf(BuildBookPreviewAdjustment.Rotate(90), BuildBookPreviewAdjustment.ToggleMirror, BuildBookPreviewAdjustment.Reset)
+                    presentation.activateWorld(owner, initial.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 0
+                    val priced = checkNotNull(presentation.worldFrame(owner))
+                    plain.serialize(priced.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.text) shouldContain "148.45 💰"
+                    host.confirmation = host.confirmation.copy(issuePriceMinor = 15_000)
+                    presentation.activateWorld(owner, priced.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 0
+                    val repriced = checkNotNull(presentation.worldFrame(owner))
+                    plain.serialize(repriced.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.text) shouldContain "150.00 💰"
+                    presentation.activateWorld(owner, repriced.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 1
+                    val busy = checkNotNull(presentation.worldFrame(owner))
+                    busy.layout.buttons.filter { it.enabled }.map { it.action } shouldBe listOf(BuilderBookWorldAction.CANCEL)
+                    presentation.activateWorld(owner, repriced.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 1
+                    presentation.activateWorld(owner, busy.context, BuilderBookWorldAction.CANCEL)
+                    checkNotNull(host.pendingConfirmation).invoke(true)
+                    host.completedConfirmations shouldBe emptyList()
+                    presentation.open(site)
+                    presentation.activateWorld(owner, repriced.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 1
+                    presentation.openPlacementForTest(owner, site)
+                    presentation.worldFrame(owner) shouldBe null
+                    owner.closeInventory()
+                    presentation.clearPlayer(owner.uniqueId)
+                    presentation.worldFrame(owner) shouldBe null
+                }
+                previewPresentation(plugin, config, host).use { legacy ->
+                    legacy.open(site)
+                    legacy.worldFrame(owner) shouldBe null
+                    legacy.intercept(owner) shouldBe false
+                }
+            } finally { ConfigManager.clear() }
+        }
+    }
+
+    test("world preparation errors cooldown and changed transforms remain actionable without stale starts") {
+        ConfigManager.clear()
+        MockBukkitTestRuntime.open().use { paper ->
+            val plugin = paper.loadPlugin<ArcBuilderPlugin>()
+            installArcVisualPacketBudgetFixture(paper.createSimplePlugin("ArcCoreVisualFixture"))
+            BuilderToolsModule.shutdown()
+            try {
+                val config = BuilderToolsConfig(ConfigManager.ofModule(plugin.dataPath, "builder-tools.yml")).validated()
+                val owner = paper.addPlayer("WorldBookStates")
+                val site = previewSite(owner, owner.location.clone().add(0.0, 0.0, 7.0), BuildBookData("house.schem", "Дом"))
+                val host = PreviewHost(site, BuilderBookPreviewConfirmation(BuilderBookPreviewConfirmationKind.CONSTRUCTION,
+                    4, "Дом", Duration.ofMinutes(5), emptyList()), deferPreparation = true, hasCurrentConfirmation = false)
+                previewPresentation(plugin, config, host, worldControlsEnabled = true).use { presentation ->
+                    presentation.open(site)
+                    val first = checkNotNull(presentation.worldFrame(owner))
+                    presentation.activateWorld(owner, first.context, BuilderBookWorldAction.PRIMARY)
+                    checkNotNull(presentation.worldFrame(owner)).layout.buttons.count { it.enabled } shouldBe 1
+                    checkNotNull(host.pendingPreparation).invoke(null)
+                    val failed = checkNotNull(presentation.worldFrame(owner))
+                    plain(failed.layout.labels.single { it.key == "status" }.text) shouldContain "Не удалось"
+                    host.hasCurrentConfirmation = true
+                    val cooldown = checkNotNull(presentation.worldFrame(owner))
+                    cooldown.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.enabled shouldBe false
+                    cooldown.layout.buttons.single { it.action == BuilderBookWorldAction.ROTATE }.enabled shouldBe true
+                    presentation.activateWorld(owner, cooldown.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 0
+                    host.confirmation = host.confirmation.copy(cooldownRemaining = Duration.ZERO)
+                    val ready = checkNotNull(presentation.worldFrame(owner))
+                    every { site.rotation } returns 90
+                    presentation.activateWorld(owner, ready.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 0
+                    val rotated = checkNotNull(presentation.worldFrame(owner))
+                    presentation.activateWorld(owner, rotated.context, BuilderBookWorldAction.PRIMARY)
+                    host.confirmCalls shouldBe 1
+                    host.completedConfirmations shouldBe listOf(BuilderBookPreviewConfirmationKind.CONSTRUCTION)
+                }
+            } finally { ConfigManager.clear() }
+        }
+    }
+
     test("plaque occupancy coalesces bursts and preserves one worker through cancellation and reopening") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
@@ -740,6 +980,8 @@ private fun previewPresentation(
     displays: PaperPacketDisplays = mockk(relaxed = true),
     space: PaperSpatialSpace = unblockedPlaqueSpace(),
     planningTasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
+    worldControlsEnabled: Boolean = false,
+    plaqueFollowPlayer: Boolean = false,
 ): BuilderBookPreviewPresentation = BuilderBookPreviewPresentation(
     plugin = plugin,
     renderer = mockk(relaxed = true),
@@ -756,6 +998,8 @@ private fun previewPresentation(
     displays = displays,
     space = space,
     planningTasks = planningTasks,
+    worldControlsEnabled = worldControlsEnabled,
+    plaqueFollowPlayer = plaqueFollowPlayer,
 )
 
 /** The mocked display owner has no tick; drive its Core participant's native capture explicitly. */

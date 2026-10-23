@@ -178,6 +178,7 @@ internal class BuilderToolsRuntime(
         movementPeriodTicks = config.previewMovementPeriodTicks,
         planningTasks = planningTasks,
         blockDataRotation = blockDataRotation,
+        worldBookControlsEnabled = config.bookPreviewWorldControlsEnabled,
     )
     internal val closeCompletion = CompletableFuture<Unit>()
     private val capturedMaximumRange = config.maximumRange
@@ -376,6 +377,8 @@ internal class BuilderToolsRuntime(
     private val committedRecords = mutableMapOf<UUID, BuilderJournalRecord>()
     private val consumedUndoSources = mutableSetOf<UUID>()
     private val plannedConstructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
+    private data class WorldBookCooldown(val planId: UUID, val projectCount: Int, val bypass: Boolean, val untilMillis: Long)
+    private val worldBookCooldowns = mutableMapOf<UUID, WorldBookCooldown>()
     private val constructionProjects = mutableMapOf<UUID, BuilderConstructionProjectRecord>()
     private val constructionPauseRequests = BuilderConstructionPauseRequests()
     private val constructionInstantRequests = mutableMapOf<UUID, UUID>()
@@ -686,6 +689,9 @@ internal class BuilderToolsRuntime(
                     override fun currentConfirmation(player: Player): BuilderBookPreviewConfirmation? =
                         currentBookPreviewConfirmation(player)
 
+                    override fun currentWorldConfirmation(player: Player): BuilderBookPreviewConfirmation? =
+                        currentBookPreviewConfirmation(player, worldControls = true)
+
                     override fun confirm(player: Player, complete: (Boolean) -> Unit) = confirmBookPreview(player, complete)
 
                     override fun complete(player: Player, kind: BuilderBookPreviewConfirmationKind) {
@@ -714,6 +720,8 @@ internal class BuilderToolsRuntime(
                 viewRange = config.constructionSiteViewRange,
                 planningTasks = planningTasks,
                 panelAppearance = config.plaqueAppearance(),
+                worldControlsEnabled = config.bookPreviewWorldControlsEnabled,
+                plaqueFollowPlayer = config.bookPreviewPlaqueFollowPlayer,
             ).also { initializedBookPreviewPresentation = it }
             BuildingManager.installPreviewBridge(
                 bookPreviewPresentation,
@@ -1009,6 +1017,7 @@ internal class BuilderToolsRuntime(
             )
             checkNotNull(taskScope.runTimer(1L, 1L) {
                 selectionActionPanel?.tick()
+                bookPreviewPresentation.tick()
                 pastePreview.tick()
                 tickSelectionTargets()
                 entityEditor?.tick()
@@ -2378,16 +2387,31 @@ internal class BuilderToolsRuntime(
         }
     }
 
-    private fun currentBookPreviewConfirmation(player: Player): BuilderBookPreviewConfirmation? {
+    private fun currentBookPreviewConfirmation(player: Player, worldControls: Boolean = false): BuilderBookPreviewConfirmation? {
         val plan = previews.plan(player.uniqueId)?.takeIf { it.kind == BuilderPlanKind.BUILD_BOOK }
         if (plan != null) {
             val project = plannedConstructionProjects[plan.id] ?: return null
+            val now = System.currentTimeMillis()
+            val bypass = player.hasPermission(BOOK_COOLDOWN_BYPASS_PERMISSION)
+            val cached = worldBookCooldowns[player.uniqueId]?.takeIf {
+                it.planId == plan.id && it.projectCount == constructionProjects.size && it.bypass == bypass
+            }
+            // Only the world display uses this deadline; actual confirmation always revalidates the records.
+            val cooldown = if (worldControls && cached != null) {
+                Duration.ofMillis((cached.untilMillis - now).coerceAtLeast(0L))
+            } else bookApplicationCooldownRemaining(player, now).also { remaining ->
+                worldBookCooldowns[player.uniqueId] = WorldBookCooldown(plan.id, constructionProjects.size, bypass,
+                    now + remaining.toMillis())
+            }
             return BuilderBookPreviewConfirmation(
                 kind = BuilderBookPreviewConfirmationKind.CONSTRUCTION,
                 blockCount = plan.changes.size,
                 title = project.projectTitle ?: project.plan.bookBuildingId ?: "Постройка",
-                cooldownRemaining = bookApplicationCooldownRemaining(player),
-                requiredMaterials = project.plan.costs.mapNotNull { item ->
+                cooldownRemaining = cooldown.let { remaining ->
+                    if (worldControls && !remaining.isZero) Duration.ofMinutes((remaining.toMillis() + 59_999L) / 60_000L)
+                    else remaining
+                },
+                requiredMaterials = if (worldControls) emptyList() else project.plan.costs.mapNotNull { item ->
                     val amount = item.amount - if (item.itemBase64 == project.bookCost.itemBase64 && item.materialKey == project.bookCost.materialKey) project.bookCost.amount else 0
                     item.copy(amount = amount).takeIf { amount > 0 }
                 }.sortedBy(BuilderItemAmount::materialKey),
@@ -3767,11 +3791,11 @@ internal class BuilderToolsRuntime(
     private fun hourlyLimit(player: Player): Int =
         BuilderPermissionPolicy.hourlyChanges(player::hasPermission, config.baseHourlyChanges)
 
-    private fun bookApplicationCooldownRemaining(player: Player): java.time.Duration =
+    private fun bookApplicationCooldownRemaining(player: Player, nowMillis: Long = System.currentTimeMillis()): java.time.Duration =
         BuilderBookApplicationCooldown.remaining(
             playerId = player.uniqueId,
             records = constructionProjects.values,
-            nowMillis = System.currentTimeMillis(),
+            nowMillis = nowMillis,
             cooldown = config.bookApplicationCooldown,
             bypass = player.hasPermission(BOOK_COOLDOWN_BYPASS_PERMISSION),
         )
@@ -3811,6 +3835,7 @@ internal class BuilderToolsRuntime(
         messages.render("construction.states.${state.name.lowercase(Locale.ROOT)}", locale(player))
 
     private fun discardPendingPlan(playerId: UUID) {
+        worldBookCooldowns.remove(playerId)
         moveSelections.remove(playerId)
         pastePreview.clear(playerId)
         previews.plan(playerId)?.let { plan -> plannedConstructionProjects.remove(plan.id) }
@@ -4080,6 +4105,13 @@ internal class BuilderToolsRuntime(
             return
         }
         if (entityEditor?.isEditing(player) == true) return
+        if (event.hand == EquipmentSlot.HAND && event.action in listOf(
+                Action.LEFT_CLICK_AIR, Action.LEFT_CLICK_BLOCK, Action.RIGHT_CLICK_AIR, Action.RIGHT_CLICK_BLOCK,
+            ) && bookPreviewPresentation.intercept(player, allowMenuFallback =
+                event.action == Action.RIGHT_CLICK_AIR && event.item?.let(BuildBookCodec::read) != null)) {
+            event.isCancelled = true
+            return
+        }
         val item = event.item ?: return
         if (event.hand == EquipmentSlot.HAND) {
             BuildBookCodec.read(item)?.let { data ->
@@ -4469,6 +4501,7 @@ internal class BuilderToolsRuntime(
         attempt { placementAssist?.close() }
         attempt { materialPicker?.close() }
         materialScans.clear()
+        worldBookCooldowns.clear()
         panelPlanSummaries.clear()
         selectionUndoAvailable.clear()
         selectionPanelPages.clear()

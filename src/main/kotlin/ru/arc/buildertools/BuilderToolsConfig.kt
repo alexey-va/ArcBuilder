@@ -142,6 +142,12 @@ class BuilderToolsConfig(
     val previewGuidancePeriodTicks: Long get() = config.long("preview.guidance-period-ticks", 20L)
     val bookPreviewTtl: Duration get() = config.duration("preview.book-ttl", Duration.ofMinutes(3))
     val bookPreviewMaxOffset: Int get() = config.integer("preview.book-max-offset", 16)
+    val bookPreviewWorldControlsEnabled: Boolean
+        get() = runtimeOverride?.booleanOrNull("preview.book-controls.enabled")
+            ?: config.bool("preview.book-controls.enabled", true)
+    val bookPreviewPlaqueFollowPlayer: Boolean
+        get() = runtimeOverride?.booleanOrNull("preview.book-plaque.follow-player")
+            ?: config.bool("preview.book-plaque.follow-player", true)
     val previewPlanTitleFadeInTicks: Int get() = config.integer("preview.plan-title.fade-in-ticks", 5)
     val previewPlanTitleStayTicks: Int get() = config.integer("preview.plan-title.stay-ticks", 45)
     val previewPlanTitleFadeOutTicks: Int get() = config.integer("preview.plan-title.fade-out-ticks", 10)
@@ -717,7 +723,10 @@ class BuilderToolsConfig(
                 "book.preview-menu.inspection.overview.name",
                 "book.preview-menu.inspection.mirror.yes",
                 "book.preview-menu.inspection.mirror.no",
-            ) + BuilderPanelAction.entries.map { action ->
+            ) + setOf(
+                "title", "hint", "height", "left", "right", "away", "toward", "up", "down", "rotate",
+                "mirror", "reset", "cancel", "quote", "activate", "continue", "preparing", "cooldown", "error", "near-preview",
+            ).map { "book.world-controls.$it" } + BuilderPanelAction.entries.map { action ->
                 "selection-panel.actions.${action.name.lowercase(Locale.ROOT).replace('_', '-')}"
             } + BuilderPlanKind.entries.map { kind ->
                 "kinds.${kind.name.lowercase(Locale.ROOT)}"

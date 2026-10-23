@@ -96,8 +96,14 @@ internal class BuilderWorldPlaque(
         authored?.let { scene.refreshWith(SceneRefreshRegion(it, audience, style.viewRange), checkNotNull(refreshController)) }
     }
 
-    fun update(location: Location, content: Component) {
-        if (authored != location) previous = null
+    fun update(location: Location, content: Component, retainTranslatedClearance: Boolean = false) {
+        if (authored != location) {
+            val old = authored
+            previous = if (retainTranslatedClearance && old != null && old.world == location.world &&
+                old.yaw == location.yaw && old.pitch == location.pitch && text == content) {
+                previous?.clone()?.add(location.x - old.x, location.y - old.y, location.z - old.z)
+            } else null
+        }
         if (authored != location) refreshController?.let {
             scene.refreshWith(SceneRefreshRegion(location, audience, style.viewRange), it)
         }

@@ -598,7 +598,19 @@ existing recovery contract.
 A player may own one block preview or one prepared build plan, never both.
 Opening a new block preview discards an existing book plan first; air clicks
 do not prepare or confirm construction. The hologram and `/builder book menu`
-open the same owner placement menu. `BuilderToolsRuntime` canonicalizes legacy item titles from the system
+enter the configured owner placement controls, with the legacy inventory menu
+available through `preview.book-controls.enabled: false`. The runtime passes both
+book presentation switches to `BuilderBookPreviewPresentation`, ticks it through
+the existing one-tick UI loop, and gives genuine main-hand panel hits first
+refusal before held-book world interaction. The presentation remains under the
+existing asynchronous close owner. Adjust, quote, explicit payment/confirmation,
+cancel and restore still route through `BuilderBookPreviewPresentationHost`.
+World controls use cached full occupied schematic bounds as well as real-world
+clearance. Near an opaque preview face, the whole panel scales with its clamped
+viewer distance; when that bounded plane cannot fit, right-clicking the held book
+in air opens the same placement menu. Entering or leaving this fallback preserves
+the site, session and quoted price, and removes hidden world targets.
+`BuilderToolsRuntime` canonicalizes legacy item titles from the system
 catalogue before either transition, so filenames are never player-facing.
 
 Player-authored copying is author-only at both boundaries: the editor exposes
@@ -642,7 +654,7 @@ operator-tunable groups are:
 | `limits`, `timers` | Change caps, range, plan/clipboard/undo lifetimes, and journal retention. |
 | `construction` | Container search radius, online-inventory range, tick period, probe budget, bounded per-project container cache, per-call resolution budget, sampled sound/particle feedback, and the construction-site outline/panel presentation. |
 | `runtime` | In-memory health refresh period, player-recovery retry period, and progress cadence. Lifecycle health-log cadence remains platform-owned. |
-| `preview` | World-surface refresh cadence/radius, asynchronous movement-window cadence, selection particle budget, nearest-block display budget, plan display range, guidance cadence, and plan-title timings. |
+| `preview` | World-surface refresh cadence/radius, asynchronous movement-window cadence, selection particle budget, nearest-block display budget, plan display range, guidance cadence, plan-title timings, book placement controls, and preview-plaque following. |
 | `shop` | Read-only quote and auto-buy gates/limits. |
 | `book-contracts` | Contract enablement/pricing, auction recovery retry, player-material summary limit, and MySQL settings. Contract enablement/pricing/SQL may be overlaid by the runtime file. |
 | `safety` | Lands/CoreProtect requirements and the replaceable-material allowlist. |
@@ -652,7 +664,15 @@ The new scalar keys are read by `BuilderToolsConfig` at
 `src/main/kotlin/ru/arc/buildertools/BuilderToolsConfig.kt:22-100` and their
 bounds are enforced at `src/main/kotlin/ru/arc/buildertools/BuilderToolsConfig.kt:102-189`. Values not listed
 as runtime overlays above are read from the base file, not from an arbitrary
-runtime copy. `auto-build.yml` and `system-build-books.yml` are also reload
+runtime copy. The independent booleans `preview.book-controls.enabled` and
+`preview.book-plaque.follow-player` default to `true` and also accept explicit
+runtime-file overrides. The first selects world placement controls or the legacy
+inventory placement menu; the second selects nearest-player preview-plaque
+placement or its fixed face. Both are strictly typed behavior settings and
+require a runtime-generation replacement. They never enter the appearance-only
+reload exception: an open selection, book preview, or confirmation refuses the
+change as `busy` and keeps the active settings until that state is drained.
+`auto-build.yml` and `system-build-books.yml` are also reload
 inputs: the former is validated and the latter is path/hash checked when the
 candidate is enabled (`src/main/kotlin/ru/arc/buildertools/BuilderToolsReload.kt:103-130`).
 

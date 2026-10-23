@@ -278,6 +278,12 @@ preview:
   book-ttl: 3m
   # Session-only movement bound; this never changes book metadata.
   book-max-offset: 16
+  book-controls:
+    # Owner controls appear automatically in the world. False keeps plaque -> inventory controls.
+    enabled: true
+  book-plaque:
+    # Follow the nearest safe schematic edge. False preserves the original fixed anchor-side placement.
+    follow-player: true
   plan-title:
     fade-in-ticks: 5
     stay-ticks: 45
@@ -977,7 +983,7 @@ locales:
 
         <prefix><#d48763>Превью постройки «<name>» готово.
         <#8c8c8c>   1. <#e6fff3>Найдите светящуюся голограмму перед постройкой.
-        <#8c8c8c>   2. <#e6fff3>Нажмите по голограмме ПКМ — откроется единое меню.
+        <#8c8c8c>   2. <#e6fff3>Настройте место кнопками голограммы или через меню.
         <#8c8c8c>   <#2bba43>Зелёный куб<#e6fff3> показывает выбранный блок.
         <#8c8c8c>   Превью и голограмма исчезнут сами через 3 минуты.
         <#8c8c8c>   <click:run_command:'/builder book menu'><#2bba43>[▶ Открыть меню]</click> <click:run_command:'/builder cancel'><#c42323>[✖ Убрать превью]</click>
@@ -999,16 +1005,37 @@ locales:
         selector-close: "<white>Закрыть"
         selector-edit: "<#ffb142>Поворот и смещение"
         saved: "<prefix><#b8b8b8>В книге выбран <#ffb142><name><#b8b8b8>. ПКМ по блоку — разместить превью."
+      world-controls:
+        near-preview: "<#ffb142>Вплотную к схеме: ПКМ книгой в воздух — меню размещения"
+        title: "<#ffb142><name>"
+        hint: "<#b8b8b8>^ дальше · v ближе · шаг 1 блок по взгляду"
+        height: "<#b8b8b8>Высота"
+        left: "<#92bed8>[ < ]"
+        right: "<#92bed8>[ > ]"
+        away: "<#92bed8>[ ^ ]"
+        toward: "<#92bed8>[ v ]"
+        up: "<#92bed8>[ + ]"
+        down: "<#92bed8>[ − ]"
+        rotate: "<#ffb142>↻ 90°"
+        mirror: "<#d48763>Зеркало"
+        reset: "<#e6fff3>Сброс"
+        cancel: "<#e78383>Убрать"
+        quote: "<#2bba43>Рассчитать цену\n<#b8b8b8>без оплаты"
+        activate: "<#2bba43>Оплатить активацию\n<#e6fff3><price> <white>💰"
+        continue: "<#2bba43>Начать стройку\n<#b8b8b8>использовать книгу"
+        preparing: "<#ffb142>Подготовка…"
+        cooldown: "<#ffb142>Доступно через <hours> ч <minutes> мин"
+        error: "<#e78383>Не удалось выполнить · повторите"
       preview-panel: |-
         <prefix><#ffb142><bold>Настроить постройку</bold> <prefix>
         <#e6fff3><name>
         <#92bed8>ПКМ — открыть меню
       preview:
         title: "<#ffb142>Превью постройки готово"
-        subtitle: "<#e6fff3>Нажмите ПКМ по светящейся голограмме"
-        actionbar: "<#d48763>Светящаяся голограмма: ПКМ — открыть меню   <#8c8c8c>—   <#969696>/builder cancel"
-        bossbar-draft: "<#ffb142>Черновик «<name>» — нажмите ПКМ по голограмме"
-        bossbar-active: "<#2bba43>Книга «<name>» — нажмите ПКМ по голограмме"
+        subtitle: "<#e6fff3>Управление — на голограмме рядом с превью"
+        actionbar: "<#d48763>Голограмма рядом с превью — управление   <#8c8c8c>—   <#969696>/builder cancel"
+        bossbar-draft: "<#ffb142>Черновик «<name>» — управление на голограмме"
+        bossbar-active: "<#2bba43>Книга «<name>» — управление на голограмме"
       hold-hint:
         title: "<#ffb142>Поставьте превью постройки"
         subtitle: "<#e6fff3>Нажмите ПКМ по нужному блоку"
@@ -1942,7 +1969,7 @@ locales:
         - "<dark_gray>      <aqua>/builder book draft [name] <gray>— free <hover:show_text:'A positioning and price-check book that cannot build yet.'>draft</hover>."
         - "<dark_gray>   4. <gray>Right-click a block to place or move <hover:show_text:'A player-only outline of the future build; the world is unchanged.'>preview</hover>."
         - "<dark_gray>      <gray>Sneak-click to open detailed settings."
-        - "<dark_gray>   5. <gray>Right-click the glowing hologram to open the single build menu."
+        - "<dark_gray>   5. <gray>Use the controls beside the preview to open the single build menu."
         - "<dark_gray>   6. <gray>Click the green button in the hologram to validate and confirm construction."
         - |-
           <dark_gray>   7. <gray>The author can issue a <hover:show_text:'A separately paid instance of the same book; each physical book is single-use.'>new single-use copy</hover>.
@@ -1981,7 +2008,7 @@ locales:
           <prefix><green>Step 4/7: free draft ready.
           <dark_gray>   <gray>Name: <white><name>
           <dark_gray>   <gray>Right-click a block — place or move preview.
-          <dark_gray>   <gray>Right-click the glowing hologram to open the menu.
+          <dark_gray>   <gray>Use the controls beside the preview to open the menu.
         draft-recovery: |-
 
           <prefix><yellow>Your blueprint is saved and waiting for draft delivery.
@@ -2019,7 +2046,7 @@ locales:
         <dark_gray>   <gray>Name: <white><name>
         <dark_gray>   <gray><count> blocks — no charge
         <dark_gray>   <gray>Right-click a block to place or move the preview.
-        <dark_gray>   <gray>Right-click the glowing hologram to open the menu.
+        <dark_gray>   <gray>Use the controls beside the preview to open the menu.
         <dark_gray>   <gray>Sneak-click to adjust the position.
       draft-recovered: |-
 
@@ -2111,16 +2138,37 @@ locales:
         selector-close: "<white>Close"
         selector-edit: "<#ffb142>Rotation and offset"
         saved: "<prefix><#ffb142><name><#b8b8b8> selected in the book. Right-click a block to place the preview."
+      world-controls:
+        near-preview: "<gold>Close to the preview: right-click the book in air for controls"
+        title: "<gold><name>"
+        hint: "<gray>^ away · v toward · 1 block relative to view"
+        height: "<gray>Height"
+        left: "<aqua>[ < ]"
+        right: "<aqua>[ > ]"
+        away: "<aqua>[ ^ ]"
+        toward: "<aqua>[ v ]"
+        up: "<aqua>[ + ]"
+        down: "<aqua>[ − ]"
+        rotate: "<gold>↻ 90°"
+        mirror: "<#d48763>Mirror"
+        reset: "<white>Reset"
+        cancel: "<#e78383>Cancel"
+        quote: "<green>Calculate price\n<gray>no payment yet"
+        activate: "<green>Pay to activate\n<white><price> <white>💰"
+        continue: "<green>Start building\n<gray>use the book"
+        preparing: "<gold>Preparing…"
+        cooldown: "<gold>Available in <hours> h <minutes> min"
+        error: "<#e78383>Action failed · try again"
       preview-panel: |-
         <prefix><gold><bold>Adjust the build</bold> <prefix>
         <white><name>
         <aqua>Right-click — open controls
       preview:
         title: "<gold>Build preview ready"
-        subtitle: "<white>Right-click the glowing hologram"
-        actionbar: "<aqua>Glowing hologram: right-click to open the single menu   <dark_gray>—   <gray>/builder cancel"
-        bossbar-draft: "<gold>Draft “<name>” — right-click the hologram"
-        bossbar-active: "<green>Book “<name>” — right-click the hologram"
+        subtitle: "<white>Use the controls beside the preview"
+        actionbar: "<aqua>Hologram beside the preview: placement controls   <dark_gray>—   <gray>/builder cancel"
+        bossbar-draft: "<gold>Draft “<name>” — use the hologram controls"
+        bossbar-active: "<green>Book “<name>” — use the hologram controls"
       hold-hint:
         title: "<gold>Place the build preview"
         subtitle: "<white>Right-click the block you want"
@@ -2269,7 +2317,7 @@ locales:
 
         <prefix><green>The book is active; the open preview was refreshed.
         <dark_gray>   <gray>Right-click a block to move the preview.
-        <dark_gray>   <gray>Right-click the glowing hologram to open the build menu.
+        <dark_gray>   <gray>Use the controls beside the preview to open the build menu.
       copied: |-
 
         <prefix><green>A new instance is registered.

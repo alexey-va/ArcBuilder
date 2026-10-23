@@ -40,6 +40,55 @@ import java.util.UUID
 import java.util.function.Consumer
 
 class BuilderWorldPlaqueTest : StringSpec({
+    "following the same face translates retained clearance across a wall edge and returns when clear" {
+        val h = BuilderPlaqueDisplays()
+        val world = clearPlaqueWorld()
+        var wall = true
+        every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers {
+            val boxes = if (wall && firstArg<Int>() == 5 && secondArg<Int>() == 67 && thirdArg<Int>() == 5)
+                listOf(BoundingBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)) else emptyList()
+            mockk<org.bukkit.block.Block> { every { collisionShape.boundingBoxes } returns boxes }
+        }
+        mockkStatic(Bukkit::class)
+        try {
+            every { Bukkit.isPrimaryThread() } returns true
+            val space = PaperSpatialSpace()
+            val samples = mutableListOf<Map<String, Double>>()
+            BuilderWorldPlaque(h.owner, space, plaqueStyle(), SceneAudience.Public()).use { plaque ->
+                val text = Component.text("Дом")
+                fun move(x: Double) {
+                    plaque.update(Location(world, x, 66.6, 5.4, 0f, 0f), text, retainTranslatedClearance = true)
+                    val location = h.texts.first().location
+                    val bounds = plaque.controls(Unit).clearanceFootprints.single()
+                    space.clear(world, bounds) shouldBe true
+                    samples += mapOf("authoredX" to x, "resolvedX" to location.x, "resolvedZ" to location.z)
+                }
+                move(.38)
+                move(.42)
+                val escaped = h.texts.first().location.z
+                (escaped > 6.0) shouldBe true
+                repeat(12) { move(if (it % 2 == 0) .38 else .42) }
+                samples.drop(2).forEach { it.getValue("resolvedZ") shouldBe (escaped plusOrMinus 1e-8) }
+                h.texts.size shouldBe 2
+                wall = false
+                repeat(3) {
+                    // The existing SceneRefreshController also runs while the player stands still.
+                    plaque.refresh()
+                    val next = h.texts.first().location.z
+                    samples += mapOf("authoredX" to .42, "resolvedX" to h.texts.first().location.x, "resolvedZ" to next)
+                    next shouldBe (5.4 plusOrMinus 1e-8)
+                }
+                // A changed face/source still uses the original reset path.
+                plaque.update(Location(world, -10.4, 66.6, 1.0, 90f, 0f), text)
+                h.texts.first().location.x shouldBe -10.4
+            }
+            java.io.File("build/reports/builder-book-controls/obstacle-trace.json").apply {
+                parentFile.mkdirs()
+                writeText(com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(samples))
+            }
+        } finally { unmockkStatic(Bukkit::class) }
+    }
+
     "trail emission follows the yaw and audience cadence and stops on hide disable and close" {
         val h = BuilderPlaqueDisplays()
         val world = mockk<World>(relaxed = true)

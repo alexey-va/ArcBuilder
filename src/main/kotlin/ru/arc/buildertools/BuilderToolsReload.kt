@@ -315,6 +315,9 @@ internal object BuilderToolsReloadPreflight {
         "construction.site.panel" to YamlValueType.MAPPING,
         "construction.site.panel.glow" to YamlValueType.MAPPING,
         "construction.site.panel.border-trail" to YamlValueType.MAPPING,
+        "preview" to YamlValueType.MAPPING,
+        "preview.book-controls" to YamlValueType.MAPPING,
+        "preview.book-plaque" to YamlValueType.MAPPING,
         "enabled" to YamlValueType.BOOLEAN,
         "allowed-worlds" to YamlValueType.STRING_LIST,
         "default-locale" to YamlValueType.STRING,
@@ -417,6 +420,8 @@ internal object BuilderToolsReloadPreflight {
         "preview.block-display-scale" to YamlValueType.DOUBLE,
         "preview.plan-display-range" to YamlValueType.DOUBLE,
         "preview.guidance-period-ticks" to YamlValueType.LONG,
+        "preview.book-controls.enabled" to YamlValueType.BOOLEAN,
+        "preview.book-plaque.follow-player" to YamlValueType.BOOLEAN,
         "preview.plan-title.fade-in-ticks" to YamlValueType.INT,
         "preview.plan-title.stay-ticks" to YamlValueType.INT,
         "preview.plan-title.fade-out-ticks" to YamlValueType.INT,
@@ -450,6 +455,8 @@ internal object BuilderToolsReloadPreflight {
 
     private val RUNTIME_OVERRIDE_TYPES = BUILDER_TYPES.filterKeys {
         it == "enabled" || it == "allowed-worlds" || it == "storage.schematics-root" || it == "presentation.font" ||
+            it == "preview" || it == "preview.book-controls" || it == "preview.book-controls.enabled" ||
+            it == "preview.book-plaque" || it == "preview.book-plaque.follow-player" ||
             it == "book-contracts.enabled" || it == "book-contracts.construction-markup-percent" ||
             it == "book-contracts.max-issue-price" || it.startsWith("book-contracts.mysql.")
     }

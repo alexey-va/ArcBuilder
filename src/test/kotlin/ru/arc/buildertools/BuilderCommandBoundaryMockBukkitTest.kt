@@ -7,11 +7,15 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
 import org.bukkit.Location
+import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.command.Command
@@ -21,15 +25,133 @@ import org.bukkit.event.block.Action
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.inventory.EquipmentSlot
 import ru.arc.autobuild.ConstructionSite
+import ru.arc.autobuild.BuildBookData
+import ru.arc.autobuild.BuildBookItems
 import ru.arc.autobuild.PlayerBuildBookDigestInspection
 import ru.arc.config.ConfigManager
 import ru.arc.observability.RuntimeHealthState
 import ru.arc.paper.testing.MockBukkitTestRuntime
 import ru.arc.paper.testing.loadPlugin
 import ru.ruscrafting.builder.paper.ArcBuilderPlugin
+import java.time.Duration
 import java.util.Locale
+import java.util.UUID
 
 class BuilderCommandBoundaryMockBukkitTest : FunSpec({
+    test("world book offers stay stable without rescanning materials while confirmation revalidates cooldown") {
+        withCommandFixture { fixture ->
+            val player = fixture.player("BookOffer")
+            val planId = UUID.randomUUID()
+            val book = BuilderItemAmount("book", "minecraft:written_book", 1)
+            val stone = BuilderItemAmount("stone", "minecraft:stone", 12)
+            val plan = mockk<BuilderPlan> {
+                every { id } returns planId
+                every { kind } returns BuilderPlanKind.BUILD_BOOK
+                every { changes } returns emptyList()
+                every { costs } returns listOf(book, stone)
+            }
+            val project = mockk<BuilderConstructionProjectRecord> {
+                every { projectTitle } returns "Stable offer"
+                every { this@mockk.plan } returns plan
+                every { bookCost } returns book
+            }
+            var started = System.currentTimeMillis() - Duration.ofHours(1).toMillis()
+            val previous = mockk<BuilderConstructionProjectRecord> {
+                every { playerId } returns player.uniqueId
+                every { applicationStartedAtMillis } answers { started }
+            }
+            var recordReads = 0
+            var projectCount = 1
+            val records = mockk<MutableMap<UUID, BuilderConstructionProjectRecord>> {
+                every { size } answers { projectCount }
+                every { values } answers { recordReads++; mutableListOf(previous) }
+            }
+            val previews = mockk<BuilderPreviewSessions> {
+                every { plan(player.uniqueId) } returns plan
+            }
+            fun field(name: String) = BuilderToolsRuntime::class.java.getDeclaredField(name).apply { isAccessible = true }
+            val previewsField = field("previews")
+            val recordsField = field("constructionProjects")
+            val originalPreviews = previewsField.get(fixture.runtime)
+            val originalRecords = recordsField.get(fixture.runtime)
+            @Suppress("UNCHECKED_CAST")
+            val planned = field("plannedConstructionProjects").get(fixture.runtime) as MutableMap<UUID, BuilderConstructionProjectRecord>
+            val current = BuilderToolsRuntime::class.java.getDeclaredMethod(
+                "currentBookPreviewConfirmation", Player::class.java, Boolean::class.javaPrimitiveType,
+            ).apply { isAccessible = true }
+            fun offer(world: Boolean) = current.invoke(fixture.runtime, player, world) as BuilderBookPreviewConfirmation
+            previewsField.set(fixture.runtime, previews)
+            recordsField.set(fixture.runtime, records)
+            planned[planId] = project
+            try {
+                val first = offer(true)
+                first.requiredMaterials shouldBe emptyList()
+                offer(true) shouldBe first
+                recordReads shouldBe 1
+                verify(exactly = 0) { plan.costs }
+
+                // An authoritative confirmation must see changed durable history even when its size is unchanged.
+                started = System.currentTimeMillis() - 1_000L
+                val authoritative = offer(false)
+                authoritative.requiredMaterials shouldBe listOf(stone)
+                (authoritative.cooldownRemaining > first.cooldownRemaining) shouldBe true
+                recordReads shouldBe 2
+                offer(true).cooldownRemaining shouldBe Duration.ofHours(12)
+                recordReads shouldBe 2
+
+                projectCount++
+                offer(true)
+                recordReads shouldBe 3
+                fixture.grant(player, "arcbuild.book.cooldown.bypass")
+                offer(true).cooldownRemaining shouldBe Duration.ZERO
+                recordReads shouldBe 4
+            } finally {
+                previewsField.set(fixture.runtime, originalPreviews)
+                recordsField.set(fixture.runtime, originalRecords)
+                planned.remove(planId)
+            }
+        }
+    }
+
+    test("book panel input is claimed before a held book can use the world block behind it") {
+        withCommandFixture { fixture ->
+            val player = fixture.player("BookPanelInput")
+            fixture.grant(player, "arcbuild.book.use")
+            val behind = fixture.allowed.getBlockAt(0, 64, 0).also { it.type = Material.STONE }
+            player.inventory.setItemInMainHand(BuildBookItems.create(BuildBookData("atelier-house.schem", "Book panel")))
+            val presentationField = BuilderToolsRuntime::class.java.getDeclaredField("bookPreviewPresentation")
+                .apply { isAccessible = true }
+            val original = presentationField.get(fixture.runtime)
+            val presentation = mockk<BuilderBookPreviewPresentation>()
+            var hit = true
+            every { presentation.intercept(player, any()) } answers { hit }
+            presentationField.set(fixture.runtime, presentation)
+            try {
+                for (action in listOf(Action.LEFT_CLICK_AIR, Action.LEFT_CLICK_BLOCK,
+                    Action.RIGHT_CLICK_AIR, Action.RIGHT_CLICK_BLOCK)) {
+                    val event = PlayerInteractEvent(player, action, player.inventory.itemInMainHand,
+                        behind.takeIf { action == Action.LEFT_CLICK_BLOCK || action == Action.RIGHT_CLICK_BLOCK },
+                        BlockFace.UP, EquipmentSlot.HAND)
+                    fixture.runtime.onInteract(event)
+                    event.isCancelled shouldBe true
+                    fixture.messagesFor(player) shouldBe emptyList()
+                    behind.type shouldBe Material.STONE
+                }
+                verify(exactly = 3) { presentation.intercept(player, false) }
+                verify(exactly = 1) { presentation.intercept(player, true) }
+                hit = false
+                val outside = PlayerInteractEvent(player, Action.RIGHT_CLICK_BLOCK, player.inventory.itemInMainHand,
+                    behind, BlockFace.UP, EquipmentSlot.HAND)
+                fixture.runtime.onInteract(outside)
+                // This fixture rejects unreviewed books: a miss must still reach that ordinary book path.
+                fixture.messagesFor(player).isNotEmpty() shouldBe true
+                fixture.runtime.runtimeHealthContribution().activeLeases shouldBe 0
+            } finally {
+                presentationField.set(fixture.runtime, original)
+            }
+        }
+    }
+
     test("display editor completion requires its separate permission and works without umbrella") {
         withCommandFixture { fixture ->
             val builder = fixture.player("OrdinaryBuilder")
@@ -356,6 +478,8 @@ private class CommandFixture(
 
     fun tab(player: Player, vararg args: String): List<String> =
         runtime.onTabComplete(player, command, "builder", args)
+
+    fun messagesFor(player: Player): List<Component> = messages.forPlayer(player)
 
     fun assertRejected(player: Player, expectedMessage: String, action: () -> Unit) {
         val beforeInventory = player.inventory.contents.map { it?.clone() }

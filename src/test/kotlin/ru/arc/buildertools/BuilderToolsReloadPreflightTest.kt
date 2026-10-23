@@ -33,9 +33,65 @@ class BuilderToolsReloadPreflightTest : FunSpec({
         candidate.selectionPanelSettings().heightOffset shouldBe 0.0
         candidate.selectionPanelSettings().suppressSelectionGlow shouldBe true
         candidate.selectionPanelSettings().obstacleMaxShift shouldBe 1.25
+        candidate.bookPreviewWorldControlsEnabled shouldBe true
+        candidate.bookPreviewPlaqueFollowPlayer shouldBe true
         val plain = PlainTextComponentSerializer.plainText()
         plain.serialize(candidate.messages().render("selection-panel.actions.previous-page", "ru")) shouldBe "<"
         plain.serialize(candidate.messages().render("selection-panel.actions.next-page", "ru")) shouldBe ">"
+    }
+
+    test("book world controls and plaque following are independent typed runtime overrides") {
+        val root = configRoot()
+        val base = Config(root, "modules/builder-tools.yml")
+        base.setBoolean("preview.book-controls.enabled", false)
+        base.setBoolean("preview.book-plaque.follow-player", true)
+        base.saveStrict()
+        BuilderToolsReloadPreflight.load(root).bookPreviewWorldControlsEnabled shouldBe false
+        BuilderToolsReloadPreflight.load(root).bookPreviewPlaqueFollowPlayer shouldBe true
+        val override = Config(root, "modules/builder-tools-runtime.yml")
+        for (controls in listOf(false, true)) for (follow in listOf(false, true)) {
+            override.setBoolean("preview.book-controls.enabled", controls)
+            override.setBoolean("preview.book-plaque.follow-player", follow)
+            override.saveStrict()
+            val candidate = BuilderToolsReloadPreflight.load(root)
+            candidate.bookPreviewWorldControlsEnabled shouldBe controls
+            candidate.bookPreviewPlaqueFollowPlayer shouldBe follow
+        }
+        BuilderToolsConfig.mergeBundledDefaults(root)
+        val merged = Config(root, "modules/builder-tools.yml")
+        merged.boolean("preview.book-controls.enabled") shouldBe false
+        merged.boolean("preview.book-plaque.follow-player") shouldBe true
+    }
+
+    test("book placement mode switches require a generation reload even alongside plaque appearance") {
+        for (key in listOf("preview.book-controls.enabled", "preview.book-plaque.follow-player")) {
+            val root = configRoot()
+            val original = BuilderToolsReloadPreflight.prepare(root)
+            val base = Config(root, "modules/builder-tools.yml")
+            base.setBoolean(key, false)
+            base.setDouble("construction.site.panel.background-opacity", .4)
+            base.saveStrict()
+            onlyPlaqueAppearanceChanged(original, BuilderToolsReloadPreflight.prepare(root)) shouldBe false
+        }
+    }
+
+    test("book placement parents and mode booleans reject malformed base and runtime values before merge") {
+        for (file in listOf("builder-tools.yml", "builder-tools-runtime.yml")) {
+            for ((key, value) in listOf(
+                "preview" to "broken",
+                "preview.book-controls" to false,
+                "preview.book-plaque" to emptyList<String>(),
+                "preview.book-controls.enabled" to "legacy",
+                "preview.book-plaque.follow-player" to "nearest",
+            )) {
+                val root = configRoot()
+                val path = root.resolve("modules/$file")
+                Config(root, "modules/$file").apply { setStructured(key, value); saveStrict() }
+                val before = Files.readString(path)
+                shouldThrowAny { BuilderToolsReloadPreflight.prepare(root) }.message.orEmpty() shouldContain key
+                Files.readString(path) shouldBe before
+            }
+        }
     }
 
     test("dialogue font is an explicit validated runtime override and can be opted out") {
