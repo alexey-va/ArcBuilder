@@ -50,7 +50,7 @@ class BuilderCrownSelectionDialogTest : FunSpec({
                         fun text(key: String) = messages.render("display-editor.$key", locale)
                         fun decorated(screen: PaperDialogScreen) = screen.body.joinToString {
                             PlainTextComponentSerializer.plainText().serialize(it.text)
-                        }.codePoints().anyMatch { it in 0xF9000..0xF9FFF }
+                        }.codePoints().anyMatch { it in 0xF9000..0xF9FFF || it in 0xFA300..0xFAF1B }
                         val suffix = "${if (font.isEmpty()) "plain-" else ""}$locale"
                         for (long in listOf(false, true)) {
                             val state = if (long) "long-" else ""

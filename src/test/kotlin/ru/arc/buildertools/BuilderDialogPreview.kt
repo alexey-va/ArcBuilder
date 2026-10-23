@@ -43,6 +43,7 @@ internal fun exportBuilderDialog(id: String, screen: PaperDialogScreen) {
         .joinToString("") { "%02x".format(it) } }
     Files.writeString(out.resolve("$id.json"), GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create().toJson(
         mapOf("content" to content, "dialog" to dialog, "numberInputs" to numbers,
+            "components" to screen.body.map { mapOf("width" to it.width, "text" to com.google.gson.JsonParser.parseString(GsonComponentSerializer.gson().serialize(it.text))) },
             "sourceSha256" to sourceHashes,
             "exitComponent" to screen.exitButton?.label?.let(GsonComponentSerializer.gson()::serialize),
             "evidence" to "Actual controller and Core dialog components with fixture data. Native client acceptance is separate.")))

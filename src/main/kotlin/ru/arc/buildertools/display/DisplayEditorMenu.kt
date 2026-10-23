@@ -31,7 +31,7 @@ internal object DisplayEditorMenu {
         id = "builder.display-editor",
         title = text("title"),
         body = listOfNotNull(presentation.paragraph(text("intro"), 400),
-            selection?.let { PaperDialogBody(it, 400) }, presentation.divider(400),
+            selection?.let { presentation.summary(it, 400) }, presentation.divider(400),
             presentation.callout(text("controls"), 400)),
         buttons = buildList {
             add(button("block", text("create-block"), text("create-block-help"), action))
@@ -69,7 +69,7 @@ internal object DisplayEditorMenu {
         title = text("axis-title"),
         body = listOfNotNull(
             presentation.paragraph(text("axis-body"), 380),
-            selection?.let { PaperDialogBody(it, 380) },
+            selection?.let { presentation.summary(it, 380) },
             presentation.divider(380),
             presentation.callout(text(if (scale == null) "scale-select-first" else "scale-body"), 380),
             feedback?.let { PaperDialogBody(it, 380) },

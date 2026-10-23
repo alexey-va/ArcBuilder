@@ -159,7 +159,7 @@ internal class BuilderCrownSelectionDialog(
             id = SETUP_SCREEN_ID,
             title = text("title"),
             body = listOf(
-                presentation.callout(
+                presentation.summary(
                     text(
                         "body",
                         mapOf(

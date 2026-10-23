@@ -3,6 +3,7 @@ package ru.arc.buildertools
 import net.kyori.adventure.key.Key
 import net.kyori.adventure.text.Component
 import ru.arc.paper.menu.DialogDecoration
+import ru.arc.paper.menu.DialogTables
 import ru.arc.paper.menu.DialogTextLayout
 import ru.arc.paper.menu.PaperDialogBody
 import ru.arc.text.TextAlignment
@@ -18,6 +19,9 @@ internal class BuilderDialogPresentation(font: String = "") {
 
     fun callout(text: Component, width: Int): PaperDialogBody =
         decoration?.openCorners(text, width, corners) ?: PaperDialogBody(text, width)
+
+    fun summary(text: Component, width: Int): PaperDialogBody = if (decoration == null) PaperDialogBody(text, width)
+        else DialogTables.filledBody(rows = listOf(listOf(text)), headers = null, width = width, columnWeights = listOf(1))
 
     fun divider(width: Int): PaperDialogBody? = decoration?.let { PaperDialogBody(it.divider(width, rule), width) }
 
