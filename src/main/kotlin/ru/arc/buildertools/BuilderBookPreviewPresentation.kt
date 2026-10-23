@@ -567,7 +567,7 @@ internal class BuilderBookPreviewPresentation(
         }
         confirmationInventories.remove(player.uniqueId)
         placementSites[player.uniqueId] = site
-        if (player.uniqueId in snapshots && host.currentConfirmation(player) == null) {
+        if (player.uniqueId in snapshots && player.uniqueId !in preparing && host.currentConfirmation(player) == null) {
             snapshots.remove(player.uniqueId)
         }
         menuViewers[player.uniqueId] = player

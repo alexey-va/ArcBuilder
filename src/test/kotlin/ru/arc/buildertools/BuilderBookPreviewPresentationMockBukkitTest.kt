@@ -40,7 +40,7 @@ import java.util.Locale
 import java.util.UUID
 
 class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
-    test("too-close and inside ghost fallback preserves the offered quote and opens only the explicit air gesture menu") {
+    test("too-close fallback preserves offered and pending quotes through the explicit air menu roundtrip") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -58,7 +58,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     ArcSchematicBlock(ArcSchematicPoint(-4, 0, -3), "minecraft:stone", false, false),
                     ArcSchematicBlock(ArcSchematicPoint(5, 4, -3), "minecraft:stone", false, false)))
                 val host = PreviewHost(site, BuilderBookPreviewConfirmation(BuilderBookPreviewConfirmationKind.DRAFT_ACTIVATION,
-                    4, "Дом", Duration.ZERO, emptyList(), issuePriceMinor = 14_845))
+                    4, "Дом", Duration.ZERO, emptyList(), issuePriceMinor = 14_845), deferPreparation = true)
                 previewPresentation(plugin, config, host, worldControlsEnabled = true).use { presentation ->
                     presentation.open(site)
                     presentation.retainConfirmation(site)
@@ -86,6 +86,30 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     player.teleport(org.bukkit.Location(world, 1.0, 64.0, -7.0))
                     checkNotNull(presentation.worldFrame(player)).context shouldBe offered
                     host.currentConfirmation(player)?.issuePriceMinor shouldBe 14_845
+                    host.restoreCalls shouldBe 0
+                    host.confirmCalls shouldBe 0
+
+                    presentation.clearConfirmation(player.uniqueId)
+                    host.hasCurrentConfirmation = false
+                    presentation.open(site)
+                    presentation.activateWorld(player, checkNotNull(presentation.worldFrame(player)).context, BuilderBookWorldAction.PRIMARY)
+                    val pending = checkNotNull(host.pendingPreparation)
+                    val preparing = checkNotNull(presentation.worldFrame(player)).context
+                    checkNotNull(preparing.preparation)
+                    player.teleport(org.bukkit.Location(world, 1.0, 64.0, -3.05))
+                    presentation.intercept(player, allowMenuFallback = true) shouldBe true
+                    paper.callEvent(InventoryCloseEvent(player.openInventory))
+                    player.closeInventory()
+                    player.teleport(org.bukkit.Location(world, 1.0, 64.0, -7.0))
+                    checkNotNull(presentation.worldFrame(player)).context shouldBe preparing
+                    host.hasCurrentConfirmation = true
+                    pending(host.confirmation)
+                    val quoted = checkNotNull(presentation.worldFrame(player))
+                    quoted.context.preparation shouldBe null
+                    quoted.context.confirmation?.issuePriceMinor shouldBe 14_845
+                    val primary = quoted.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }
+                    primary.enabled shouldBe true
+                    plain(primary.text) shouldContain "148.45"
                     host.restoreCalls shouldBe 0
                     host.confirmCalls shouldBe 0
                 }
