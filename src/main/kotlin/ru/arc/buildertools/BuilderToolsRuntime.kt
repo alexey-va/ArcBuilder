@@ -26,6 +26,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
+import org.bukkit.event.block.Action
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
@@ -250,6 +251,7 @@ internal class BuilderToolsRuntime(
         maximumChanges = config.maxChanges,
         host = planningHost,
     )
+    private val moveController = BuilderMoveController(safety, config.maxChanges, planningHost)
     private val clipboardController = BuilderClipboardController(
         safety = safety,
         selections = selections,
@@ -1158,10 +1160,24 @@ internal class BuilderToolsRuntime(
     }
 
     private data class SelectionPanelContext(val selection: BuilderSelection, val state: Any?)
+    private data class SelectionPanelPlacement(val selection: BuilderSelection, val followView: Boolean)
+    private val selectionPanelPlacements = mutableMapOf<UUID, SelectionPanelPlacement>()
+
+    private data class MoveDirectionPick(
+        val selection: BuilderSelection,
+        val gameMode: GameMode,
+        val slot: Int,
+        val item: ItemStack,
+        val startedTick: Int,
+    )
+    private data class MoveSelection(val planId: UUID, val before: BuilderSelection, val after: BuilderSelection)
+    private val moveDirectionPicks = mutableMapOf<UUID, MoveDirectionPick>()
+    private val moveSelections = mutableMapOf<UUID, MoveSelection>()
 
     private fun canUseSelectionPanel(player: Player): Boolean =
         !closed && player.isOnline && !recovering && !recoveryBlocked &&
             !pastePreview.capturesInput(player.uniqueId) &&
+            player.uniqueId !in moveDirectionPicks &&
             entityEditor?.isEditing(player) != true &&
             isSelector(player.inventory.itemInMainHand) && hasUsePermission(player) &&
             BuilderGameModePolicy.allows(player.gameMode) && config.allowsWorld(player.world.name) &&
@@ -1171,6 +1187,7 @@ internal class BuilderToolsRuntime(
         val id = player.uniqueId
         val selection = selectionOrNull(player)
         if (selection == null || !canUseSelectionPanel(player)) {
+            selectionPanelPlacements.remove(id)
             materialScans.remove(id)
             panelPlanSummaries.remove(id)
             selectionUndoAvailable.remove(id)
@@ -1181,7 +1198,12 @@ internal class BuilderToolsRuntime(
         }
         val location = player.location
         val maxDistance = config.selectionPanelMaxSelectionDistance
-        if (selection.distanceSquaredTo(location.x, location.y, location.z) > maxDistance * maxDistance) return null
+        val distanceSquared = selection.distanceSquaredTo(location.x, location.y, location.z)
+        val previous = selectionPanelPlacements[id]?.takeIf { it.selection == selection }
+        val returnDistance = maxDistance - minOf(0.5, maxDistance * 0.1)
+        val followView = if (previous?.followView == true) distanceSquared >= returnDistance * returnDistance
+            else distanceSquared > maxDistance * maxDistance
+        selectionPanelPlacements[id] = SelectionPanelPlacement(selection, followView)
         if (materialPicker?.isOpen(id) == true || crownSelectionDialog?.isOpen(id) == true) return null
         fun text(key: String, values: Map<String, Component> = emptyMap()) =
             messages.render("selection-panel.$key", locale(player), values)
@@ -1189,6 +1211,7 @@ internal class BuilderToolsRuntime(
             return BuilderPanelView(
                 SelectionPanelContext(selection, token), selection, text("scanning"),
                 listOf(BuilderPanelAction.CANCEL),
+                followView = followView,
             )
         }
         operationLocks.operation(id)?.let { operation ->
@@ -1199,6 +1222,7 @@ internal class BuilderToolsRuntime(
                     "count" to messages.literal(operation.record.plan.changes.size),
                 )),
                 emptyList(),
+                followView = followView,
             )
         }
         if (operationLocks.isPlayerLocked(id) || id in constructionStarts) return null
@@ -1224,6 +1248,7 @@ internal class BuilderToolsRuntime(
                         add(BuilderPanelAction.ROTATE_RIGHT)
                     }
                 },
+                followView = followView,
             )
         }
         panelPlanSummaries.remove(id)
@@ -1234,6 +1259,7 @@ internal class BuilderToolsRuntime(
             offer(BuilderPanelAction.FILL, BuilderRootCommand.FILL)
             offer(BuilderPanelAction.REPLACE, BuilderRootCommand.REPLACE)
             offer(BuilderPanelAction.COPY, BuilderRootCommand.COPY)
+            offer(BuilderPanelAction.MOVE, BuilderRootCommand.MOVE)
             if (clipboardController.current(id) != null) offer(BuilderPanelAction.PASTE, BuilderRootCommand.PASTE)
             offer(BuilderPanelAction.DECONSTRUCT, BuilderRootCommand.DECONSTRUCT)
             if (player.hasPermission("arcbuild.book.create") &&
@@ -1263,6 +1289,7 @@ internal class BuilderToolsRuntime(
                 "current" to messages.literal(page + 1),
                 "total" to messages.literal(pageCount),
             )) else Component.empty(),
+            followView = followView,
         )
     }
 
@@ -1291,6 +1318,7 @@ internal class BuilderToolsRuntime(
                 BuilderPanelAction.FILL -> openFillMaterialPicker(player)
                 BuilderPanelAction.REPLACE -> openReplaceMaterialPicker(player)
                 BuilderPanelAction.COPY -> handleBuilder(player, arrayOf("copy"))
+                BuilderPanelAction.MOVE -> armSelectionMove(player)
                 BuilderPanelAction.PASTE -> handleBuilder(player, arrayOf("paste"))
                 BuilderPanelAction.DECONSTRUCT -> handleBuilder(player, arrayOf("deconstruct"))
                 BuilderPanelAction.DISCONNECT -> handleBuilder(player, arrayOf("disconnect"))
@@ -1307,6 +1335,42 @@ internal class BuilderToolsRuntime(
                 BuilderPanelAction.ASSIST_ON -> handleBuilder(player, arrayOf("assist", "on"))
                 BuilderPanelAction.ASSIST_OFF -> handleBuilder(player, arrayOf("assist", "off"))
             }
+        }
+    }
+
+    private fun ensureMovePermission(player: Player) {
+        ensureFeaturePermission(player, BuilderFeature.COPY)
+        ensureFeaturePermission(player, BuilderFeature.PASTE)
+    }
+
+    private fun armSelectionMove(player: Player) {
+        ensureMovePermission(player)
+        if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
+        val selection = requiredSelection(player)
+        bookRequests.invalidate(player.uniqueId)
+        discardPendingPlan(player.uniqueId)
+        placementAssist?.clearPlayer(player.uniqueId)
+        dismissSelectionControls(player.uniqueId)
+        moveDirectionPicks[player.uniqueId] = MoveDirectionPick(selection, player.gameMode,
+            player.inventory.heldItemSlot, player.inventory.itemInMainHand.clone(), Bukkit.getCurrentTick())
+        send(player, "move.choose-direction")
+    }
+
+    private fun currentMoveDirectionPick(player: Player, pick: MoveDirectionPick): Boolean =
+        !closed && player.isOnline && !player.isDead && player.gameMode == pick.gameMode &&
+            player.world.uid == pick.selection.worldId && selectionOrNull(player) == pick.selection &&
+            player.inventory.heldItemSlot == pick.slot && player.inventory.itemInMainHand == pick.item &&
+            isSelector(player.inventory.itemInMainHand) && !operationLocks.isPlayerLocked(player.uniqueId) &&
+            runCatching { ensureAvailable(player); ensureMovePermission(player) }.isSuccess
+
+    private fun prepareMove(player: Player) {
+        ensureMovePermission(player)
+        val selection = requiredSelection(player)
+        val direction = BuilderMoveController.lookDirection(player.eyeLocation.direction)
+        val movedSelection = selection.shifted(direction)
+        requestPlanning(player, { current -> moveController.plan(player, direction, current) }) { plan ->
+            preparePlan(player, plan)
+            moveSelections[player.uniqueId] = MoveSelection(plan.id, selection, movedSelection)
         }
     }
 
@@ -1374,6 +1438,8 @@ internal class BuilderToolsRuntime(
     }
 
     private fun dismissSelectionControls(playerId: UUID) {
+        selectionPanelPlacements.remove(playerId)
+        moveDirectionPicks.remove(playerId)
         pastePreview.clear(playerId)
         clearSelectionTarget(playerId)
         materialScans.remove(playerId)
@@ -1439,6 +1505,9 @@ internal class BuilderToolsRuntime(
         if (closed) return
         Bukkit.getOnlinePlayers().forEach { player ->
             try {
+                moveDirectionPicks[player.uniqueId]?.let { pick ->
+                    if (!currentMoveDirectionPick(player, pick)) moveDirectionPicks.remove(player.uniqueId, pick)
+                }
                 refreshSelectionTarget(player)
                 selectionTargetFailures.remove(player.uniqueId)
             } catch (failure: Exception) {
@@ -1453,6 +1522,7 @@ internal class BuilderToolsRuntime(
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     fun onBookGameModeChange(event: org.bukkit.event.player.PlayerGameModeChangeEvent) {
         invalidatePendingBookRequests(event.player.uniqueId)
+        moveDirectionPicks.remove(event.player.uniqueId)
         pastePreview.clear(event.player.uniqueId)
     }
 
@@ -1595,6 +1665,9 @@ internal class BuilderToolsRuntime(
 
     private fun handleBuilder(player: Player, args: Array<out String>) {
         val root = BuilderRootCommand.parse(args.firstOrNull()) ?: BuilderRootCommand.HELP
+        if (root !in setOf(BuilderRootCommand.CANCEL, BuilderRootCommand.STATUS, BuilderRootCommand.HELP)) {
+            moveDirectionPicks.remove(player.uniqueId)
+        }
         if (root == BuilderRootCommand.ASSIST) {
             checkNotNull(placementAssist).command(player, args.drop(1))
             return
@@ -1640,6 +1713,7 @@ internal class BuilderToolsRuntime(
                     ),
                 ) }
             }
+            BuilderRootCommand.MOVE -> prepareMove(player)
             BuilderRootCommand.BOOK -> when (args.getOrNull(1)?.lowercase(Locale.ROOT)) {
                 "cancel" -> {
                     val loading = bookRequests.invalidate(player.uniqueId)
@@ -1718,6 +1792,7 @@ internal class BuilderToolsRuntime(
         BuilderRootCommand.REPLACE -> BuilderPermissionPolicy.canUse(BuilderFeature.REPLACE, player::hasPermission)
         BuilderRootCommand.DISCONNECT -> BuilderPermissionPolicy.canUse(BuilderFeature.FENCE_DISCONNECT, player::hasPermission)
         BuilderRootCommand.COPY -> BuilderPermissionPolicy.canUse(BuilderFeature.COPY, player::hasPermission)
+        BuilderRootCommand.MOVE -> BuilderPermissionPolicy.canMove(player::hasPermission)
         BuilderRootCommand.PASTE -> BuilderPermissionPolicy.canUse(BuilderFeature.PASTE, player::hasPermission)
         BuilderRootCommand.DECONSTRUCT -> BuilderPermissionPolicy.canUse(BuilderFeature.DECONSTRUCT, player::hasPermission)
         BuilderRootCommand.CROWN -> BuilderPermissionPolicy.canUse(BuilderFeature.CROWN, player::hasPermission)
@@ -1774,6 +1849,7 @@ internal class BuilderToolsRuntime(
         val points = selections.points(player.uniqueId, player.world.uid)
         if ((if (first) points.first else points.second) == position) return
         materialScans.remove(player.uniqueId)
+        selectionPanelPlacements.remove(player.uniqueId)
         selectionPanelPages.remove(player.uniqueId)
         crownSelectionDialog?.close(player.uniqueId)
         materialPicker?.close(player.uniqueId)
@@ -2117,6 +2193,7 @@ internal class BuilderToolsRuntime(
 
     private fun preparePlan(player: Player, plan: BuilderPlan, announce: Boolean = true) {
         preflightPlan(player, plan)
+        moveSelections.remove(player.uniqueId)
         crown.clearAnchor(player.uniqueId)
         previews.open(
             player = player,
@@ -2427,6 +2504,7 @@ internal class BuilderToolsRuntime(
             throw BuilderUserFailure("book.preview-required")
         }
         if (buildBook || plan.kind == BuilderPlanKind.BUILD_BOOK) ensureBuildBookAvailable(player) else ensureAvailable(player)
+        if (plan.kind == BuilderPlanKind.MOVE) ensureMovePermission(player)
         if (operationLocks.isPlayerLocked(player.uniqueId)) throw BuilderUserFailure("errors.busy")
         if (plan.expiresAtMillis <= System.currentTimeMillis()) {
             discardPendingPlan(player.uniqueId)
@@ -3202,7 +3280,15 @@ internal class BuilderToolsRuntime(
             }
         }
         // Physics is outside the rollback-safe transaction; drops must never be duplicated by restoration.
+        val movedSelection = moveSelections[player.uniqueId]?.takeIf { it.planId == durable.plan.id }
         finishOperation(operation)
+        movedSelection?.let { moved ->
+            if (player.isOnline && selectionOrNull(player) == moved.before) {
+                selections.set(player.uniqueId, moved.after.first, first = true)
+                selections.set(player.uniqueId, moved.after.second, first = false)
+                displayRenderer.selection(player, selections.points(player.uniqueId, player.world.uid), moved.after)
+            }
+        }
         if (failures > 0) send(player, "operation.physics-failed")
         val completion = messages.render(
             "operation.completed",
@@ -3299,12 +3385,18 @@ internal class BuilderToolsRuntime(
         finishOperation(operation)
     }
 
-    private fun finishOperation(operation: BuilderActiveOperation) = operationLocks.finish(operation)
+    private fun finishOperation(operation: BuilderActiveOperation) {
+        moveSelections[operation.record.playerId]?.takeIf { it.planId == operation.record.plan.id }?.let {
+            moveSelections.remove(operation.record.playerId, it)
+        }
+        operationLocks.finish(operation)
+    }
 
     private fun revalidatePlanAsync(
         player: Player, plan: BuilderPlan, construction: BuilderConstructionProjectRecord?, isCurrent: () -> Boolean,
     ): CompletableFuture<Unit> {
         val maximum = config.maxChangesFor(plan.kind)
+        if (plan.kind == BuilderPlanKind.MOVE) ensureMovePermission(player)
         if (BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, plan) &&
             !BuilderPermissionPolicy.canDeconstructWithoutTool(player::hasPermission)) throw BuilderUserFailure("errors.no-permission")
         return planningTasks.compute {
@@ -3338,6 +3430,7 @@ internal class BuilderToolsRuntime(
     }
 
     private fun cancelPlan(player: Player) {
+        val pickingMoveDirection = moveDirectionPicks.remove(player.uniqueId) != null
         val movingPaste = pastePreview.clear(player.uniqueId)
         val loading = bookRequests.invalidate(player.uniqueId)
         val quoting = books.invalidateSchematicRequests(player.uniqueId)
@@ -3365,7 +3458,7 @@ internal class BuilderToolsRuntime(
         } else if (BuildingManager.closePreview(player.uniqueId)) {
             bookPreviewPresentation.clearPlayer(player.uniqueId)
             send(player, "book.preview-cancelled")
-        } else if (loading || quoting || movingPaste) {
+        } else if (loading || quoting || movingPaste || pickingMoveDirection) {
             bookPreviewPresentation.clearPlayer(player.uniqueId)
             send(player, "plan.cancelled")
         } else {
@@ -3420,6 +3513,7 @@ internal class BuilderToolsRuntime(
         val selectionPoints = selections.points(player.uniqueId, player.world.uid)
         when {
             pastePreview.capturesInput(player.uniqueId) -> send(player, "clipboard.moving")
+            player.uniqueId in moveDirectionPicks -> send(player, "move.choose-direction")
             active != null -> send(player, "status.plan", mapOf("kind" to kindLabel(player, active.record.plan.kind), "count" to messages.literal(active.appliedChanges), "total" to messages.literal(active.record.plan.changes.size)))
             construction != null -> send(
                 player,
@@ -3717,6 +3811,7 @@ internal class BuilderToolsRuntime(
         messages.render("construction.states.${state.name.lowercase(Locale.ROOT)}", locale(player))
 
     private fun discardPendingPlan(playerId: UUID) {
+        moveSelections.remove(playerId)
         pastePreview.clear(playerId)
         previews.plan(playerId)?.let { plan -> plannedConstructionProjects.remove(plan.id) }
         previews.discard(playerId)
@@ -3961,6 +4056,20 @@ internal class BuilderToolsRuntime(
                 }
             }
             return
+        }
+        moveDirectionPicks[player.uniqueId]?.let { pick ->
+            if (event.action in listOf(
+                    Action.LEFT_CLICK_AIR, Action.LEFT_CLICK_BLOCK, Action.RIGHT_CLICK_AIR, Action.RIGHT_CLICK_BLOCK,
+                )) {
+                event.isCancelled = true
+                if (!currentMoveDirectionPick(player, pick)) {
+                    moveDirectionPicks.remove(player.uniqueId, pick)
+                } else if (event.hand == EquipmentSlot.HAND && Bukkit.getCurrentTick() != pick.startedTick) {
+                    moveDirectionPicks.remove(player.uniqueId, pick)
+                    runBuilderAction(player, "move_direction") { prepareMove(player) }
+                }
+                return
+            }
         }
         if (event.action in listOf(
                 org.bukkit.event.block.Action.LEFT_CLICK_AIR, org.bukkit.event.block.Action.LEFT_CLICK_BLOCK,
@@ -4239,6 +4348,8 @@ internal class BuilderToolsRuntime(
 
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
+        selectionPanelPlacements.remove(event.player.uniqueId)
+        moveDirectionPicks.remove(event.player.uniqueId)
         pastePreview.clear(event.player.uniqueId)
         selectionTargets.remove(event.player.uniqueId)
         selectionTargetFailures.remove(event.player.uniqueId)
@@ -4361,6 +4472,9 @@ internal class BuilderToolsRuntime(
         panelPlanSummaries.clear()
         selectionUndoAvailable.clear()
         selectionPanelPages.clear()
+        selectionPanelPlacements.clear()
+        moveDirectionPicks.clear()
+        moveSelections.clear()
         actionDiagnostics.clear()
         attempt { crown.close() }
         attempt { previews.close() }

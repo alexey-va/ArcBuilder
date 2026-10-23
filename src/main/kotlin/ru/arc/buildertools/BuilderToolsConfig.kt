@@ -446,6 +446,8 @@ class BuilderToolsConfig(
                 "errors.chunk-unloaded",
                 "errors.too-far",
                 "errors.nothing-to-change",
+                "errors.move-occupied",
+                "move.choose-direction",
                 "errors.busy",
                 "errors.expired",
                 "errors.inventory",

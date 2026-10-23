@@ -117,7 +117,7 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
             complete("crown", "birch_leaves", "") shouldBe (3..10).map(Int::toString)
             complete("crown", "stone", "") shouldBe emptyList()
             complete("crown", "shape", "round", "") shouldBe emptyList()
-            for (root in listOf("help", "wand", "clear", "copy", "deconstruct", "cancel", "undo", "status", "projects", "reload")) {
+            for (root in listOf("help", "wand", "clear", "copy", "move", "deconstruct", "cancel", "undo", "status", "projects", "reload")) {
                 complete(root, "") shouldBe emptyList()
             }
             for (terminal in listOf(arrayOf("confirm", "buy"), arrayOf("disconnect", "confirm"),
@@ -147,6 +147,18 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
             fixture.tab(creator, "book", "") shouldNotContain "draft"
             fixture.grant(creator, "arcbuild.copy")
             fixture.tab(creator, "book", "DR") shouldBe listOf("draft")
+        }
+    }
+
+    test("move requires both existing copy and paste feature grants") {
+        withCommandFixture { fixture ->
+            val mover = fixture.player("MoveAccess")
+            fixture.grant(mover, "arcbuild.copy")
+            fixture.tab(mover, "mov") shouldBe emptyList()
+            fixture.assertRejected(mover, "нет доступа") { fixture.execute(mover, "move") }
+            fixture.grant(mover, "arcbuild.paste")
+            fixture.tab(mover, "mov") shouldBe listOf("move")
+            fixture.assertRejected(mover, "выдел") { fixture.execute(mover, "move") }
         }
     }
 

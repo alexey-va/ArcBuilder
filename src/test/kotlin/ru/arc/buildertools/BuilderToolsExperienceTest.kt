@@ -20,6 +20,7 @@ class BuilderToolsExperienceTest : FunSpec({
             "replace",
             "disconnect",
             "copy",
+            "move",
             "book",
             "paste",
             "deconstruct",
@@ -33,6 +34,7 @@ class BuilderToolsExperienceTest : FunSpec({
             "projects",
         )
         BuilderRootCommand.parse("WAND") shouldBe BuilderRootCommand.WAND
+        BuilderRootCommand.parse("MOVE") shouldBe BuilderRootCommand.MOVE
         BuilderRootCommand.parse("pos1") shouldBe null
         BuilderRootCommand.parse("pos2") shouldBe null
         BuilderRootCommand.parse("stop") shouldBe null

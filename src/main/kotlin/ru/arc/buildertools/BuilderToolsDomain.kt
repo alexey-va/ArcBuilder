@@ -14,6 +14,7 @@ enum class BuilderPlanKind {
     FILL,
     REPLACE,
     FENCE_DISCONNECT,
+    MOVE,
     PASTE,
     BUILD_BOOK,
     DECONSTRUCT,
@@ -176,6 +177,15 @@ data class BuilderPlan(
         }
         require(rewards.sumOf { it.amount.toLong() } <= ABSOLUTE_MAX_ITEMS) {
             "Builder-tools plan reward is outside its safety bound"
+        }
+        if (kind == BuilderPlanKind.MOVE) {
+            require(costs.isEmpty() && rewards.isEmpty() && toolDamage == 0) { "A move cannot exchange inventory" }
+            val air = setOf("minecraft:air", "minecraft:cave_air", "minecraft:void_air")
+            fun counts(blockData: (BuilderBlockChange) -> String) = changes.asSequence().map(blockData)
+                .filter { it.substringBefore('[') !in air }.groupingBy { it }.eachCount()
+            require(counts(BuilderBlockChange::beforeBlockData) == counts(BuilderBlockChange::afterBlockData)) {
+                "A move must conserve exact block states"
+            }
         }
         require(toolDamage in 0..ABSOLUTE_MAX_CHANGES) { "Builder-tools tool damage is outside its safety bound" }
         require((toolDamage == 0) == (toolFingerprintBase64 == null)) {

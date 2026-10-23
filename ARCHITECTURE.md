@@ -37,6 +37,7 @@ reverse order. Startup fails closed if a required runtime invariant is not met.
 | `replace <old> <new> [confirm]` | `BuilderReplaceController` | `REPLACE` | `arcbuild.replace` |
 | `disconnect [confirm]` | `BuilderFenceConnectionController` | `FENCE_DISCONNECT` | `arcbuild.disconnect` |
 | `copy`, `paste` | `BuilderClipboardController` | `PASTE` for paste | `arcbuild.copy`, `arcbuild.paste` |
+| `move` | `BuilderMoveController` | `MOVE` | both `arcbuild.copy` and `arcbuild.paste` |
 | `deconstruct` | `BuilderDeconstructionController` | `DECONSTRUCT` | `arcbuild.deconstruct` |
 | `crown` | `BuilderCrownController` | `CROWN` | `arcbuild.crown` |
 | `display` | `display/BuilderDisplayEditor` | separate decorative entity edits | explicit `arcbuild.display` |
@@ -62,7 +63,25 @@ There is no building-material transaction or inventory redemption: zero-cost
 decoration is assessed in `docs/display-editor-economy-20261021.md`.
 
 `BuilderPlanningHost` is the shared runtime preflight and plan boundary for
-the fill, replace, and fence-disconnect controllers.
+the fill, replace, fence-disconnect, and move controllers.
+
+`/builder move` previews a one-block shift along the dominant look axis, including
+up and down. The selection-panel action first arms direction picking; a fresh
+main-hand selector click chooses the look direction, then opens the same explicit
+plan confirmation. Same-tick and offhand clicks do not choose a direction. The
+runtime clears that transient mode on cancel, another action, tool/context exit,
+disconnect, or shutdown. World capture uses the shared sliced planning queue.
+`BuilderMoveController` combines source removal and placement from one snapshot,
+so overlapping source and destination have one final change per position. Unsafe
+blocks remain excluded; any occupied destination outside the movable snapshot
+rejects the whole plan. MOVE exchanges no inventory and its domain validation
+requires exact block-state conservation. It does not emit construction rewards.
+The existing captured multi-block policy excludes unmatched door/plant halves;
+only complete safe pairs are moved, without synthesizing their companions.
+The runtime shifts selection corners only after that MOVE reaches COMMITTED and
+only while the original selection is still current; preview, cancellation and
+rollback preserve the corners. This follow state is transient; journal recovery
+continues to use the ordinary durable block preimages.
 
 ## Personal placement assistant
 

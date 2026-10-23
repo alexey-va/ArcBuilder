@@ -259,11 +259,19 @@ class BuilderBookJourneyTest : FunSpec({
 
         val russianClipboard = config.string("locales.ru.clipboard.saved")
         russianClipboard shouldContain "<color:#92bed8>[▶ Вставить здесь]"
-        russianClipboard shouldContain "<color:#92bed8>[▶ Создать книгу]"
+        russianClipboard shouldContain "<color:#92bed8>[▶ Создать схему]"
 
         val englishClipboard = config.string("locales.en.clipboard.saved")
         englishClipboard shouldContain "<color:#92bed8>[▶ Paste here]"
-        englishClipboard shouldContain "<color:#92bed8>[▶ Create book]"
+        englishClipboard shouldContain "<color:#92bed8>[▶ Create blueprint]"
+
+        config.string("locales.ru.selection-panel.actions.draft") shouldBe "<color:#92bed8>Создать схему"
+        config.string("locales.en.selection-panel.actions.draft") shouldBe "<color:#92bed8>Create blueprint"
+        listOf("ru", "en").forEach { locale ->
+            config.string("locales.$locale.selection-panel.actions.move").isNotBlank() shouldBe true
+            config.string("locales.$locale.move.choose-direction") shouldContain "<click:run_command:'/builder cancel'>"
+            config.string("locales.$locale.kinds.move") shouldContain "<hover:show_text:"
+        }
 
         listOf("ru", "en").forEach { locale ->
             val buttonSurfaces = listOf(

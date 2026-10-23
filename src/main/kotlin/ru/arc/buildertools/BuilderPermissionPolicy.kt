@@ -41,6 +41,9 @@ internal object BuilderPermissionPolicy {
     fun canUse(feature: BuilderFeature, hasPermission: (String) -> Boolean): Boolean =
         hasPermission(umbrellaPermission) || hasPermission(feature.canonicalPermission)
 
+    fun canMove(hasPermission: (String) -> Boolean): Boolean =
+        canUse(BuilderFeature.COPY, hasPermission) && canUse(BuilderFeature.PASTE, hasPermission)
+
     fun canDeconstructWithoutTool(hasPermission: (String) -> Boolean): Boolean =
         hasPermission(deconstructWithoutToolPermission)
 

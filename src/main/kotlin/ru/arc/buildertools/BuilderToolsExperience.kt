@@ -32,6 +32,7 @@ internal enum class BuilderRootCommand(
     REPLACE("replace"),
     DISCONNECT("disconnect"),
     COPY("copy"),
+    MOVE("move"),
     BOOK("book"),
     PASTE("paste"),
     DECONSTRUCT("deconstruct"),

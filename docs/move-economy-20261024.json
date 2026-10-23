@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "title": "ArcBuilder one-block MOVE",
+  "assumptions": [
+    "Source-level assessment for a new MOVE operation. No live income or client behavior is claimed.",
+    "1 participant and 1/100/10000 accepted moves per day are stress scenarios, not measured activity or guaranteed throughput.",
+    "MOVE transfers safe existing world blocks in a single snapshot-derived journaled plan; costs and rewards are empty, occupied destinations outside the moved source are rejected.",
+    "Vault, tokens, XP and inventory items remain separate units. World-block material multiset is conserved before existing vanilla physics; no automatic item payout is introduced.",
+    "Builder construction reward events exclude MOVE. Existing hourly/range/protection and unsafe-block limits remain authoritative; SELL and the planned SELL-to-contract transition are unchanged."
+  ],
+  "participants": [
+    1,
+    1,
+    1
+  ],
+  "currencies": {
+    "vault": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "move_vault",
+          "kind": "mint",
+          "source": "src/main/kotlin/ru/arc/buildertools/BuilderMoveController.kt",
+          "basis": "Moving blocks does not grant or consume this currency or inventory unit.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "tokens": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "move_tokens",
+          "kind": "mint",
+          "source": "src/main/kotlin/ru/arc/buildertools/BuilderMoveController.kt",
+          "basis": "Moving blocks does not grant or consume this currency or inventory unit.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "player_xp": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "move_player_xp",
+          "kind": "mint",
+          "source": "src/main/kotlin/ru/arc/buildertools/BuilderMoveController.kt",
+          "basis": "Moving blocks does not grant or consume this currency or inventory unit.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "inventory_items": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "move_inventory_items",
+          "kind": "item",
+          "source": "src/main/kotlin/ru/arc/buildertools/BuilderMoveController.kt",
+          "basis": "Moving blocks does not grant or consume this currency or inventory unit.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              1,
+              100,
+              10000
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

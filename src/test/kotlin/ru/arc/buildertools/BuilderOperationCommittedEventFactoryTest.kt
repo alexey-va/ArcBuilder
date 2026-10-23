@@ -36,6 +36,7 @@ class BuilderOperationCommittedEventFactoryTest : FunSpec({
         )
 
         BuilderOperationCommittedEventFactory.create(plan, GameMode.SURVIVAL) shouldBe null
+        BuilderOperationCommittedEventFactory.create(plan.copy(kind = BuilderPlanKind.MOVE), GameMode.SURVIVAL) shouldBe null
         BuilderOperationCommittedEventFactory.create(plan.copy(kind = BuilderPlanKind.FILL), GameMode.CREATIVE) shouldBe null
     }
 })

@@ -1307,7 +1307,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
-    test("selection panel stays near the nearest selection edge and returns without losing selection") {
+    test("selection panel follows the view away from the selection and retains paste and selection context") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("LocalPanelBuilder", GameMode.CREATIVE)
             player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
@@ -1315,16 +1315,25 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.performCommand("builder wand") shouldBe true
             journey.select(player, journey.world, player.inventory.itemInMainHand, 0, 64, 0, 12, 64, 0)
             val selected = checkNotNull(journey.selectionPanel(player)).selection
+            journey.world.getBlockAt(0, 64, 0).type = Material.STONE
+            journey.selectionPanelAction(player, BuilderPanelAction.COPY)
+            val actions = checkNotNull(journey.selectionPanel(player)).actions
+            actions.contains(BuilderPanelAction.PASTE) shouldBe true
+            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
 
             player.teleport(Location(journey.world, 21.0, 64.0, 0.5))
             checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
+            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
             player.teleport(Location(journey.world, 21.1, 64.0, 0.5))
-            journey.selectionPanel(player) shouldBe null
-            journey.selectionPanelAction(player, BuilderPanelAction.CLEAR)
+            checkNotNull(journey.selectionPanel(player)).followView shouldBe true
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
+            checkNotNull(journey.selectionPanel(player)).actions shouldBe actions
             player.teleport(Location(journey.world, 0.5, 74.0, 0.5))
-            journey.selectionPanel(player) shouldBe null
+            checkNotNull(journey.selectionPanel(player)).followView shouldBe true
+            checkNotNull(journey.selectionPanel(player)).actions shouldBe actions
             player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
             checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
+            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
         }
     }
 
@@ -1350,6 +1359,44 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("selection panel near far latch prevents threshold jitter and clears with selection and tool context") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("PanelHysteresis", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, -90f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            val wand = player.inventory.itemInMainHand.clone()
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            journey.select(player, world, wand, 0, 64, 0, 12, 64, 0)
+            journey.selectionPanelAction(player, BuilderPanelAction.COPY)
+            val selected = checkNotNull(journey.selectionPanel(player)).selection
+            val actions = checkNotNull(journey.selectionPanel(player)).actions
+            actions.contains(BuilderPanelAction.PASTE) shouldBe true
+            fun move(x: Double): BuilderPanelView {
+                player.simulatePlayerMove(Location(world, x, 64.0, 0.5, -90f, 0f))
+                return checkNotNull(journey.selectionPanel(player)).also {
+                    it.selection shouldBe selected
+                    it.actions shouldBe actions
+                }
+            }
+            move(20.995).followView shouldBe false
+            move(21.005).followView shouldBe true
+            move(20.995).followView shouldBe true
+            move(21.005).followView shouldBe true
+            move(20.5).followView shouldBe true
+            move(20.49).followView shouldBe false
+            move(21.005).followView shouldBe true
+            move(20.995).followView shouldBe true
+            journey.paper.callEvent(PlayerItemHeldEvent(player, 0, 1))
+            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
+            move(21.005).followView shouldBe true
+            move(20.995).followView shouldBe true
+            journey.select(player, world, wand, 1, 64, 0, 12, 64, 0)
+            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
+        }
+    }
+
     test("selection panel confirmation preserves the durable fill and held-tool boundary") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("PanelBuilder", GameMode.SURVIVAL)
@@ -1369,10 +1416,11 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             firstPage.contains(BuilderPanelAction.PASTE) shouldBe true
             firstPage.count { it !in setOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE) } shouldBe 6
             firstPage.containsAll(listOf(BuilderPanelAction.FILL, BuilderPanelAction.REPLACE, BuilderPanelAction.COPY,
-                BuilderPanelAction.DECONSTRUCT, BuilderPanelAction.DRAFT)) shouldBe true
+                BuilderPanelAction.MOVE, BuilderPanelAction.DECONSTRUCT)) shouldBe true
             firstPage.contains(BuilderPanelAction.DISCONNECT) shouldBe false
             journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
             val secondPage = checkNotNull(journey.selectionPanel(player)).actions
+            secondPage.contains(BuilderPanelAction.DRAFT) shouldBe true
             secondPage.contains(BuilderPanelAction.CLEAR) shouldBe true
             secondPage.contains(BuilderPanelAction.DISCONNECT) shouldBe true
             secondPage.indexOf(BuilderPanelAction.CROWN) shouldBe secondPage.indexOf(BuilderPanelAction.DISCONNECT) + 1
@@ -1411,6 +1459,134 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
                 (0..1).all { journey.world.getBlockAt(it, 64, 0).type == Material.AIR }
             }
             journey.amount(player, Material.STONE) shouldBe 2
+        }
+    }
+
+    test("move previews overlap then follows the committed structure without exchanging inventory and supports undo") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("MoveBuilder", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, -90f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.DIRT
+            player.inventory.addItem(ItemStack(Material.STONE, 7))
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 1, 64, 0)
+            val selection = checkNotNull(journey.selectionPanel(player)).selection
+            val inventory = player.inventory.contents.map { it?.clone() }
+
+            journey.command(player, "builder move") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).kind shouldBe BuilderPlanKind.MOVE
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT
+            journey.command(player, "builder cancel") shouldBe true
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection
+            journey.command(player, "builder move") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) {
+                world.getBlockAt(0, 64, 0).type == Material.AIR &&
+                    world.getBlockAt(1, 64, 0).type == Material.STONE && world.getBlockAt(2, 64, 0).type == Material.DIRT
+            }
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection.shifted(BlockFace.EAST)
+            player.inventory.contents.toList() shouldBe inventory
+            journey.command(player, "builder undo") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) {
+                world.getBlockAt(0, 64, 0).type == Material.STONE &&
+                    world.getBlockAt(1, 64, 0).type == Material.DIRT && world.getBlockAt(2, 64, 0).type == Material.AIR
+            }
+            player.inventory.contents.toList() shouldBe inventory
+        }
+    }
+
+    test("move panel waits for a fresh main hand direction click before preview and confirmation") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("MoveDirection", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, 0f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            val selection = checkNotNull(journey.selectionPanel(player)).selection
+            fun click(hand: EquipmentSlot = EquipmentSlot.HAND) {
+                val event = PlayerInteractEvent(player, Action.RIGHT_CLICK_AIR, player.inventory.itemInMainHand,
+                    null, BlockFace.SELF, hand)
+                journey.paper.callEvent(event)
+                event.isCancelled shouldBe true
+            }
+            journey.selectionPanelAction(player, BuilderPanelAction.MOVE)
+            journey.selectionPanel(player) shouldBe null
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            click() // The click that armed the mode cannot also pick its direction.
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            journey.paper.performTicks(1)
+            click(EquipmentSlot.OFF_HAND)
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            player.setRotation(-90f, 0f)
+            click()
+            journey.await("move preview after fresh selector click") { journey.renderer.plans[player.uniqueId] != null }
+            val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
+            plan.kind shouldBe BuilderPlanKind.MOVE
+            plan.changes.single { it.afterBlockData != "minecraft:air" }.position shouldBe BuilderBlockPos(world.uid, 1, 64, 0)
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            journey.selectionPanelAction(player, BuilderPanelAction.CONFIRM)
+            journey.awaitSettled(player) { world.getBlockAt(1, 64, 0).type == Material.STONE }
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection.shifted(BlockFace.EAST)
+        }
+    }
+
+    test("move direction mode cancels on explicit cancel and tool or world context exits") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("MoveCancel", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            val selection = checkNotNull(journey.selectionPanel(player)).selection
+            journey.selectionPanelAction(player, BuilderPanelAction.MOVE)
+            journey.command(player, "builder cancel") shouldBe true
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection
+            journey.selectionPanelAction(player, BuilderPanelAction.MOVE)
+            journey.paper.callEvent(PlayerItemHeldEvent(player, 0, 1))
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection
+            journey.selectionPanelAction(player, BuilderPanelAction.MOVE)
+            val other = journey.paper.addSimpleWorld("move-other-world")
+            player.teleport(Location(other, 0.5, 64.0, 3.5))
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection
+            journey.renderer.plans[player.uniqueId] shouldBe null
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+        }
+    }
+
+    test("move rechecks copy and paste permission at confirmation and preserves selection on rejection") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("MovePermission", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, -90f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            val selection = checkNotNull(journey.selectionPanel(player)).selection
+            journey.command(player, "builder move") shouldBe true
+            player.addAttachment(journey.plugin, "arcbuild.use", false)
+            player.addAttachment(journey.plugin, "arcbuild.paste", false)
+            player.addAttachment(journey.plugin, "arcbuild.copy", true)
+            player.recalculatePermissions()
+            player.hasPermission("arcbuild.copy") shouldBe true
+            player.hasPermission("arcbuild.paste") shouldBe false
+            journey.command(player, "builder confirm") shouldBe true
+            journey.activeLeases() shouldBe 0
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            world.getBlockAt(1, 64, 0).type shouldBe Material.AIR
+            checkNotNull(journey.selectionPanel(player)).selection shouldBe selection
         }
     }
 
@@ -1799,6 +1975,8 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.world.getBlockAt(2, 64, 0).type = Material.OAK_PLANKS
             journey.world.getBlockAt(3, 64, 0).type = Material.DEEPSLATE
             journey.select(player, journey.world, wand, 2, 64, 0, 3, 64, 0)
+            journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
+            checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.DRAFT) shouldBe true
             journey.selectionPanelAction(player, BuilderPanelAction.DRAFT)
             journey.await("draft replaces the stale clipboard with the new selection") {
                 player.inventory.storageContents.filterNotNull().any { BuildBookCodec.read(it)?.blockCount == 2 } &&

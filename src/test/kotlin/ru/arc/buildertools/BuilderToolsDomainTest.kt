@@ -554,6 +554,10 @@ class BuilderToolsDomainTest : FunSpec({
         BuilderPermissionPolicy.canUse(BuilderFeature.FILL, permissions("arcbuild.fill")) shouldBe true
         BuilderPermissionPolicy.canUse(BuilderFeature.REPLACE, permissions("arcbuild.replace")) shouldBe true
         BuilderPermissionPolicy.canUse(BuilderFeature.COPY, permissions("arcbuild.copy")) shouldBe true
+        BuilderPermissionPolicy.canMove(permissions("arcbuild.use")) shouldBe true
+        BuilderPermissionPolicy.canMove(permissions("arcbuild.copy", "arcbuild.paste")) shouldBe true
+        BuilderPermissionPolicy.canMove(permissions("arcbuild.copy")) shouldBe false
+        BuilderPermissionPolicy.canMove(permissions("arcbuild.paste")) shouldBe false
         BuilderPermissionPolicy.canUse(BuilderFeature.FILL, permissions("arc.builder.tools.fill")) shouldBe false
         BuilderPermissionPolicy.canUse(BuilderFeature.PASTE, permissions("arc.buildertools.paste")) shouldBe false
         BuilderPermissionPolicy.canUse(BuilderFeature.CROWN, permissions("arc.crown")) shouldBe false

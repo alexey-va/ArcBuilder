@@ -242,7 +242,8 @@ selection-panel:
   distance: 2.4
   side-offset: 0.0
   height-offset: 0.0
-  # Distance from the nearest point of the selected cuboid; reload applies it.
+  # Beyond this distance from the selected cuboid, the same panel follows the viewer.
+  # Nearby controls face the selection; distant controls adopt view yaw after body movement.
   max-selection-distance: 8.0
   row-spacing: 0.26
   column-spacing: 1.55
@@ -499,13 +500,14 @@ locales:
         fill: '<#92bed8>Заполнить'
         replace: '<#92bed8>Заменить'
         copy: '<#92bed8>Скопировать'
+        move: '<#92bed8>Сдвинуть'
         paste: '<#92bed8>Вставить'
         previous-page: '<#92bed8>\<'
         next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Разобрать'
         disconnect: '<#92bed8>Разъединить'
         crown: '<#92bed8>Крона'
-        draft: '<#92bed8>Создать книгу'
+        draft: '<#92bed8>Создать схему'
         clear: '<#ff9f0f>Сбросить'
         undo: '<#d48763>Откатить'
         confirm: '<#2bba43>Применить'
@@ -526,6 +528,10 @@ locales:
       preview: '<#2bba43>Предпросмотр'
       preview-help: "<hover:show_text:'Покажет точные блоки и расход до строительства.'><#e8dfd2>Посмотреть план</hover>"
       cancel: '<#e8dfd2>Назад'
+    move:
+      choose-direction: |-
+        <prefix><#e6fff3>Посмотри в сторону сдвига: вбок, вверх или вниз.
+        <#8c8c8c>   <#e6fff3>ЛКМ / ПКМ — превью на 1 блок. <click:run_command:'/builder cancel'><#92bed8>[✖ Отмена]</click>
     help:
       - "<prefix><#e6fff3>Инструменты строителя"
       - "<click:run_command:'/builder assist on'><#72ebc5><underlined>Включить помощника строительства</underlined></click> <#e6fff3>— ряд и плоскость выбираются по твоим блокам"
@@ -535,6 +541,7 @@ locales:
       - "<#8c8c8c>   <#d48763>/builder replace старый новый [confirm] <#e6fff3>— замена"
       - "<#8c8c8c>   <#d48763>/builder disconnect [confirm] <#e6fff3>— без превью"
       - "<#8c8c8c>   <#d48763>/builder copy <#e6fff3>и <#d48763>/builder paste <#e6fff3>— <hover:show_text:'Временная копия выделенных блоков, которую можно вставлять в другом месте.'>чертёж</hover>"
+      - "<#8c8c8c>   <#d48763>/builder move <#e6fff3>— <hover:show_text:'Выбирает ближайшее направление по оси X, Y или Z, в том числе вверх и вниз. Сначала превью, затем /builder confirm.'>сдвиг на 1 блок по взгляду</hover>"
       - "<#8c8c8c>   <#d48763>/builder book draft [имя] <#e6fff3>— <hover:show_text:'Бесплатная книга только для выбора места и расчёта цены; строить она ещё не может.'>бесплатный черновик</hover>"
       - "<#8c8c8c>   <#d48763>/builder book copy <#e6fff3>— платная копия"
       - "<#8c8c8c>   <#d48763>/builder book sell [цена] <#e6fff3>— продать книгу"
@@ -572,6 +579,7 @@ locales:
 
         <prefix><#ff9f0f>В выделении нет блоков для чертежа.
         <#8c8c8c>   <#e6fff3>Воздух и заменяемые растения не копируются.
+      move-occupied: "<prefix><#ff9f0f>На пути сдвига есть другой блок. Освободи место или выбери другое направление."
       hourly-limit: |-
 
         <prefix><#ff9f0f>Достигнут безопасный лимит изменений за час.
@@ -766,12 +774,12 @@ locales:
 
         <prefix><#2bba43><hover:show_text:'Временная копия выделенных блоков с точкой привязки.'>Чертёж</hover> <#8c8c8c>— <#e6fff3><count> блоков
         <#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки не попали в чертёж.'>Пропущено безопасно</hover>: <#969696><skipped>
-        <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Вставить здесь]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать книгу]</click>
+        <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Вставить здесь]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать схему]</click>
       saved-cursor: |-
 
         <prefix><#2bba43><hover:show_text:'Временная копия выделенных блоков с точкой привязки.'>Чертёж</hover> <#8c8c8c>— <#e6fff3><count> блоков
         <#8c8c8c>   <hover:show_text:'Контейнеры, нестандартные и другие небезопасные блоки не попали в чертёж.'>Пропущено безопасно</hover>: <#969696><skipped>
-        <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Разместить чертёж]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать книгу]</click>
+        <#8c8c8c>   <click:run_command:'/builder paste'><#92bed8>[▶ Разместить чертёж]</click> <#8c8c8c>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Создать схему]</click>
       retained: "<#d48763>Чертёж сохранён <#8c8c8c>— <#e6fff3>можно вставить снова"
       moving: |-
         <prefix><#ffb142>Превью следует за курсором. <#e6fff3>Зелёная рамка — точка привязки чертежа.
@@ -1455,6 +1463,7 @@ locales:
     kinds:
       fill: "<hover:show_text:'Заполняет пустые и заменяемые места выбранным блоком.'>Заполнение</hover>"
       replace: "<hover:show_text:'Меняет в выделении только указанный старый блок на новый.'>Замена блоков</hover>"
+      move: "<hover:show_text:'Переносит поддерживаемые блоки выделения на один блок по выбранной оси. Исходные позиции освобождаются только после подтверждения.'>Сдвиг области</hover>"
       fence_disconnect: "<hover:show_text:'Убирает текущие соединения заборов и оград; последующее обновление соседей может соединить их снова.'>Разъединение заборов и оград</hover>"
       paste: "<hover:show_text:'Привязывает чертёж к блоку под курсором. Клик фиксирует позицию; подтверждение размещает блоки.'>Вставка чертежа</hover>"
       paste-cursor: "<hover:show_text:'Привязывает чертёж к блоку под курсором. Клик фиксирует позицию; подтверждение размещает блоки.'>Вставка чертежа</hover>"
@@ -1620,13 +1629,14 @@ locales:
         fill: '<#92bed8>Fill'
         replace: '<#92bed8>Replace'
         copy: '<#92bed8>Copy'
+        move: '<#92bed8>Move'
         paste: '<#92bed8>Paste'
         previous-page: '<#92bed8>\<'
         next-page: '<#92bed8>>'
         deconstruct: '<#ff9f0f>Deconstruct'
         disconnect: '<#92bed8>Disconnect'
         crown: '<#92bed8>Crown'
-        draft: '<#92bed8>Create book'
+        draft: '<#92bed8>Create blueprint'
         clear: '<#ff9f0f>Clear'
         undo: '<#d48763>Undo'
         confirm: '<#2bba43>Apply'
@@ -1647,6 +1657,10 @@ locales:
       preview: '<#2bba43>Preview'
       preview-help: "<hover:show_text:'Shows exact block changes and material cost before building.'><#e8dfd2>Review plan</hover>"
       cancel: '<#e8dfd2>Back'
+    move:
+      choose-direction: |-
+        <prefix><gray>Look in the move direction: sideways, up or down.
+        <dark_gray>   <gray>Left / right click: preview a one-block move. <click:run_command:'/builder cancel'><#92bed8>[✖ Cancel]</click>
     help:
       - "<prefix><white>Builder tools"
       - "<click:run_command:'/builder assist on'><#72ebc5><underlined>Enable placement assistant</underlined></click> <#e8dfd2>— your blocks establish the row and plane"
@@ -1656,6 +1670,7 @@ locales:
       - "<dark_gray>   <white>/builder replace old new [confirm] <gray>— replace"
       - "<dark_gray>   <white>/builder disconnect [confirm] <gray>— no preview"
       - "<dark_gray>   <white>/builder copy <gray>and <white>/builder paste <gray>— <hover:show_text:'A temporary copy of selected blocks that can be placed elsewhere.'>blueprint</hover>"
+      - "<dark_gray>   <white>/builder move <gray>— <hover:show_text:'Uses the nearest X, Y or Z direction, including up and down. Preview first, then /builder confirm.'>move one block where you look</hover>"
       - "<dark_gray>   <white>/builder book draft [name] <gray>— <hover:show_text:'A free positioning and price-check book that cannot build yet.'>free draft</hover>"
       - "<dark_gray>   <white>/builder book sell [price] <gray>— list an active book"
       - "<dark_gray>   <white>/builder book copy <gray>— quote a paid registered copy"
@@ -1693,6 +1708,7 @@ locales:
 
         <prefix><yellow>The selection has no blocks to copy.
         <dark_gray>   <gray>Air and replaceable plants are excluded.
+      move-occupied: "<prefix><yellow>Another block is in the way. Clear the destination or choose another direction."
       hourly-limit: |-
 
         <prefix><yellow>Safe hourly change limit reached.
@@ -1869,12 +1885,12 @@ locales:
 
         <prefix><green><hover:show_text:'A temporary copy of selected blocks with an anchor point.'>Blueprint</hover> <dark_gray>— <white><count> blocks
         <dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks were excluded.'>Skipped safely</hover>: <gray><skipped>
-        <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Paste here]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create book]</click>
+        <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Paste here]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create blueprint]</click>
       saved-cursor: |-
 
         <prefix><green><hover:show_text:'A temporary copy of selected blocks with an anchor point.'>Blueprint</hover> <dark_gray>— <white><count> blocks
         <dark_gray>   <hover:show_text:'Containers, custom blocks, and other unsafe blocks were excluded.'>Skipped safely</hover>: <gray><skipped>
-        <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Position blueprint]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create book]</click>
+        <dark_gray>   <click:run_command:'/builder paste'><#92bed8>[▶ Position blueprint]</click> <dark_gray>   <click:suggest_command:'/builder book draft '><#92bed8>[▶ Create blueprint]</click>
       retained: "<aqua>Blueprint retained <dark_gray>— <white>you can paste it again"
       moving: |-
         <prefix><#ffb142>The preview follows your cursor. <#e6fff3>The green outline marks the blueprint origin.
@@ -2540,6 +2556,7 @@ locales:
     kinds:
       fill: "<hover:show_text:'Fills empty and replaceable positions with the selected block.'>Fill</hover>"
       replace: "<hover:show_text:'Changes only the selected source block into the target block.'>Block replacement</hover>"
+      move: "<hover:show_text:'Moves supported selection blocks one block along the chosen axis. Source positions are cleared only after confirmation.'>Selection move</hover>"
       fence_disconnect: "<hover:show_text:'Clears current fence and wall connections; later neighbor updates may reconnect them.'>Fence and wall disconnection</hover>"
       paste: "<hover:show_text:'Attaches the blueprint to the aimed cell. Click to fix its position, then confirm to place blocks.'>Blueprint paste</hover>"
       paste-cursor: "<hover:show_text:'Attaches the blueprint to the aimed cell. Click to fix its position, then confirm to place blocks.'>Blueprint paste</hover>"

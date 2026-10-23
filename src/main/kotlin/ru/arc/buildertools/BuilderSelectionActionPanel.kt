@@ -4,22 +4,25 @@ import net.kyori.adventure.text.Component
 import org.bukkit.entity.Player
 import org.bukkit.plugin.Plugin
 import ru.arc.paper.actionpanel.ActionPanelAction
+import ru.arc.paper.actionpanel.ActionPanelButton
 import ru.arc.paper.actionpanel.ActionPanelController
 import ru.arc.paper.actionpanel.ActionPanelFollowSettings
 import ru.arc.paper.actionpanel.ActionPanelFrame
 import ru.arc.paper.actionpanel.ActionPanelGridSettings
 import ru.arc.paper.actionpanel.ActionPanelInputProfile
+import ru.arc.paper.actionpanel.ActionPanelLayout
 import ru.arc.paper.actionpanel.ActionPanelLayouts
 import ru.arc.paper.actionpanel.ActionPanelOptions
 import ru.arc.paper.actionpanel.ActionPanelPlacement
 import ru.arc.paper.actionpanel.ActionPanelPoint
+import ru.arc.paper.actionpanel.ActionPanelTextStyle
 import ru.arc.paper.actionpanel.PaperActionPanels
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.text.LocalizedMiniMessage
 import java.util.UUID
 
 internal enum class BuilderPanelAction {
-    FILL, REPLACE, COPY, PASTE, PREVIOUS_PAGE, NEXT_PAGE, DECONSTRUCT, DISCONNECT, CROWN,
+    FILL, REPLACE, COPY, MOVE, PASTE, PREVIOUS_PAGE, NEXT_PAGE, DECONSTRUCT, DISCONNECT, CROWN,
     DRAFT, CLEAR, UNDO, CONFIRM, CANCEL, ROTATE_LEFT, ROTATE_RIGHT, ASSIST_ON, ASSIST_OFF;
 
     val localeKey: String get() = name.lowercase(java.util.Locale.ROOT).replace('_', '-')
@@ -31,6 +34,7 @@ internal data class BuilderPanelView(
     val status: Component,
     val actions: List<BuilderPanelAction>,
     val pagination: Component = Component.empty(),
+    val followView: Boolean = false,
 )
 
 internal data class BuilderPanelSettings(
@@ -75,11 +79,18 @@ internal class BuilderSelectionActionPanel(
     private val onSelectionGlowSuppression: (UUID, Boolean) -> Unit = { _, _ -> },
 ) : ActionPanelController<BuilderPanelContext, BuilderPanelAction>(), AutoCloseable {
     private val follow = ActionPanelFollowSettings(
-        settings.distance, settings.sideOffset, settings.heightOffset, settings.obstacleMaxShift, 0.0,
+        settings.distance, settings.sideOffset, settings.heightOffset, settings.obstacleMaxShift,
+        ActionPanelFollowSettings().movementTolerance,
     )
     private val grid = ActionPanelGridSettings(
         settings.rowSpacing, settings.columnSpacing, settings.buttonWidth, settings.buttonHeight, settings.labelScale,
     )
+    private val draftStyle = run {
+        // Bundled labels: 77px RU / 83px EN, plus 2px native background and 3px inset at 40px/block.
+        val scale = minOf(settings.labelScale, settings.buttonWidth / 2.2f).coerceAtLeast(0.1f)
+        ActionPanelTextStyle(scale, (settings.buttonWidth * 40f / scale).toInt().minus(5).coerceAtMost(190),
+            settings.buttonWidth, settings.buttonHeight, 0.025)
+    }
     private val options = ActionPanelOptions(
         ActionPanelInputProfile.ENTITY_BOTH, settings.reach, settings.suppressSelectionGlow,
     )
@@ -103,9 +114,19 @@ internal class BuilderSelectionActionPanel(
         require(current.actions.size <= BuilderPanelAction.entries.size)
         val actions = current.actions.distinct()
         val locale = BuilderLocalePolicy.localeTag(player)
+        val layout = ActionPanelLayouts.twoColumn(
+            actions.map { action ->
+                ActionPanelAction(action, messages.render("selection-panel.actions.${action.localeKey}", locale))
+            },
+            current.status,
+            current.pagination,
+            navigationCount(actions),
+            grid,
+        )
         return ActionPanelFrame(
             BuilderPanelContext(current.context, selection),
-            ActionPanelPlacement.FollowTarget(
+            if (current.followView) ActionPanelPlacement.FollowView(selection.worldId, follow)
+            else ActionPanelPlacement.FollowTarget(
                 selection.worldId,
                 ActionPanelPoint(
                     (selection.minX.toDouble() + selection.maxX + 1.0) / 2.0,
@@ -114,15 +135,10 @@ internal class BuilderSelectionActionPanel(
                 ),
                 follow,
             ),
-            ActionPanelLayouts.twoColumn(
-                actions.map { action ->
-                    ActionPanelAction(action, messages.render("selection-panel.actions.${action.localeKey}", locale))
-                },
-                current.status,
-                current.pagination,
-                navigationCount(actions),
-                grid,
-            ),
+            ActionPanelLayout(layout.buttons.map { button ->
+                if (button.action == BuilderPanelAction.DRAFT) ActionPanelButton(button.action, button.rect,
+                    button.text, draftStyle, button.visible, button.enabled) else button
+            }, layout.labels),
             true,
             options,
             null,
