@@ -238,6 +238,10 @@ internal class BuilderToolsRuntime(
         previewSpacing = config.previewSpacing,
         maximumOutlinePoints = config.previewMaxSelectionParticles,
     )
+    private val worldEditSelection = if (Bukkit.getPluginManager().isPluginEnabled("WorldEdit") ||
+        Bukkit.getPluginManager().isPluginEnabled("FastAsyncWorldEdit")
+    ) BuilderWorldEditSelection() else null
+    private val worldEditSelectionPoints = mutableMapOf<UUID, BuilderSelectionPoints>()
     private val fillController = BuilderFillController(
         safety = safety,
         maximumChanges = config.maxChanges,
@@ -746,13 +750,7 @@ internal class BuilderToolsRuntime(
                 canRender = { player ->
                     BuilderGameModePolicy.allows(player.gameMode) && config.allowsWorld(player.world.name)
                 },
-                renderSelection = { player ->
-                    this.displayRenderer.selection(
-                        player,
-                        selections.points(player.uniqueId, player.world.uid),
-                        selections.selection(player.uniqueId, player.world.uid),
-                    )
-                },
+                renderSelection = ::renderSelection,
                 renderPlan = this.displayRenderer::plan,
                 clearPlan = { playerId ->
                     this.displayRenderer.clearPlan(playerId)
@@ -1435,6 +1433,9 @@ internal class BuilderToolsRuntime(
         moveDirectionPicks.remove(playerId)
         pastePreview.clear(playerId)
         clearSelectionTarget(playerId)
+        if (worldEditSelectionPoints.remove(playerId) != null) {
+            Bukkit.getPlayer(playerId)?.let(::renderSelection)
+        }
         materialScans.remove(playerId)
         selectionPanelPages.remove(playerId)
         crownSelectionDialog?.close(playerId)
@@ -1480,8 +1481,38 @@ internal class BuilderToolsRuntime(
         displayRenderer.clearSelectionTarget(playerId)
     }
 
+    private fun canUseWorldEditSelection(player: Player): Boolean =
+        !closed && player.isOnline && !player.isDead &&
+            !operationLocks.isPlayerLocked(player.uniqueId) && player.uniqueId !in constructionStarts &&
+            !pastePreview.capturesInput(player.uniqueId) && player.uniqueId !in moveDirectionPicks &&
+            entityEditor?.isEditing(player) != true && BuildingManager.pending(player.uniqueId) == null &&
+            !isSelector(player.inventory.itemInMainHand) && BuildBookCodec.read(player.inventory.itemInMainHand) == null
+
+    private fun renderSelection(player: Player) {
+        val points = worldEditSelectionPoints[player.uniqueId]
+            ?: if (BuilderGameModePolicy.allows(player.gameMode) && config.allowsWorld(player.world.name)) {
+                selections.points(player.uniqueId, player.world.uid)
+            } else BuilderSelectionPoints(null, null)
+        val selection = points.first?.let { first -> points.second?.let { BuilderSelection(first, it) } }
+        displayRenderer.selection(player, points, selection)
+    }
+
+    private fun refreshWorldEditSelection(player: Player, initializeSession: Boolean = false): Boolean {
+        val points = if (worldEditSelection != null && canUseWorldEditSelection(player)) {
+            worldEditSelection.points(player, initializeSession)
+        } else null
+        if (points == null) {
+            if (worldEditSelectionPoints.remove(player.uniqueId) != null) renderSelection(player)
+            return false
+        }
+        if (worldEditSelectionPoints.put(player.uniqueId, points) != points) renderSelection(player)
+        return true
+    }
+
     private fun refreshSelectionTarget(player: Player): BuilderBlockPos? {
-        val target = if (canUseSelectionPanel(player) && !player.isDead && !constructionRecovering &&
+        val worldEdit = player.uniqueId in worldEditSelectionPoints
+        val target = if (worldEdit) selectionTargetResolver(player, BuilderSelectionTarget.RANGE)
+        else if (canUseSelectionPanel(player) && !player.isDead && !constructionRecovering &&
             player.uniqueId !in constructionStarts && !operationLocks.isPlayerLocked(player.uniqueId) &&
             selectionActionPanel?.isTargeted(player) != true
         ) selectionTargetResolver(player, config.maximumRange) else null
@@ -1501,9 +1532,11 @@ internal class BuilderToolsRuntime(
                 moveDirectionPicks[player.uniqueId]?.let { pick ->
                     if (!currentMoveDirectionPick(player, pick)) moveDirectionPicks.remove(player.uniqueId, pick)
                 }
+                refreshWorldEditSelection(player)
                 refreshSelectionTarget(player)
                 selectionTargetFailures.remove(player.uniqueId)
             } catch (failure: Exception) {
+                if (worldEditSelectionPoints.remove(player.uniqueId) != null) renderSelection(player)
                 clearSelectionTarget(player.uniqueId)
                 if (selectionTargetFailures.add(player.uniqueId)) {
                     error("Builder selector target failed for ${player.name}", failure)
@@ -4050,6 +4083,26 @@ internal class BuilderToolsRuntime(
         val confirmed: Boolean,
     )
 
+    // WorldEdit/FAWE's NORMAL listener skips useItemInHand == DENY. Claim Shift
+    // before it runs; an already-denied item stays denied, including in the air.
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = false)
+    fun onWorldEditSelectionInteract(event: PlayerInteractEvent) {
+        if (worldEditSelection == null || event.hand != EquipmentSlot.HAND ||
+            event.useItemInHand() == org.bukkit.event.Event.Result.DENY || !event.player.isSneaking
+        ) return
+        val first = when (event.action) {
+            Action.LEFT_CLICK_BLOCK, Action.LEFT_CLICK_AIR -> true
+            Action.RIGHT_CLICK_BLOCK, Action.RIGHT_CLICK_AIR -> false
+            else -> return
+        }
+        val player = event.player
+        if (!refreshWorldEditSelection(player, initializeSession = true)) return
+        event.isCancelled = true
+        val target = refreshSelectionTarget(player) ?: return
+        worldEditSelection.select(player, target, first)
+        refreshWorldEditSelection(player)
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     fun onInteract(event: PlayerInteractEvent) {
         val player = event.player
@@ -4366,6 +4419,7 @@ internal class BuilderToolsRuntime(
         pastePreview.clear(event.player.uniqueId)
         selectionTargets.remove(event.player.uniqueId)
         selectionTargetFailures.remove(event.player.uniqueId)
+        worldEditSelectionPoints.remove(event.player.uniqueId)
         bookRequests.invalidate(event.player.uniqueId)
         selectionActionPanel?.clear(event.player.uniqueId)
         crownSelectionDialog?.clearPlayer(event.player.uniqueId)
@@ -4528,6 +4582,7 @@ internal class BuilderToolsRuntime(
         selections.clear()
         selectionTargets.clear()
         selectionTargetFailures.clear()
+        worldEditSelectionPoints.clear()
         attempt { clipboardController.close() }
         attempt { BuildingManager.clearPreviews() }
         attempt { BuildingManager.installPreviewBridge(null) }

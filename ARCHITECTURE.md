@@ -157,6 +157,27 @@ selection becomes the immutable `BuilderSelection` domain value from
 `BuilderToolsDomain.kt`, which provides bounded top-down and bottom-up position
 iteration.
 
+`BuilderWorldEditSelection` adds the same private cursor and cuboid outline to an
+active WorldEdit/FAWE selection wand. Ordinary clicks remain native; Shift-left
+and Shift-right select the resolver's air cell as native WE point 1 and 2. The
+LOW interaction listener denies the item before WE's NORMAL listener, avoiding
+two selections. The adapter uses the existing session's actual tool binding,
+tool permission, selector and actor limits; it never grants editing permissions
+or changes world blocks. Preview reads never create sessions or reset a selection
+from another world. A first Shift-click can initialize the native session only
+for the configured default wand with the native selection permission, after
+which the actual loaded tool binding is checked. Non-cuboid selectors retain their native point semantics
+without a misleading cuboid outline. A lone primary point is rendered while a
+cuboid is incomplete; its full pair appears once both points exist.
+
+While that wand is held, the shared selection layer shows WE points; switching
+away restores the independent ArcBuilder corners. WE commands such as `//pos1`,
+`//expand` and `//sel` are reflected by the existing per-tick refresh. ArcBuilder
+selection actions and axis controls still require its own selector. Book, paste
+and display-editor input retain ownership. This optional adapter adds no command,
+permission, config setting or separate renderer, and does not apply ArcBuilder's
+building-world or size restrictions to the native WE selection.
+
 The runtime validates axis and scan-volume limits before a planner sees the
 selection. `BuilderBlockDisplayRenderer` and `BuilderPreviewSessions` render
 player-only selection and plan displays; preview rendering never mutates the
