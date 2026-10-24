@@ -8,6 +8,7 @@ import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.spyk
+import io.mockk.verify
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer
 import org.bukkit.Color
 import org.bukkit.GameMode
@@ -40,7 +41,7 @@ import java.util.Locale
 import java.util.UUID
 
 class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
-    test("too-close fallback preserves offered and pending quotes through the explicit air menu roundtrip") {
+    test("owner controls stay available inside the ghost and preserve offered and pending quotes through the explicit menu") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val plugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -63,21 +64,22 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     presentation.open(site)
                     presentation.retainConfirmation(site)
                     val offered = checkNotNull(presentation.worldFrame(player)).context
-                    player.teleport(org.bukkit.Location(world, 1.0, 64.0, -4.0))
-                    val near = checkNotNull(presentation.worldFrame(player))
-                    (near.placement as ru.arc.paper.actionpanel.ActionPanelPlacement.FollowTarget).settings.distance shouldBe .85
-                    near.context shouldBe offered
-                    for (z in listOf(-3.05, -2.5)) {
+                    for (z in listOf(-4.0, -3.05, -2.5)) {
                         player.teleport(org.bukkit.Location(world, 1.0, 64.0, z))
-                        presentation.worldFrame(player) shouldBe null
-                        presentation.intercept(player) shouldBe false
-                        presentation.activateWorld(player, offered, BuilderBookWorldAction.PRIMARY)
+                        val frame = checkNotNull(presentation.worldFrame(player))
+                        frame.context shouldBe offered
+                        val placement = frame.placement as ru.arc.paper.actionpanel.ActionPanelPlacement.FollowView
+                        placement.settings.distance shouldBe 2.4
+                        placement.motion shouldBe ru.arc.paper.actionpanel.ActionPanelViewMotion.AIM_STABLE
+                        frame.options.depth shouldBe ru.arc.paper.actionpanel.ActionPanelDepth.VIEW_OVERLAY
+                        frame.layout.buttons.size shouldBe 11
+                        frame.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.enabled shouldBe true
                         host.confirmCalls shouldBe 0
                     }
                     player.teleport(org.bukkit.Location(world, 1.0, 64.0, -7.0))
                     checkNotNull(presentation.worldFrame(player)).context shouldBe offered
                     player.teleport(org.bukkit.Location(world, 1.0, 64.0, -3.05))
-                    presentation.intercept(player, allowMenuFallback = true) shouldBe true
+                    presentation.openPlacementForOwner(player, site)
                     plain(player.openInventory.topInventory.getItem(25)!!.itemMeta.displayName()!!) shouldContain "148.45"
                     host.confirmCalls shouldBe 0
                     host.restoreCalls shouldBe 0
@@ -97,7 +99,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     val preparing = checkNotNull(presentation.worldFrame(player)).context
                     checkNotNull(preparing.preparation)
                     player.teleport(org.bukkit.Location(world, 1.0, 64.0, -3.05))
-                    presentation.intercept(player, allowMenuFallback = true) shouldBe true
+                    presentation.openPlacementForOwner(player, site)
                     paper.callEvent(InventoryCloseEvent(player.openInventory))
                     player.closeInventory()
                     player.teleport(org.bukkit.Location(world, 1.0, 64.0, -7.0))
@@ -117,7 +119,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
         }
     }
 
-    test("published Core aims the offered world button before a block behind it and retains packet labels") {
+    test("owner overlay is displayed before plaque geometry and claims a button through a nearer real block exactly once") {
         ConfigManager.clear()
         MockBukkitTestRuntime.open().use { paper ->
             val realPlugin = paper.loadPlugin<ArcBuilderPlugin>()
@@ -130,14 +132,19 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 every { world.minHeight } returns -64
                 every { world.maxHeight } returns 320
                 every { world.isChunkLoaded(any<Int>(), any<Int>()) } returns true
-                every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers {
-                    mockk<org.bukkit.block.Block> { every { collisionShape.boundingBoxes } returns emptyList() }
+                val solid = mockk<org.bukkit.block.Block> {
+                    every { collisionShape.boundingBoxes } returns listOf(org.bukkit.util.BoundingBox(0.0, 0.0, 0.0, 1.0, 1.0, 1.0))
                 }
-                // A real block ray hit lies behind the label plane, never in front of it.
+                var collisionQueries = 0
+                var rayQueries = 0
+                every { world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) } answers { collisionQueries++; solid }
+                // A real solid wall is closer than every owner control; WORLD placement would refuse it.
                 every { world.rayTraceBlocks(any<org.bukkit.Location>(), any<org.bukkit.util.Vector>(), any<Double>(),
                     any<org.bukkit.FluidCollisionMode>(), any<Boolean>(), any<java.util.function.Predicate<org.bukkit.block.Block>>()) } answers {
-                    if (thirdArg<Double>() < 3.8) null else org.bukkit.util.RayTraceResult(
-                        firstArg<org.bukkit.Location>().toVector().add(secondArg<org.bukkit.util.Vector>().clone().multiply(3.8)))
+                    rayQueries++
+                    if (thirdArg<Double>() < .45 || !lastArg<java.util.function.Predicate<org.bukkit.block.Block>>().test(solid)) null
+                    else org.bukkit.util.RayTraceResult(
+                        firstArg<org.bukkit.Location>().toVector().add(secondArg<org.bukkit.util.Vector>().clone().multiply(.45)))
                 }
                 every { world.spawn(any<org.bukkit.Location>(), eq(org.bukkit.entity.Interaction::class.java), any<Consumer<org.bukkit.entity.Interaction>>()) } answers {
                     var location = firstArg<org.bukkit.Location>().clone()
@@ -152,7 +159,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 }
                 val player = mockk<org.bukkit.entity.Player>(relaxed = true)
                 val playerId = UUID.randomUUID()
-                val feet = org.bukkit.Location(world, .5, 64.0, -7.0)
+                val feet = org.bukkit.Location(world, .5, 64.0, .5)
                 var eye = feet.clone().add(0.0, 1.62, 0.0)
                 every { player.uniqueId } returns playerId
                 every { player.world } returns world
@@ -168,13 +175,27 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                 val plugin = spyk(realPlugin)
                 every { plugin.server } returns server
                 val site = previewSite(player, org.bukkit.Location(world, .5, 64.0, 0.0), BuildBookData("house.schem", "Дом"))
+                every { site.view } returns schematicTestSnapshot(listOf(
+                    ArcSchematicBlock(ArcSchematicPoint(-4, 0, -3), "minecraft:stone", false, false),
+                    ArcSchematicBlock(ArcSchematicPoint(5, 4, 4), "minecraft:stone", false, false)))
                 val host = PreviewHost(site, BuilderBookPreviewConfirmation(BuilderBookPreviewConfirmationKind.CONSTRUCTION,
                     4, "Дом", Duration.ZERO, emptyList()), hasCurrentConfirmation = false)
                 val packet = BuilderPlaqueDisplays()
-                previewPresentation(plugin, config, host, packet.owner, worldControlsEnabled = true).use { presentation ->
+                val tasks = QueuedBuilderPlanningTasks()
+                previewPresentation(plugin, config, host, packet.owner, planningTasks = tasks, worldControlsEnabled = true).use { presentation ->
                     presentation.open(site)
+                    val offered = checkNotNull(presentation.worldFrame(player))
+                    offered.layout.buttons.size shouldBe 11
                     presentation.tick()
-                    packet.texts.size shouldBe 16 // Two inspector plaque faces, eleven buttons, three labels.
+                    tasks.workerRuns shouldBe 0
+                    packet.texts.size shouldBe 14 // All owner controls already exist; plaque scan has not started.
+                    packet.texts.forEach { text -> verify {
+                        text.display.isSeeThrough = true
+                        text.display.isVisibleByDefault = false
+                        text.display.showTo(playerId)
+                    } }
+                    collisionQueries shouldBe 0
+                    rayQueries shouldBe 0
                     val right = packet.texts.single { plain(it.content) == "[ > ]" }
                     val aim = right.location.clone().add(0.0, .1, 0.0)
                     eye = feet.clone().add(0.0, 1.62, 0.0).apply { direction = aim.toVector().subtract(toVector()) }
@@ -182,8 +203,17 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     host.adjustments shouldBe listOf(BuildBookPreviewAdjustment.Move(BuildBookPreviewMove.RIGHT))
                     presentation.intercept(player) shouldBe true
                     host.adjustments.size shouldBe 1 // Same-tick native/gesture duplicate belongs to Core's gate.
+                    collisionQueries shouldBe 0
+                    rayQueries shouldBe 0
+                    eye = feet.clone().add(0.0, 1.62, 0.0).apply { yaw = 90f }
+                    presentation.intercept(player) shouldBe false // A world click outside all controls stays unclaimed.
+                    host.adjustments.size shouldBe 1
+                    tasks.runComputations()
+                    tasks.tick()
+                    tasks.workerRuns shouldBe 1
                     presentation.tick()
                     packet.texts.size shouldBe 16
+                    checkNotNull(presentation.worldFrame(player)).context shouldBe offered.context
                     val old = checkNotNull(presentation.worldFrame(player)).context
                     every { site.rotation } returns 90
                     presentation.activateWorld(player, old, BuilderBookWorldAction.PRIMARY)

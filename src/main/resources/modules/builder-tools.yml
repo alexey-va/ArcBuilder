@@ -1006,7 +1006,6 @@ locales:
         selector-edit: "<#ffb142>Поворот и смещение"
         saved: "<prefix><#b8b8b8>В книге выбран <#ffb142><name><#b8b8b8>. ПКМ по блоку — разместить превью."
       world-controls:
-        near-preview: "<#ffb142>Вплотную к схеме: ПКМ книгой в воздух — меню размещения"
         title: "<#ffb142><name>"
         hint: "<#b8b8b8>^ дальше · v ближе · шаг 1 блок по взгляду"
         height: "<#b8b8b8>Высота"
@@ -2139,7 +2138,6 @@ locales:
         selector-edit: "<#ffb142>Rotation and offset"
         saved: "<prefix><#ffb142><name><#b8b8b8> selected in the book. Right-click a block to place the preview."
       world-controls:
-        near-preview: "<gold>Close to the preview: right-click the book in air for controls"
         title: "<gold><name>"
         hint: "<gray>^ away · v toward · 1 block relative to view"
         height: "<gray>Height"

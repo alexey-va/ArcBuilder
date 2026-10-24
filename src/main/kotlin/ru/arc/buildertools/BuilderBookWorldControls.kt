@@ -21,21 +21,18 @@ internal object BuilderBookWorldControls {
         status: String = "hint",
         busy: Boolean = false,
         primaryEnabled: Boolean = true,
-        distanceScale: Double = 1.0,
     ): ActionPanelLayout<BuilderBookWorldAction> {
         fun rect(x: Double, y: Double, width: Double, height: Double) =
-            ActionPanelRect(ActionPanelPoint(x * distanceScale, y * distanceScale, 0.0), width * distanceScale, height * distanceScale)
+            ActionPanelRect(ActionPanelPoint(x, y, 0.0), width, height)
         fun button(action: BuilderBookWorldAction, x: Double, y: Double, width: Double = .76,
             height: Double = .25, scale: Float = .8f): ActionPanelButton<BuilderBookWorldAction> =
             ActionPanelButton(action, rect(x, y, width, height), text(if (action == BuilderBookWorldAction.PRIMARY) primary else action.localeKey),
-                ActionPanelTextStyle((scale * distanceScale).toFloat(), (width * 40 / scale).toInt() - 5,
-                    (width * distanceScale).toFloat(), (height * distanceScale).toFloat(), .025 * distanceScale),
+                ActionPanelTextStyle(scale, (width * 40 / scale).toInt() - 5, width.toFloat(), height.toFloat(), .025),
                 true, if (action == BuilderBookWorldAction.CANCEL) true else !busy &&
                     (action != BuilderBookWorldAction.PRIMARY || primaryEnabled))
         fun label(key: String, x: Double, y: Double, width: Double, scale: Float = .48f, textKey: String = key) =
             ActionPanelLabel(key, rect(x, y, width, .18), text(textKey),
-                ActionPanelTextStyle((scale * distanceScale).toFloat(), (width * 40 / scale).toInt() - 5,
-                    (width * distanceScale).toFloat(), (.18 * distanceScale).toFloat(), .025 * distanceScale))
+                ActionPanelTextStyle(scale, (width * 40 / scale).toInt() - 5, width.toFloat(), .18f, .025))
         return ActionPanelLayout(listOf(
             button(BuilderBookWorldAction.AWAY, -.55, .47),
             button(BuilderBookWorldAction.LEFT, -1.37, .18),

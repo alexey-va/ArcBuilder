@@ -725,7 +725,7 @@ class BuilderToolsConfig(
                 "book.preview-menu.inspection.mirror.no",
             ) + setOf(
                 "title", "hint", "height", "left", "right", "away", "toward", "up", "down", "rotate",
-                "mirror", "reset", "cancel", "quote", "activate", "continue", "preparing", "cooldown", "error", "near-preview",
+                "mirror", "reset", "cancel", "quote", "activate", "continue", "preparing", "cooldown", "error",
             ).map { "book.world-controls.$it" } + BuilderPanelAction.entries.map { action ->
                 "selection-panel.actions.${action.name.lowercase(Locale.ROOT).replace('_', '-')}"
             } + BuilderPlanKind.entries.map { kind ->

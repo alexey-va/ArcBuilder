@@ -42,12 +42,13 @@ import ru.arc.paper.display.PacketDisplayAudienceGroup
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.paper.api.ArcSchematicSnapshot
 import ru.arc.paper.actionpanel.ActionPanelController
+import ru.arc.paper.actionpanel.ActionPanelDepth
 import ru.arc.paper.actionpanel.ActionPanelFollowSettings
 import ru.arc.paper.actionpanel.ActionPanelFrame
 import ru.arc.paper.actionpanel.ActionPanelInputProfile
 import ru.arc.paper.actionpanel.ActionPanelOptions
 import ru.arc.paper.actionpanel.ActionPanelPlacement
-import ru.arc.paper.actionpanel.ActionPanelPoint
+import ru.arc.paper.actionpanel.ActionPanelViewMotion
 import ru.arc.paper.actionpanel.PaperActionPanels
 import ru.arc.paper.scene.PaperSpatialControls
 import ru.arc.paper.scene.PaperSpatialSpace
@@ -146,7 +147,6 @@ internal class BuilderBookPreviewPresentation(
         var geometry: BuilderBookPlaqueGeometry,
         var face: BuilderConstructionSitePanelFace,
         var placement: BuilderSitePanelPlacement,
-        var controlFace: BuilderConstructionSitePanelFace? = null,
     )
 
     private var panels = mutableMapOf<UUID, PanelScene>()
@@ -160,7 +160,6 @@ internal class BuilderBookPreviewPresentation(
     private var confirmationInventories = mutableMapOf<UUID, org.bukkit.inventory.Inventory>()
     private val worldSessions = mutableMapOf<UUID, Any>()
     private val worldFailures = mutableSetOf<UUID>()
-    private val fallbackHints = mutableMapOf<UUID, Int>()
     private val menuConfiguration = loadMenuConfiguration()
     private val menus = PaperMenuRuntime(plugin, BukkitTaskScheduler(plugin), menuConfiguration)
     private val menuItems = PaperMenuItemFactory(
@@ -223,40 +222,12 @@ internal class BuilderBookPreviewPresentation(
             runCatching { movePlaque(scene) }.onFailure { removePanel(scene.site.player.uniqueId) }
         }
         if (worldControlsEnabled) worldPanels.tick()
-        if (worldControlsEnabled) placementSites.values.forEach { site ->
-            val player = site.player
-            if (menuFallback(player)) {
-                val now = Bukkit.getCurrentTick()
-                if (now - (fallbackHints[player.uniqueId] ?: (now - 20)) >= 20) {
-                    player.sendActionBar(messages.render("book.world-controls.near-preview", locale(player)))
-                    fallbackHints[player.uniqueId] = now
-                }
-            } else fallbackHints.remove(player.uniqueId)
-        }
     }
 
-    fun intercept(player: Player, allowMenuFallback: Boolean = false): Boolean {
+    fun intercept(player: Player): Boolean {
         if (closed || !worldControlsEnabled) return false
-        if (worldPanels.intercept(player)) return true
-        if (allowMenuFallback && menuFallback(player)) {
-            openPlacementForOwner(player, checkNotNull(placementSites[player.uniqueId]))
-            return true
-        }
-        return false
+        return worldPanels.intercept(player)
     }
-
-    private fun controlPlacement(player: Player): BuilderBookPlaqueGeometry.Controls? {
-        val scene = panels[player.uniqueId] ?: return null
-        val site = placementSites[player.uniqueId] ?: return null
-        if (site.transforming || scene.site !== site || site.view !== scene.source.view || site.adjustedCenter.let {
-            it.blockX != scene.source.origin.x || it.blockY != scene.source.origin.y || it.blockZ != scene.source.origin.z
-        }) return null
-        return scene.geometry.controls(player.location.x, player.location.z, scene.controlFace).also { scene.controlFace = it?.face }
-    }
-
-    private fun menuFallback(player: Player): Boolean = !closed && worldControlsEnabled && player.isOnline &&
-        !player.isDead && player.openInventory.type == org.bukkit.event.inventory.InventoryType.CRAFTING &&
-        placementSites[player.uniqueId]?.let { it.world.uid == player.world.uid && controlPlacement(player) == null } == true
 
     internal fun worldFrame(player: Player): ActionPanelFrame<BuilderBookWorldContext, BuilderBookWorldAction>? {
         if (closed || !worldControlsEnabled || !player.isOnline || player.isDead ||
@@ -265,7 +236,6 @@ internal class BuilderBookPreviewPresentation(
         val site = placementSites[id] ?: return null
         if (site.player.uniqueId != id || site.world.uid != player.world.uid || site.transforming) return null
         val view = site.view ?: return null
-        val placement = controlPlacement(player) ?: return null
         val origin = site.adjustedCenter.let { BuilderBlockPos(site.world.uid, it.blockX, it.blockY, it.blockZ) }
         val confirmation = host.currentWorldConfirmation(player)
         val context = BuilderBookWorldContext(worldSessions[id] ?: return null, site, view, origin, site.bookData,
@@ -284,15 +254,13 @@ internal class BuilderBookPreviewPresentation(
             "hours" to messages.literal(cooldown?.toHours() ?: 0),
             "minutes" to messages.literal(cooldown?.toMinutes()?.rem(60) ?: 0),
         )
-        return ActionPanelFrame(context, ActionPanelPlacement.FollowTarget(site.world.uid, ActionPanelPoint(
-            placement.targetX,
-            origin.y + (view.minimum.y.toDouble() + view.maximum.y + 1) / 2,
-            placement.targetZ,
-        ), ActionPanelFollowSettings(placement.distance, 0.0, 0.0, if (placement.scale < 1.0) 0.0 else 1.25, .03)), BuilderBookWorldControls.layout(
+        // Owner controls are independent of the asynchronous, world-anchored inspector plaque.
+        return ActionPanelFrame(context, ActionPanelPlacement.FollowView(site.world.uid,
+            ActionPanelFollowSettings(), ActionPanelViewMotion.AIM_STABLE), BuilderBookWorldControls.layout(
             { messages.render("book.world-controls.$it", locale(player), values) }, primary,
             when { busy -> "preparing"; cooldown != null -> "cooldown"; context.failed -> "error"; else -> "hint" },
-            busy, cooldown == null, placement.scale,
-        ), true, ActionPanelOptions(ActionPanelInputProfile.ENTITY_BOTH, 4.0, false), null)
+            busy, cooldown == null,
+        ), true, ActionPanelOptions(ActionPanelInputProfile.ENTITY_BOTH, 4.0, false, false, ActionPanelDepth.VIEW_OVERLAY), null)
     }
 
     internal fun activateWorld(player: Player, context: BuilderBookWorldContext, action: BuilderBookWorldAction) {
@@ -382,7 +350,6 @@ internal class BuilderBookPreviewPresentation(
         worldPanels.clear(playerId)
         worldSessions.remove(playerId)
         worldFailures.remove(playerId)
-        fallbackHints.remove(playerId)
         renderer.close(playerId)
         removePanel(playerId)
         placementSites.remove(playerId)
@@ -410,7 +377,6 @@ internal class BuilderBookPreviewPresentation(
         worldSessions.remove(playerId)
         worldFailures.remove(playerId)
         worldPanels.clear(playerId)
-        fallbackHints.remove(playerId)
         removePanel(playerId)
         Bukkit.getPlayer(playerId)?.let(menus::session)?.close()
     }
@@ -831,7 +797,6 @@ internal class BuilderBookPreviewPresentation(
         existing.site = site
         existing.source = source
         existing.geometry = geometry
-        existing.controlFace = null
         val nearest = if (plaqueFollowPlayer) geometry.nearest(site.player.location.x, site.player.location.z, existing.face) else null
         existing.face = nearest?.face ?: source.face
         val panel = nearest?.placement ?: geometry.fixed
@@ -925,7 +890,6 @@ internal class BuilderBookPreviewPresentation(
         displayedConfirmations.clear()
         worldSessions.clear()
         worldFailures.clear()
-        fallbackHints.clear()
         val nativeFailure = failure
         val packetDrain = runCatching { displays.closeAsync() }.getOrElse { CompletableFuture.failedFuture(it) }
         packetDrain.whenComplete { _, packetFailure ->

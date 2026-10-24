@@ -1319,21 +1319,16 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.selectionPanelAction(player, BuilderPanelAction.COPY)
             val actions = checkNotNull(journey.selectionPanel(player)).actions
             actions.contains(BuilderPanelAction.PASTE) shouldBe true
-            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
 
             player.teleport(Location(journey.world, 21.0, 64.0, 0.5))
             checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
-            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
             player.teleport(Location(journey.world, 21.1, 64.0, 0.5))
-            checkNotNull(journey.selectionPanel(player)).followView shouldBe true
             checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
             checkNotNull(journey.selectionPanel(player)).actions shouldBe actions
             player.teleport(Location(journey.world, 0.5, 74.0, 0.5))
-            checkNotNull(journey.selectionPanel(player)).followView shouldBe true
             checkNotNull(journey.selectionPanel(player)).actions shouldBe actions
             player.teleport(Location(journey.world, 0.5, 64.0, 3.5))
             checkNotNull(journey.selectionPanel(player)).selection shouldBe selected
-            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
         }
     }
 
@@ -1359,7 +1354,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
-    test("selection panel near far latch prevents threshold jitter and clears with selection and tool context") {
+    test("selection reset stays on page one with every action available and survives distance boundaries") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("PanelHysteresis", GameMode.CREATIVE)
             val world = journey.world
@@ -1371,29 +1366,27 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.select(player, world, wand, 0, 64, 0, 12, 64, 0)
             journey.selectionPanelAction(player, BuilderPanelAction.COPY)
             val selected = checkNotNull(journey.selectionPanel(player)).selection
-            val actions = checkNotNull(journey.selectionPanel(player)).actions
+            val firstPage = checkNotNull(journey.selectionPanel(player))
+            val actions = firstPage.actions
+            actions.take(6) shouldBe listOf(BuilderPanelAction.FILL, BuilderPanelAction.REPLACE, BuilderPanelAction.COPY,
+                BuilderPanelAction.MOVE, BuilderPanelAction.PASTE, BuilderPanelAction.CLEAR)
+            journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
+            val secondPage = checkNotNull(journey.selectionPanel(player)).actions
+            secondPage.containsAll(listOf(BuilderPanelAction.DECONSTRUCT, BuilderPanelAction.DRAFT,
+                BuilderPanelAction.DISCONNECT, BuilderPanelAction.CROWN)) shouldBe true
+            journey.selectionPanelAction(player, BuilderPanelAction.PREVIOUS_PAGE)
             actions.contains(BuilderPanelAction.PASTE) shouldBe true
             fun move(x: Double): BuilderPanelView {
                 player.simulatePlayerMove(Location(world, x, 64.0, 0.5, -90f, 0f))
                 return checkNotNull(journey.selectionPanel(player)).also {
                     it.selection shouldBe selected
                     it.actions shouldBe actions
+                    it.context shouldBe firstPage.context
                 }
             }
-            move(20.995).followView shouldBe false
-            move(21.005).followView shouldBe true
-            move(20.995).followView shouldBe true
-            move(21.005).followView shouldBe true
-            move(20.5).followView shouldBe true
-            move(20.49).followView shouldBe false
-            move(21.005).followView shouldBe true
-            move(20.995).followView shouldBe true
+            listOf(20.995, 21.005, 20.995, 20.49, 40.0, 0.5).forEach { move(it) }
             journey.paper.callEvent(PlayerItemHeldEvent(player, 0, 1))
-            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
-            move(21.005).followView shouldBe true
-            move(20.995).followView shouldBe true
             journey.select(player, world, wand, 1, 64, 0, 12, 64, 0)
-            checkNotNull(journey.selectionPanel(player)).followView shouldBe false
         }
     }
 
@@ -1416,12 +1409,13 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             firstPage.contains(BuilderPanelAction.PASTE) shouldBe true
             firstPage.count { it !in setOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE) } shouldBe 6
             firstPage.containsAll(listOf(BuilderPanelAction.FILL, BuilderPanelAction.REPLACE, BuilderPanelAction.COPY,
-                BuilderPanelAction.MOVE, BuilderPanelAction.DECONSTRUCT)) shouldBe true
+                BuilderPanelAction.MOVE, BuilderPanelAction.CLEAR)) shouldBe true
             firstPage.contains(BuilderPanelAction.DISCONNECT) shouldBe false
             journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
             val secondPage = checkNotNull(journey.selectionPanel(player)).actions
             secondPage.contains(BuilderPanelAction.DRAFT) shouldBe true
-            secondPage.contains(BuilderPanelAction.CLEAR) shouldBe true
+            secondPage.contains(BuilderPanelAction.CLEAR) shouldBe false
+            secondPage.contains(BuilderPanelAction.DECONSTRUCT) shouldBe true
             secondPage.contains(BuilderPanelAction.DISCONNECT) shouldBe true
             secondPage.indexOf(BuilderPanelAction.CROWN) shouldBe secondPage.indexOf(BuilderPanelAction.DISCONNECT) + 1
             secondPage.last { it !in setOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE) } shouldBe
@@ -1963,6 +1957,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             player.inventory.setItem(10, ItemStack(Material.BOOK, 2))
             journey.world.getBlockAt(0, 64, 0).type = Material.STONE
             journey.select(player, journey.world, wand, 0, 64, 0, 0, 64, 0)
+            journey.selectionPanelAction(player, BuilderPanelAction.NEXT_PAGE)
             checkNotNull(journey.selectionPanel(player)).actions.contains(BuilderPanelAction.DRAFT) shouldBe true
             journey.selectionPanelAction(player, BuilderPanelAction.DRAFT)
             journey.await("draft from selection without a prior copy") {

@@ -362,32 +362,31 @@ localized actions, paging and action dispatch; Core owns placement, packet text,
 private Interaction targets, hover, deduplication and lifecycle cleanup. The
 adapter includes both the domain context and the exact selection in every input
 identity and rechecks them before dispatch to the existing runtime. Both mouse
-buttons use Core's bounded, occlusion-checked aiming rule. A compact two-column
+buttons use Core's bounded actual-eye plane aiming rule. A compact two-column
 panel shows six actions per page and arrow navigation with a separate page
-caption. The full panel envelope sits at
-the captured eye height, toward the selection's horizontal centre, perpendicular
-to the horizontal player-to-selection line. Body translation and selection changes
-recompute that direction; head turns and crouching in place leave its anchor still.
-Within 0.25 blocks of the horizontal centre the previous direction is retained;
-only the initial degenerate case falls back to the player's horizontal look.
-Candidate placement checks the full panel footprint against loaded world geometry.
-Before pulling closer, it can escape a small obstacle with the nearest upward or
-sideways shift, bounded by `selection-panel.obstacle-max-shift` (1.25 blocks by
-default; zero disables shifts). Candidates retain full-panel visibility and reach.
-The chosen shift stays fixed while the player stands still; movement allows a
-gradual return toward the centre only when an additional clearance probe passes.
-Native interpolation checks endpoint footprints plus the rotation arc's maximum
-deviation, without inflating small turns to a full cylinder. Obstacle clearance retains a safe
-distance and restores it gradually with hysteresis. Context identity
-and a duplicate-click gate prevent old inputs from confirming a replacement
-plan. Changing a selection corner discards its pending ordinary plan. Tool,
-world, teleport, selection and runtime lifecycle changes clear the controls.
-Geometry lives under `selection-panel` in `builder-tools.yml` and is validated
-before reload activation. The adapter passes the settings directly to Core,
-including zero body-movement tolerance to preserve precise Builder following.
-Rendering and action callbacks share the configured eight-block maximum distance
-to the nearest selection face; leaving range hides
-controls without clearing the selection or pending plan.
+caption. Reset selection is always on the first page, including with a clipboard
+and every permission available. The owner menu uses
+`FollowView(..., ActionPanelViewMotion.AIM_STABLE)` and
+`ActionPanelDepth.VIEW_OVERLAY` both near and far from the selection. Native
+see-through text/background keeps it visible through real and packet-preview
+blocks; placement and input skip block occlusion while retaining full-panel reach,
+owner/context/action authority, and actual-eye hit rectangles. Only a hit inside
+a control is consumed before the selector's ordinary world action.
+
+The plane translates with meaningful body motion (0.03 blocks) without capturing
+the yaw used to aim at a side button. Head aim inside the menu and crouching keep
+its pose; a large head turn latches a new direction and recentres by at most
+12 degrees per tick. Reaching an enabled button with the actual eye ray or a
+consumed click freezes that recenter. Page changes and
+paste confirmation retain the current reachable plane rather than placing a new
+one. Text keys remain stable; changing semantic context rotates native input IDs
+so old gestures cannot confirm a replacement plan. Changing a selection corner
+discards its pending ordinary plan. Tool, world, teleport, selection and runtime
+lifecycle changes clear the controls. Geometry remains under `selection-panel`
+in `builder-tools.yml` and is validated before reload activation.
+`max-selection-distance` and `obstacle-max-shift` remain accepted compatibility
+settings; the personal overlay no longer uses selection distance or block
+avoidance to choose its placement.
 With `selection-panel.suppress-selection-glow` enabled (the default), looking
 toward the panel temporarily disables selection glow while retaining its frame.
 The gaze area covers the full panel with hysteresis; looking away or closing the

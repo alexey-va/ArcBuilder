@@ -11,45 +11,23 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 class BuilderBookWorldControlsTest : StringSpec({
-    "near ghost controls preserve angular size and keep every corner and sight line outside the schematic" {
-        val worldId = UUID.randomUUID()
-        val geometry = BuilderBookPlaqueGeometry.create(BuilderBlockPos(worldId, 0, 64, 0), BuilderConstructionSitePanelFace.MIN_Z,
-            listOf(BuilderBlockPos(worldId, -4, 64, -3), BuilderBlockPos(worldId, 5, 68, -3)), 2.25, .4, 4.5, 1.5)
-        val placement = checkNotNull(geometry.controls(1.0, -4.0))
-        placement.distance shouldBe .85
-        val layout = BuilderBookWorldControls.layout({ net.kyori.adventure.text.Component.text(it) }, "quote", distanceScale = placement.scale)
+    "the complete owner overlay remains within ordinary reach in every facing direction" {
+        val layout = BuilderBookWorldControls.layout({ net.kyori.adventure.text.Component.text(it) }, "quote")
         val rects = layout.buttons.map { it.rect } + layout.labels.map { it.rect }
-        val eye = ru.arc.paper.actionpanel.ActionPanelPoint(1.0, 65.62, -4.0)
-        val anchor = ru.arc.paper.actionpanel.ActionPanelGeometry.followingAnchor(eye, 180f, rects, placement.distance, 0.0, 0.0)
-        val corners = rects.flatMap { rect -> listOf(-1, 1).flatMap { sx -> listOf(-1, 1).map { sy ->
-            ru.arc.paper.actionpanel.ActionPanelGeometry.localToWorld(anchor, ru.arc.paper.actionpanel.ActionPanelPoint(
-                rect.center.x + sx * rect.width / 2, rect.center.y + sy * rect.height / 2, 0.0))
-        } } }
-        corners.forEach { corner ->
-            (corner.z <= -3.149) shouldBe true
-            (maxOf(eye.z, corner.z) < -3.0) shouldBe true
+        val eye = ru.arc.paper.actionpanel.ActionPanelPoint(1.0, 65.62, -3.05)
+        val frames = listOf(0f, 90f, 180f, 270f).map { yaw ->
+            val anchor = ru.arc.paper.actionpanel.ActionPanelGeometry.followingAnchor(eye, yaw, rects, 2.4, 0.0, 0.0)
+            ru.arc.paper.actionpanel.ActionPanelGeometry.allReachable(eye, anchor, rects, 4.0) shouldBe true
+            val corners = rects.flatMap { rect -> listOf(-1, 1).flatMap { sx -> listOf(-1, 1).map { sy ->
+                ru.arc.paper.actionpanel.ActionPanelGeometry.localToWorld(anchor, ru.arc.paper.actionpanel.ActionPanelPoint(
+                    rect.center.x + sx * rect.width / 2, rect.center.y + sy * rect.height / 2, 0.0))
+            } } }
+            mapOf("yaw" to yaw, "anchor" to anchor, "corners" to corners)
         }
-        (kotlin.math.abs(layout.buttons.first().rect.width / placement.distance - .76 / 2.4) < 1e-9) shouldBe true
-        geometry.controls(1.0, -3.05) shouldBe null
-        geometry.controls(1.0, -2.5) shouldBe null
-        val corner = checkNotNull(geometry.controls(-5.01, -4.0))
-        var controlFace: BuilderConstructionSitePanelFace? = corner.face
-        val cornerTrace = listOf(-5.01, -4.99, -5.01, -4.98, -5.02, -4.8, -4.7).map { x ->
-            val current = checkNotNull(geometry.controls(x, -4.0, controlFace))
-            if (x <= -4.8) current.face shouldBe corner.face
-            controlFace = current.face
-            mapOf("viewerX" to x, "viewerZ" to -4.0, "placement" to current)
-        }
-        controlFace shouldBe BuilderConstructionSitePanelFace.MIN_Z
-        geometry.controls(1.0, -3.8) shouldBe null
-        checkNotNull(geometry.controls(1.0, -3.8, BuilderConstructionSitePanelFace.MIN_Z)).face shouldBe BuilderConstructionSitePanelFace.MIN_Z
-        geometry.controls(1.0, -3.74, BuilderConstructionSitePanelFace.MIN_Z) shouldBe null
-        checkNotNull(geometry.controls(1.0, -7.0)).scale shouldBe 1.0
-        java.io.File("build/reports/builder-book-controls/near-ghost.json").apply {
+        java.io.File("build/reports/builder-book-controls/owner-overlay.json").apply {
             parentFile.mkdirs()
             writeText(com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(mapOf(
-                "geometry" to geometry, "eye" to eye, "placement" to placement, "anchor" to anchor, "corners" to corners,
-                "fallbackViewerZ" to listOf(-3.05, -2.5), "cornerTrace" to cornerTrace)))
+                "eye" to eye, "distance" to 2.4, "reach" to 4.0, "frames" to frames)))
         }
     }
 
@@ -61,8 +39,7 @@ class BuilderBookWorldControlsTest : StringSpec({
                 mapOf("name" to messages.literal("Берёзовый дом"), "price" to messages.literal("50,000,000.00"),
                     "hours" to messages.literal(2), "minutes" to messages.literal(15))) },
                 when(state) { "cooldown" -> "continue"; "error" -> "activate"; "near-ghost" -> "quote"; else -> state },
-                if (state in listOf("preparing", "cooldown", "error")) state else "hint", state == "preparing", state != "cooldown",
-                if (state == "near-ghost") .85 / 2.4 else 1.0)
+                if (state in listOf("preparing", "cooldown", "error")) state else "hint", state == "preparing", state != "cooldown")
             val byAction = layout.buttons.associateBy { it.action }
             val away = byAction.getValue(BuilderBookWorldAction.AWAY).rect.center
             val toward = byAction.getValue(BuilderBookWorldAction.TOWARD).rect.center
@@ -81,10 +58,10 @@ class BuilderBookWorldControlsTest : StringSpec({
             val anchor = ru.arc.paper.actionpanel.ActionPanelGeometry.followingAnchor(
                 ru.arc.paper.actionpanel.ActionPanelPoint(0.0, 0.0, 0.0), 180f,
                 layout.buttons.map { it.rect } + layout.labels.map { it.rect },
-                if (state == "near-ghost") .85 else 2.4, 0.0, 0.0)
+                2.4, 0.0, 0.0)
             mapOf("locale" to locale, "state" to state, "anchorY" to anchor.point.y,
-                "distance" to if (state == "near-ghost") .85 else 2.4,
-                "viewerZ" to if (state == "near-ghost") -4.0 else -7.0, "buttons" to layout.buttons.map { mapOf(
+                "distance" to 2.4,
+                "viewerZ" to if (state == "near-ghost") -3.05 else -7.0, "buttons" to layout.buttons.map { mapOf(
                 "action" to it.action.name, "text" to plain.serialize(it.text), "rect" to it.rect,
                 "component" to GsonComponentSerializer.gson().serialize(it.text),
                 "scale" to it.style.scale, "lineWidth" to it.style.lineWidth, "baselineInset" to it.style.baselineInset, "enabled" to it.enabled,

@@ -124,7 +124,7 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
             val original = presentationField.get(fixture.runtime)
             val presentation = mockk<BuilderBookPreviewPresentation>()
             var hit = true
-            every { presentation.intercept(player, any()) } answers { hit }
+            every { presentation.intercept(player) } answers { hit }
             presentationField.set(fixture.runtime, presentation)
             try {
                 for (action in listOf(Action.LEFT_CLICK_AIR, Action.LEFT_CLICK_BLOCK,
@@ -137,8 +137,7 @@ class BuilderCommandBoundaryMockBukkitTest : FunSpec({
                     fixture.messagesFor(player) shouldBe emptyList()
                     behind.type shouldBe Material.STONE
                 }
-                verify(exactly = 3) { presentation.intercept(player, false) }
-                verify(exactly = 1) { presentation.intercept(player, true) }
+                verify(exactly = 4) { presentation.intercept(player) }
                 hit = false
                 val outside = PlayerInteractEvent(player, Action.RIGHT_CLICK_BLOCK, player.inventory.itemInMainHand,
                     behind, BlockFace.UP, EquipmentSlot.HAND)

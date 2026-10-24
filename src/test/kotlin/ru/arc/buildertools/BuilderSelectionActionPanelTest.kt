@@ -20,6 +20,10 @@ import org.bukkit.util.BoundingBox
 import org.bukkit.util.Vector
 import ru.arc.config.Config
 import ru.arc.paper.actionpanel.ActionPanelInputProfile
+import ru.arc.paper.actionpanel.ActionPanelDepth
+import ru.arc.paper.actionpanel.ActionPanelViewMotion
+import ru.arc.paper.actionpanel.ActionPanelAnchor
+import ru.arc.paper.actionpanel.ActionPanelGeometry
 import ru.arc.paper.actionpanel.ActionPanelFollowSettings
 import ru.arc.paper.actionpanel.ActionPanelPlacement
 import ru.arc.paper.actionpanel.ActionPanelPoint
@@ -37,6 +41,65 @@ import kotlin.math.abs
 class BuilderSelectionActionPanelTest : StringSpec({
     beforeTest { BuilderLocalePolicy.configure("ru", false) }
     afterSpec { BuilderLocalePolicy.configure("ru", false) }
+
+    "selection panel motion transition trace" {
+        val trace = mutableListOf<Map<String, Any?>>()
+        val navigation = listOf(BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE)
+        val firstPage = listOf(BuilderPanelAction.FILL, BuilderPanelAction.REPLACE, BuilderPanelAction.COPY,
+            BuilderPanelAction.MOVE, BuilderPanelAction.PASTE, BuilderPanelAction.CLEAR) + navigation
+        MockBukkitTestRuntime.open().use {
+            PanelHarness().use { h ->
+                h.headYaw = 180f
+                h.current = h.current!!.copy(actions = firstPage, pagination = Component.text("1 / 2"))
+                h.panel.tick(); trace += h.motionSnapshot("near-selection-looking-away")
+                (h.anchor().point.z < .5) shouldBe true
+                h.feetX = 40.5
+                h.panel.tick(); trace += h.motionSnapshot("far-selection")
+                h.headYaw = 0f
+                h.panel.tick(); trace += h.motionSnapshot("stationary-head-turn")
+                h.aimAt(BuilderPanelAction.NEXT_PAGE)
+                h.panel.intercept(h.player) shouldBe true
+                val beforePage = h.anchor()
+                h.current = h.current!!.copy(context = "page-2", actions = listOf(BuilderPanelAction.DRAFT,
+                    BuilderPanelAction.CROWN, BuilderPanelAction.CLEAR) + navigation, pagination = Component.text("2 / 2"))
+                h.panel.tick(); trace += h.motionSnapshot("page-click")
+                h.anchor() shouldBe beforePage
+            }
+            PanelHarness().use { h ->
+                h.headYaw = 0f
+                h.current = h.current!!.copy(actions = firstPage, pagination = Component.text("1 / 2"))
+                val walls = mutableListOf<BoundingBox>()
+                h.useCollisionWorld(walls)
+                h.panel.tick(); trace += h.motionSnapshot("open-space")
+                val beforeObstacle = h.anchor()
+                walls += BoundingBox(-5.0, 64.0, 2.1, 6.0, 69.0, 3.1)
+                h.panel.tick(); trace += h.motionSnapshot("obstructed")
+                h.anchor() shouldBe beforeObstacle
+                walls.clear()
+                repeat(5) { h.panel.tick(); trace += h.motionSnapshot("obstacle-return-$it") }
+            }
+            PanelHarness().use { h ->
+                h.headYaw = 0f
+                h.current = h.current!!.copy(context = "paste-plan", actions = listOf(
+                    BuilderPanelAction.CONFIRM, BuilderPanelAction.CANCEL, BuilderPanelAction.ROTATE_LEFT, BuilderPanelAction.ROTATE_RIGHT))
+                h.panel.tick(); trace += h.motionSnapshot("paste-confirm-start")
+                h.aimAt(BuilderPanelAction.CONFIRM)
+                val confirmYaw = h.anchor().yaw
+                repeat(8) { tick ->
+                    h.feetX += .04
+                    h.panel.tick()
+                    h.anchor().yaw shouldBe confirmYaw
+                    h.panel.isTargeted(h.player) shouldBe true
+                    trace += h.motionSnapshot("paste-confirm-aim-$tick")
+                }
+            }
+        }
+        java.io.File("build/reports/builder-selection-motion/after.json").apply {
+            parentFile.mkdirs()
+            writeText(com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(trace))
+        }
+        trace.size shouldBe 20
+    }
 
     "all selection states retain their localized actions and page layout through the Core adapter" {
         PanelHarness().use { h ->
@@ -87,16 +150,17 @@ class BuilderSelectionActionPanelTest : StringSpec({
         }
     }
 
-    "the adapter preserves configured geometry, selection centre, input profile and guide switch" {
+    "the adapter preserves configured geometry with an aim-stable owner overlay" {
         val settings = BuilderPanelSettings(distance = 2.8, sideOffset = 0.2, heightOffset = -0.15,
             rowSpacing = 0.3, columnSpacing = 1.7, buttonWidth = 1.6f, buttonHeight = 0.25f,
             labelScale = 0.7f, reach = 4.5, suppressSelectionGlow = false, obstacleMaxShift = 0.5)
         PanelHarness(settings).use { h ->
             h.current = h.current!!.copy(actions = listOf(BuilderPanelAction.FILL, BuilderPanelAction.REPLACE))
             val frame = checkNotNull(h.panel.frame(h.player))
-            val placement = frame.placement as ActionPanelPlacement.FollowTarget
+            val placement = frame.placement as ActionPanelPlacement.FollowView
             placement.worldId shouldBe h.world.uid
-            placement.target shouldBe ActionPanelPoint(0.5, 64.5, 5.5)
+            placement.motion shouldBe ActionPanelViewMotion.AIM_STABLE
+            frame.options.depth shouldBe ActionPanelDepth.VIEW_OVERLAY
             placement.settings.distance shouldBe settings.distance
             placement.settings.sideOffset shouldBe settings.sideOffset
             placement.settings.heightOffset shouldBe settings.heightOffset
@@ -143,13 +207,12 @@ class BuilderSelectionActionPanelTest : StringSpec({
         }
     }
 
-    "walking away changes only placement and keeps the exact selection actions and context" {
+    "near and far selection use the same view overlay with exact actions and context" {
         PanelHarness().use { h ->
             h.current = h.current!!.copy(actions = listOf(BuilderPanelAction.COPY, BuilderPanelAction.PASTE,
                 BuilderPanelAction.MOVE, BuilderPanelAction.DRAFT))
             val nearby = checkNotNull(h.panel.frame(h.player))
             h.feetX = 40.5
-            h.current = h.current!!.copy(followView = true)
             val away = checkNotNull(h.panel.frame(h.player))
             (away.placement is ActionPanelPlacement.FollowView) shouldBe true
             away.context shouldBe nearby.context
@@ -157,8 +220,8 @@ class BuilderSelectionActionPanelTest : StringSpec({
             h.panel.activate(h.player, away.context, BuilderPanelAction.PASTE)
             h.actions shouldBe listOf(BuilderPanelAction.PASTE)
 
-            h.current = h.current!!.copy(followView = false)
-            (checkNotNull(h.panel.frame(h.player)).placement is ActionPanelPlacement.FollowTarget) shouldBe true
+            h.feetX = 0.5
+            (checkNotNull(h.panel.frame(h.player)).placement is ActionPanelPlacement.FollowView) shouldBe true
         }
     }
 
@@ -200,44 +263,27 @@ class BuilderSelectionActionPanelTest : StringSpec({
         }
     }
 
-    "Core runtime holds the Builder panel for head crouch and body jitter then smoothly follows deliberate motion" {
-        // Shared spatial queries require the real Bukkit primary-thread boundary.
+    "Core retains the aim plane through crouch and small body motion then closes all owned handles" {
         MockBukkitTestRuntime.open().use { PanelHarness().use { h ->
-            org.bukkit.Bukkit.isPrimaryThread() shouldBe true
+            h.headYaw = 0f
             h.panel.tick()
             val label = h.labels.single()
             val initial = label.location.clone()
-            h.glow shouldBe emptyList()
-
-            h.headYaw = 0f
-            h.panel.tick()
             h.glow shouldBe listOf(true)
-            label.location shouldBe initial
-            h.headYaw = 90f
-            h.headPitch = 35f
+            h.headYaw = 4f
             h.eyeHeight = 1.27
             h.panel.tick()
             label.location shouldBe initial
-            h.glow shouldBe listOf(true, false)
-
             h.feetX += 0.005
             h.panel.tick()
             label.location shouldBe initial
             h.feetX += 0.04
             h.panel.tick()
-            (label.location.distance(initial) > 0.001) shouldBe true
+            (abs(label.location.x - initial.x - .045) < 1e-8) shouldBe true
             (abs(label.location.y - initial.y) < 1e-8) shouldBe true
+            label.location.yaw shouldBe initial.yaw
             label.duration shouldBe 2
             h.labels.size shouldBe 1
-            val afterMove = label.location.clone()
-            h.panel.tick()
-            label.location shouldBe afterMove
-
-            h.headYaw = 0f
-            h.headPitch = 0f
-            h.eyeHeight = 1.62
-            h.panel.tick()
-            h.glow.last() shouldBe true
             h.panel.intercept(h.player) shouldBe false
             h.panel.clear(h.player.uniqueId)
             h.glow.last() shouldBe false
@@ -251,51 +297,28 @@ class BuilderSelectionActionPanelTest : StringSpec({
         } }
     }
 
-    "the distant menu keeps its whole safe pose beside blocks and recovers smoothly when the path clears" {
+    "a real obstruction leaves the selection overlay pose and handles unchanged" {
         MockBukkitTestRuntime.open().use { PanelHarness().use { h ->
             h.headYaw = 0f
-            h.current = h.current!!.copy(followView = true, actions = listOf(
-                BuilderPanelAction.FILL, BuilderPanelAction.REPLACE, BuilderPanelAction.COPY,
-                BuilderPanelAction.MOVE, BuilderPanelAction.PASTE, BuilderPanelAction.DECONSTRUCT,
-                BuilderPanelAction.PREVIOUS_PAGE, BuilderPanelAction.NEXT_PAGE,
-            ), pagination = Component.text("Стр. 1 из 2"))
-            val walls = mutableListOf(
-                BoundingBox(-5.0, 64.0, 2.1, -1.15, 69.0, 3.5),
-                BoundingBox(2.15, 64.0, 2.1, 6.0, 69.0, 3.5),
-            )
-            h.useCollisionWorld(walls)
-            fun pose() = h.labels.map { it.location.clone() }
+            h.current = h.current!!.copy(actions = listOf(BuilderPanelAction.CONFIRM, BuilderPanelAction.CANCEL))
             h.panel.tick()
-            h.labels.size shouldBe 10
-            val initial = pose()
-            repeat(3) {
-                listOf(0.62, 0.38, 0.56, 0.44, 0.5).forEach { x ->
-                    h.feetX = x
-                    h.panel.tick()
-                    pose() shouldBe initial
-                }
+            val initial = h.labels.map { it.location.clone() }
+            every { h.world.rayTraceBlocks(any<Location>(), any<Vector>(), any<Double>(),
+                any<FluidCollisionMode>(), any<Boolean>(), any<Predicate<Block>>()) } answers {
+                org.bukkit.util.RayTraceResult(h.player.eyeLocation.toVector().add(h.player.eyeLocation.direction.multiply(.45)))
             }
-
-            walls += BoundingBox(-5.0, 64.0, 2.1, 6.0, 69.0, 3.1)
             h.panel.tick()
-            h.labels.all { it.location.z < 2.1 && it.duration == 0 } shouldBe true
-            walls.clear()
-            var previous = pose()
-            repeat(20) {
-                h.panel.tick()
-                val current = pose()
-                current.zip(previous).all { (after, before) -> after.distance(before) <= 0.09 } shouldBe true
-                previous = current
-            }
-            h.labels.all { abs(it.location.z - 2.9) < 1e-6 && !it.removed } shouldBe true
-
-            h.headYaw = 85f
-            h.headPitch = 30f
-            h.eyeHeight = 1.27
-            h.panel.tick()
-            pose() shouldBe previous
+            h.labels.map { it.location.clone() } shouldBe initial
+            h.labels.all { !it.removed } shouldBe true
+            h.aimAt(BuilderPanelAction.CONFIRM)
+            h.panel.intercept(h.player) shouldBe true
+            h.actions shouldBe listOf(BuilderPanelAction.CONFIRM)
+            verify(exactly = 0) { h.world.getBlockAt(any<Int>(), any<Int>(), any<Int>()) }
+            verify(exactly = 0) { h.world.rayTraceBlocks(any<Location>(), any<Vector>(), any<Double>(),
+                any<FluidCollisionMode>(), any<Boolean>(), any<Predicate<Block>>()) }
         } }
     }
+
 })
 
 private class RecordedLabel(start: Location, initialText: Component) {
@@ -322,6 +345,7 @@ private class PanelHarness(
     val player = mockk<Player>(relaxed = true)
     val displays = mockk<PaperPacketDisplays>(relaxed = true)
     val labels = mutableListOf<RecordedLabel>()
+    val interactions = mutableListOf<Interaction>()
     val actions = mutableListOf<BuilderPanelAction>()
     val glow = mutableListOf<Boolean>()
     var feetX = 0.5
@@ -354,6 +378,7 @@ private class PanelHarness(
             every { interaction.teleport(any<Location>()) } answers { location = firstArg<Location>().clone(); true }
             every { interaction.remove() } answers { valid = false; Unit }
             thirdArg<Consumer<Interaction>>().accept(interaction)
+            interactions += interaction
             interaction
         }
         every { player.uniqueId } returns playerId
@@ -408,6 +433,35 @@ private class PanelHarness(
             obstacles.mapNotNull { it.rayTrace(origin, direction, distance) }
                 .minByOrNull { it.hitPosition.distanceSquared(origin) }
         }
+    }
+
+    fun anchor(): ActionPanelAnchor {
+        val owner = BuilderSelectionActionPanel::class.java.getDeclaredField("panels").apply { isAccessible = true }.get(panel)
+        val map = owner.javaClass.getDeclaredField("panels").apply { isAccessible = true }.get(owner) as Map<*, *>
+        val current = checkNotNull(map[player.uniqueId])
+        return current.javaClass.getDeclaredField("anchor").apply { isAccessible = true }.get(current) as ActionPanelAnchor
+    }
+
+    fun aimAt(action: BuilderPanelAction) {
+        val rect = checkNotNull(panel.frame(player)).layout.buttons.single { it.action == action }.rect
+        val point = ActionPanelGeometry.localToWorld(anchor(), rect.center)
+        val aim = player.eyeLocation.apply { direction = Vector(point.x - x, point.y - y, point.z - z) }
+        headYaw = aim.yaw
+        headPitch = aim.pitch
+    }
+
+    fun motionSnapshot(state: String): Map<String, Any?> {
+        val anchor = anchor()
+        val eye = player.eyeLocation
+        val direction = eye.direction
+        return mapOf("state" to state, "feetX" to feetX, "headYaw" to headYaw, "headPitch" to headPitch,
+            "anchor" to anchor, "frontDot" to ((anchor.point.x - eye.x) * direction.x +
+                (anchor.point.y - eye.y) * direction.y + (anchor.point.z - eye.z) * direction.z),
+            "texts" to labels.mapIndexedNotNull { index, label -> if (label.removed) null else mapOf(
+                "id" to index, "text" to PlainTextComponentSerializer.plainText().serialize(label.content),
+                "x" to label.location.x, "y" to label.location.y, "z" to label.location.z, "yaw" to label.location.yaw,
+                "duration" to label.duration) },
+            "nativeIds" to interactions.mapIndexedNotNull { index, interaction -> index.takeIf { interaction.isValid } })
     }
 
     override fun close() = panel.close()

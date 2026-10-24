@@ -6,6 +6,7 @@ import org.bukkit.plugin.Plugin
 import ru.arc.paper.actionpanel.ActionPanelAction
 import ru.arc.paper.actionpanel.ActionPanelButton
 import ru.arc.paper.actionpanel.ActionPanelController
+import ru.arc.paper.actionpanel.ActionPanelDepth
 import ru.arc.paper.actionpanel.ActionPanelFollowSettings
 import ru.arc.paper.actionpanel.ActionPanelFrame
 import ru.arc.paper.actionpanel.ActionPanelGridSettings
@@ -14,8 +15,8 @@ import ru.arc.paper.actionpanel.ActionPanelLayout
 import ru.arc.paper.actionpanel.ActionPanelLayouts
 import ru.arc.paper.actionpanel.ActionPanelOptions
 import ru.arc.paper.actionpanel.ActionPanelPlacement
-import ru.arc.paper.actionpanel.ActionPanelPoint
 import ru.arc.paper.actionpanel.ActionPanelTextStyle
+import ru.arc.paper.actionpanel.ActionPanelViewMotion
 import ru.arc.paper.actionpanel.PaperActionPanels
 import ru.arc.paper.display.PaperPacketDisplays
 import ru.arc.text.LocalizedMiniMessage
@@ -34,7 +35,6 @@ internal data class BuilderPanelView(
     val status: Component,
     val actions: List<BuilderPanelAction>,
     val pagination: Component = Component.empty(),
-    val followView: Boolean = false,
 )
 
 internal data class BuilderPanelSettings(
@@ -92,7 +92,7 @@ internal class BuilderSelectionActionPanel(
             settings.buttonWidth, settings.buttonHeight, 0.025)
     }
     private val options = ActionPanelOptions(
-        ActionPanelInputProfile.ENTITY_BOTH, settings.reach, settings.suppressSelectionGlow,
+        ActionPanelInputProfile.ENTITY_BOTH, settings.reach, settings.suppressSelectionGlow, false, ActionPanelDepth.VIEW_OVERLAY,
     )
     private var closed = false
     private val panels = PaperActionPanels(plugin, displays, this)
@@ -125,16 +125,7 @@ internal class BuilderSelectionActionPanel(
         )
         return ActionPanelFrame(
             BuilderPanelContext(current.context, selection),
-            if (current.followView) ActionPanelPlacement.FollowView(selection.worldId, follow)
-            else ActionPanelPlacement.FollowTarget(
-                selection.worldId,
-                ActionPanelPoint(
-                    (selection.minX.toDouble() + selection.maxX + 1.0) / 2.0,
-                    (selection.minY.toDouble() + selection.maxY + 1.0) / 2.0,
-                    (selection.minZ.toDouble() + selection.maxZ + 1.0) / 2.0,
-                ),
-                follow,
-            ),
+            ActionPanelPlacement.FollowView(selection.worldId, follow, ActionPanelViewMotion.AIM_STABLE),
             ActionPanelLayout(layout.buttons.map { button ->
                 if (button.action == BuilderPanelAction.DRAFT) ActionPanelButton(button.action, button.rect,
                     button.text, draftStyle, button.visible, button.enabled) else button

@@ -1169,8 +1169,6 @@ internal class BuilderToolsRuntime(
     }
 
     private data class SelectionPanelContext(val selection: BuilderSelection, val state: Any?)
-    private data class SelectionPanelPlacement(val selection: BuilderSelection, val followView: Boolean)
-    private val selectionPanelPlacements = mutableMapOf<UUID, SelectionPanelPlacement>()
 
     private data class MoveDirectionPick(
         val selection: BuilderSelection,
@@ -1196,7 +1194,6 @@ internal class BuilderToolsRuntime(
         val id = player.uniqueId
         val selection = selectionOrNull(player)
         if (selection == null || !canUseSelectionPanel(player)) {
-            selectionPanelPlacements.remove(id)
             materialScans.remove(id)
             panelPlanSummaries.remove(id)
             selectionUndoAvailable.remove(id)
@@ -1205,14 +1202,6 @@ internal class BuilderToolsRuntime(
             materialPicker?.close(id)
             return null
         }
-        val location = player.location
-        val maxDistance = config.selectionPanelMaxSelectionDistance
-        val distanceSquared = selection.distanceSquaredTo(location.x, location.y, location.z)
-        val previous = selectionPanelPlacements[id]?.takeIf { it.selection == selection }
-        val returnDistance = maxDistance - minOf(0.5, maxDistance * 0.1)
-        val followView = if (previous?.followView == true) distanceSquared >= returnDistance * returnDistance
-            else distanceSquared > maxDistance * maxDistance
-        selectionPanelPlacements[id] = SelectionPanelPlacement(selection, followView)
         if (materialPicker?.isOpen(id) == true || crownSelectionDialog?.isOpen(id) == true) return null
         fun text(key: String, values: Map<String, Component> = emptyMap()) =
             messages.render("selection-panel.$key", locale(player), values)
@@ -1220,7 +1209,6 @@ internal class BuilderToolsRuntime(
             return BuilderPanelView(
                 SelectionPanelContext(selection, token), selection, text("scanning"),
                 listOf(BuilderPanelAction.CANCEL),
-                followView = followView,
             )
         }
         operationLocks.operation(id)?.let { operation ->
@@ -1231,7 +1219,6 @@ internal class BuilderToolsRuntime(
                     "count" to messages.literal(operation.record.plan.changes.size),
                 )),
                 emptyList(),
-                followView = followView,
             )
         }
         if (operationLocks.isPlayerLocked(id) || id in constructionStarts) return null
@@ -1257,7 +1244,6 @@ internal class BuilderToolsRuntime(
                         add(BuilderPanelAction.ROTATE_RIGHT)
                     }
                 },
-                followView = followView,
             )
         }
         panelPlanSummaries.remove(id)
@@ -1270,13 +1256,13 @@ internal class BuilderToolsRuntime(
             offer(BuilderPanelAction.COPY, BuilderRootCommand.COPY)
             offer(BuilderPanelAction.MOVE, BuilderRootCommand.MOVE)
             if (clipboardController.current(id) != null) offer(BuilderPanelAction.PASTE, BuilderRootCommand.PASTE)
+            add(BuilderPanelAction.CLEAR)
             offer(BuilderPanelAction.DECONSTRUCT, BuilderRootCommand.DECONSTRUCT)
             if (player.hasPermission("arcbuild.book.create") &&
                 rootCommandAvailable(player, BuilderRootCommand.COPY) &&
                 rootCommandAvailable(player, BuilderRootCommand.BOOK)
             ) add(BuilderPanelAction.DRAFT)
             if (selectionCanUndo(id)) add(BuilderPanelAction.UNDO)
-            add(BuilderPanelAction.CLEAR)
             offer(BuilderPanelAction.DISCONNECT, BuilderRootCommand.DISCONNECT)
             offer(BuilderPanelAction.CROWN, BuilderRootCommand.CROWN)
             add(if (placementAssist?.isEnabled(player) == true) BuilderPanelAction.ASSIST_OFF else BuilderPanelAction.ASSIST_ON)
@@ -1298,7 +1284,6 @@ internal class BuilderToolsRuntime(
                 "current" to messages.literal(page + 1),
                 "total" to messages.literal(pageCount),
             )) else Component.empty(),
-            followView = followView,
         )
     }
 
@@ -1447,7 +1432,6 @@ internal class BuilderToolsRuntime(
     }
 
     private fun dismissSelectionControls(playerId: UUID) {
-        selectionPanelPlacements.remove(playerId)
         moveDirectionPicks.remove(playerId)
         pastePreview.clear(playerId)
         clearSelectionTarget(playerId)
@@ -1858,7 +1842,6 @@ internal class BuilderToolsRuntime(
         val points = selections.points(player.uniqueId, player.world.uid)
         if ((if (first) points.first else points.second) == position) return
         materialScans.remove(player.uniqueId)
-        selectionPanelPlacements.remove(player.uniqueId)
         selectionPanelPages.remove(player.uniqueId)
         crownSelectionDialog?.close(player.uniqueId)
         materialPicker?.close(player.uniqueId)
@@ -4107,8 +4090,7 @@ internal class BuilderToolsRuntime(
         if (entityEditor?.isEditing(player) == true) return
         if (event.hand == EquipmentSlot.HAND && event.action in listOf(
                 Action.LEFT_CLICK_AIR, Action.LEFT_CLICK_BLOCK, Action.RIGHT_CLICK_AIR, Action.RIGHT_CLICK_BLOCK,
-            ) && bookPreviewPresentation.intercept(player, allowMenuFallback =
-                event.action == Action.RIGHT_CLICK_AIR && event.item?.let(BuildBookCodec::read) != null)) {
+            ) && bookPreviewPresentation.intercept(player)) {
             event.isCancelled = true
             return
         }
@@ -4380,7 +4362,6 @@ internal class BuilderToolsRuntime(
 
     @EventHandler(priority = EventPriority.MONITOR)
     fun onQuit(event: PlayerQuitEvent) {
-        selectionPanelPlacements.remove(event.player.uniqueId)
         moveDirectionPicks.remove(event.player.uniqueId)
         pastePreview.clear(event.player.uniqueId)
         selectionTargets.remove(event.player.uniqueId)
@@ -4505,7 +4486,6 @@ internal class BuilderToolsRuntime(
         panelPlanSummaries.clear()
         selectionUndoAvailable.clear()
         selectionPanelPages.clear()
-        selectionPanelPlacements.clear()
         moveDirectionPicks.clear()
         moveSelections.clear()
         actionDiagnostics.clear()
