@@ -186,7 +186,7 @@ internal class BuilderToolsRuntime(
     private val messages: LocalizedMiniMessage = config.messages()
     private val shop = BuilderShopCoordinator(config, messages)
     private val safety = BuilderBlockSafety(plugin, config.replaceableMaterials)
-    private val planningHost = object : BuilderPlanningHost, BuilderPlanningTasks by planningTasks {
+    private val planningHost = object : BuilderMoveHost, BuilderPlanningTasks by planningTasks {
         override fun ensurePermission(player: Player, feature: BuilderFeature) = ensureFeaturePermission(player, feature)
 
         override fun requiredSelection(player: Player): BuilderSelection = this@BuilderToolsRuntime.requiredSelection(player)
@@ -219,6 +219,18 @@ internal class BuilderToolsRuntime(
             costs: List<BuilderItemAmount>, rewards: List<BuilderItemAmount>, skippedUnsafeBlocks: Int,
         ): CompletableFuture<BuilderPlan> = newPlanAsync(
             player, kind, changes, costs, rewards, skippedUnsafeBlocks = skippedUnsafeBlocks,
+        )
+
+        override fun createMovePlanAsync(
+            player: Player, changes: List<BuilderBlockChange>, deconstruction: BuilderDeconstructionCapture?,
+            displaced: List<BuilderBlockPos>, skippedUnsafeBlocks: Int,
+        ): CompletableFuture<BuilderPlan> = newPlanAsync(
+            player, BuilderPlanKind.MOVE, changes, emptyList(), deconstruction?.rewards.orEmpty(),
+            deconstruction?.toolFingerprint, deconstruction?.toolDamage ?: 0,
+            skippedUnsafeBlocks = skippedUnsafeBlocks,
+            moveDeconstruction = displaced.takeIf { it.isNotEmpty() }?.let {
+                BuilderMoveDeconstruction(it, deconstruction?.toolBypassUsed == true)
+            },
         )
 
         override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
@@ -256,7 +268,6 @@ internal class BuilderToolsRuntime(
         maximumChanges = config.maxChanges,
         host = planningHost,
     )
-    private val moveController = BuilderMoveController(safety, config.maxChanges, planningHost)
     private val clipboardController = BuilderClipboardController(
         safety = safety,
         selections = selections,
@@ -372,6 +383,7 @@ internal class BuilderToolsRuntime(
             override fun fail(path: String): Nothing = throw BuilderUserFailure(path)
         },
     )
+    private val moveController = BuilderMoveController(safety, config.maxChanges, planningHost, deconstructionController)
     private val previews: BuilderPreviewSessions
     private val crown: BuilderCrownController
     private val books: BuilderBookLifecycle
@@ -2111,6 +2123,7 @@ internal class BuilderToolsRuntime(
         bookSchematicSha256: String? = null,
         skippedUnsafeBlocks: Int = 0,
         validate: Boolean = true,
+        moveDeconstruction: BuilderMoveDeconstruction? = null,
     ): BuilderPlan {
         val now = System.currentTimeMillis()
         return BuilderPlan(
@@ -2129,6 +2142,7 @@ internal class BuilderToolsRuntime(
             bookBuildingId = bookBuildingId,
             bookSchematicSha256 = bookSchematicSha256,
             skippedUnsafeBlocks = skippedUnsafeBlocks,
+            moveDeconstruction = moveDeconstruction,
             createdAtMillis = now,
             expiresAtMillis = now + config.planTtl.toMillis(),
         ).let { if (validate) it.validated(config.maxChangesFor(kind)) else it }
@@ -2138,10 +2152,11 @@ internal class BuilderToolsRuntime(
         player: Player, kind: BuilderPlanKind, changes: List<BuilderBlockChange>,
         costs: List<BuilderItemAmount>, rewards: List<BuilderItemAmount>,
         toolFingerprint: String? = null, toolDamage: Int = 0, skippedUnsafeBlocks: Int = 0,
+        moveDeconstruction: BuilderMoveDeconstruction? = null,
     ): CompletableFuture<BuilderPlan> {
         val maximum = config.maxChangesFor(kind)
         val draft = newPlan(player, kind, changes, costs, rewards, toolFingerprint, toolDamage,
-            skippedUnsafeBlocks = skippedUnsafeBlocks, validate = false)
+            skippedUnsafeBlocks = skippedUnsafeBlocks, validate = false, moveDeconstruction = moveDeconstruction)
         return planningTasks.compute { draft.validated(maximum) }
     }
 
@@ -3437,6 +3452,7 @@ internal class BuilderToolsRuntime(
     ): CompletableFuture<Unit> {
         val maximum = config.maxChangesFor(plan.kind)
         if (plan.kind == BuilderPlanKind.MOVE) ensureMovePermission(player)
+        if (plan.moveDeconstruction != null) ensureFeaturePermission(player, BuilderFeature.DECONSTRUCT)
         if (BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, plan) &&
             !BuilderPermissionPolicy.canDeconstructWithoutTool(player::hasPermission)) throw BuilderUserFailure("errors.no-permission")
         return planningTasks.compute {

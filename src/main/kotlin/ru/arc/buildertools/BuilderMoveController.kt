@@ -7,11 +7,22 @@ import org.bukkit.util.Vector
 import java.util.concurrent.CompletableFuture
 import kotlin.math.abs
 
+internal interface BuilderMoveHost : BuilderPlanningHost {
+    fun createMovePlanAsync(
+        player: Player,
+        changes: List<BuilderBlockChange>,
+        deconstruction: BuilderDeconstructionCapture?,
+        displaced: List<BuilderBlockPos>,
+        skippedUnsafeBlocks: Int,
+    ): CompletableFuture<BuilderPlan>
+}
+
 /** Captures a move once and combines source removal with placement, including overlap. */
 internal class BuilderMoveController(
     private val safety: BuilderBlockSafety,
     private val maximumChanges: Int,
-    private val host: BuilderPlanningHost,
+    private val host: BuilderMoveHost,
+    private val deconstruction: BuilderDeconstructionController,
 ) {
     private data class SourceBlock(val data: String, val material: Material, val pair: BuilderBookCapturedCell)
     private data class CapturedMove(
@@ -19,6 +30,9 @@ internal class BuilderMoveController(
         val targets: List<Pair<BuilderBlockPos, SourceBlock>>,
         val before: MutableMap<BuilderBlockPos, String>,
         val skipped: Int,
+        val excludedSource: Set<BuilderBlockPos>,
+        val displaced: MutableList<BuilderBlockPos> = mutableListOf(),
+        val deconstructBefore: MutableMap<BuilderBlockPos, String> = linkedMapOf(),
     )
 
     init {
@@ -72,7 +86,7 @@ internal class BuilderMoveController(
                 if (skipped > BuilderPlan.ABSOLUTE_MAX_CHANGES) host.fail("errors.selection-too-large")
                 if (movable.isEmpty()) host.fail("errors.nothing-to-change")
                 CapturedMove(movable, movable.map { (position, block) -> position.relative(direction).validated() to block },
-                    movable.mapValuesTo(linkedMapOf()) { it.value.data }, skipped)
+                    movable.mapValuesTo(linkedMapOf()) { it.value.data }, skipped, source.keys - movable.keys)
             }
         }.thenCompose { captured -> host.onMain {
             val targetIterator = captured.targets.iterator()
@@ -80,27 +94,37 @@ internal class BuilderMoveController(
                 if (!targetIterator.hasNext()) return@capture true
                 val (position, moved) = targetIterator.next()
                 val block = checkedBlock(position)
-                // An excluded source block is an obstacle too: it must never be overwritten.
-                if (position !in captured.source && !block.type.isAir) host.fail("errors.move-occupied")
+                // An excluded unsafe source remains an obstacle; safe occupied targets use DECONSTRUCT.
+                if (position !in captured.source && !block.type.isAir) {
+                    if (position in captured.excludedSource || !safety.isSafeExisting(block) && !safety.isReplaceable(block)) {
+                        host.fail("errors.move-occupied")
+                    }
+                    if (captured.displaced.isEmpty()) host.ensurePermission(player, BuilderFeature.DECONSTRUCT)
+                    captured.displaced += position
+                    if (!safety.isReplaceable(block)) captured.deconstructBefore[position] = block.blockData.asString
+                }
                 host.ensurePlacement(player, block, moved.material)
                 if (position !in captured.before) captured.before[position] = block.blockData.asString
                 false
             }.thenCompose {
-                host.compute {
+                val materials = if (captured.deconstructBefore.isEmpty()) CompletableFuture.completedFuture(null)
+                    else deconstruction.captureBlocks(player, captured.deconstructBefore, current)
+                materials.thenCompose { deconstructed -> host.compute {
                     val after = captured.source.mapValuesTo(linkedMapOf()) { AIR }
                     captured.targets.forEach { (position, moved) -> after[position] = moved.data }
+                    val displaced = captured.displaced.toSet()
                     captured.before.mapNotNull { (position, data) ->
                         val moved = after.getValue(position)
-                        if (data == moved) null else BuilderBlockChange(position, data, moved)
+                        if (data == moved && position !in displaced) null else BuilderBlockChange(position, data, moved)
                     }.also { changes ->
                         if (changes.size > maximumChanges) host.fail("errors.selection-too-large")
-                    } to captured.skipped
-                }
+                    }.let { Triple(it, deconstructed, captured) }
+                } }
             }
-        }.thenCompose { it } }.thenCompose { (changes, skipped) -> host.onMain {
+        }.thenCompose { it } }.thenCompose { (changes, deconstructed, captured) -> host.onMain {
             requireCurrentBuilderPlanning(current)
             if (changes.isEmpty()) host.fail("errors.nothing-to-change")
-            host.createPlanAsync(player, BuilderPlanKind.MOVE, changes, skippedUnsafeBlocks = skipped)
+            host.createMovePlanAsync(player, changes, deconstructed, captured.displaced, captured.skipped)
         }.thenCompose { it } }
     }
 

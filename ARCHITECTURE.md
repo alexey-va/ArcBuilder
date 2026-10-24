@@ -73,9 +73,19 @@ runtime clears that transient mode on cancel, another action, tool/context exit,
 disconnect, or shutdown. World capture uses the shared sliced planning queue.
 `BuilderMoveController` combines source removal and placement from one snapshot,
 so overlapping source and destination have one final change per position. Unsafe
-blocks remain excluded; any occupied destination outside the movable snapshot
-rejects the whole plan. MOVE exchanges no inventory and its domain validation
-requires exact block-state conservation. It does not emit construction rewards.
+blocks remain excluded. Safe occupied destinations outside the movable snapshot
+are captured through `BuilderDeconstructionController.captureBlocks`, using the
+same deconstruct permission, protection, native drops without Silk Touch, pooled
+tools and inventory-capacity rules. Replaceable plants yield no drops or wear;
+unsafe destinations still reject the whole move. Source overlap never yields
+deconstruction drops. Optional `BuilderMoveDeconstruction` journal metadata records
+the exact occupied target positions and tool-free bypass use; after removing those
+preimages, domain validation still requires exact source block-state conservation.
+An occupied target with the same final state stays in the changes, so confirmation,
+rollback and undo retain its preimage and protection check. Undo consumes the frozen
+target drops before restoring the world; successful tool wear stays spent, as in
+deconstruct. Older journal records have no metadata and retain inventory-free MOVE
+validation. MOVE does not emit construction rewards.
 The existing captured multi-block policy excludes unmatched door/plant halves;
 only complete safe pairs are moved, without synthesizing their companions.
 The runtime shifts selection corners only after that MOVE reaches COMMITTED and

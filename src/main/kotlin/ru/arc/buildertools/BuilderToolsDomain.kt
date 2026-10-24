@@ -113,7 +113,7 @@ data class BuilderBlockChange(
     val beforeBlockData: String,
     val afterBlockData: String,
 ) {
-    fun validated(): BuilderBlockChange = apply {
+    fun validated(allowUnchanged: Boolean = false): BuilderBlockChange = apply {
         position.validated()
         require(beforeBlockData.length in 3..512 && afterBlockData.length in 3..512) {
             "Builder-tools block data is outside its size bound"
@@ -121,9 +121,15 @@ data class BuilderBlockChange(
         require(beforeBlockData.startsWith("minecraft:") && afterBlockData.startsWith("minecraft:")) {
             "Builder-tools journal only accepts canonical vanilla block data"
         }
-        require(beforeBlockData != afterBlockData) { "Builder-tools change must alter the block state" }
+        require(allowUnchanged || beforeBlockData != afterBlockData) { "Builder-tools change must alter the block state" }
     }
 }
+
+/** Exact occupied MOVE preimages removed through the ordinary deconstruction pipeline. */
+data class BuilderMoveDeconstruction(
+    val positions: List<BuilderBlockPos>,
+    val toolBypassUsed: Boolean,
+)
 
 /** One exact ItemStack prototype encoded with Paper's native codec plus a bounded quantity. */
 data class BuilderItemAmount(
@@ -158,6 +164,8 @@ data class BuilderPlan(
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
     val skippedUnsafeBlocks: Int = 0,
+    // Nullable so existing journal records retain the original inventory-free MOVE contract.
+    val moveDeconstruction: BuilderMoveDeconstruction? = null,
 ) {
     fun validated(maxChanges: Int = ABSOLUTE_MAX_CHANGES): BuilderPlan = apply {
         require(changes.size in 1..maxChanges.coerceAtMost(ABSOLUTE_MAX_CHANGES)) {
@@ -166,7 +174,22 @@ data class BuilderPlan(
         require(changes.map { it.position }.toSet().size == changes.size) {
             "Builder-tools plan contains duplicate block positions"
         }
-        changes.forEach(BuilderBlockChange::validated)
+        require(kind == BuilderPlanKind.MOVE || moveDeconstruction == null) {
+            "Only a move may declare deconstructed destination blocks"
+        }
+        val displaced = moveDeconstruction?.positions.orEmpty().toSet()
+        moveDeconstruction?.let {
+            require(displaced.isNotEmpty() && displaced.size == it.positions.size && displaced.size <= changes.size) {
+                "Move deconstruction positions are invalid"
+            }
+            val preimages = changes.associate { change -> change.position to change.beforeBlockData }
+            require(displaced.all { position -> preimages[position]?.substringBefore('[')?.let { it !in AIR_BLOCK_DATA } == true }) {
+                "Move deconstruction must reference occupied change preimages"
+            }
+        }
+        changes.forEach {
+            it.validated(allowUnchanged = it.position in displaced || kind == BuilderPlanKind.UNDO)
+        }
         require(costs.size + rewards.size <= 4_096) { "Builder-tools item entry count is outside its safety bound" }
         require((costs + rewards).sumOf { it.itemBase64.length.toLong() } <= 16_000_000L) {
             "Builder-tools item payload total is outside its safety bound"
@@ -179,11 +202,14 @@ data class BuilderPlan(
             "Builder-tools plan reward is outside its safety bound"
         }
         if (kind == BuilderPlanKind.MOVE) {
-            require(costs.isEmpty() && rewards.isEmpty() && toolDamage == 0) { "A move cannot exchange inventory" }
-            val air = setOf("minecraft:air", "minecraft:cave_air", "minecraft:void_air")
-            fun counts(blockData: (BuilderBlockChange) -> String) = changes.asSequence().map(blockData)
-                .filter { it.substringBefore('[') !in air }.groupingBy { it }.eachCount()
-            require(counts(BuilderBlockChange::beforeBlockData) == counts(BuilderBlockChange::afterBlockData)) {
+            require(costs.isEmpty()) { "A move cannot consume building materials" }
+            require(moveDeconstruction != null || rewards.isEmpty() && toolDamage == 0) { "An empty-target move cannot exchange inventory" }
+            require(toolDamage <= displaced.size) { "Move tool wear must belong to deconstructed targets" }
+            fun counts(blocks: Sequence<String>) = blocks.filter { it.substringBefore('[') !in AIR_BLOCK_DATA }
+                .groupingBy { it }.eachCount()
+            val before = changes.asSequence().filter { it.position !in displaced }.map { it.beforeBlockData }
+            val after = changes.asSequence().map { it.afterBlockData }
+            require(counts(before) == counts(after)) {
                 "A move must conserve exact block states"
             }
         }
@@ -223,6 +249,7 @@ data class BuilderPlan(
     }
 
     companion object {
+        private val AIR_BLOCK_DATA = setOf("minecraft:air", "minecraft:cave_air", "minecraft:void_air")
         const val ABSOLUTE_MAX_IMMEDIATE_CHANGES = 10_000
         const val ABSOLUTE_MAX_CHANGES = 100_000
         const val ABSOLUTE_MAX_ITEMS = 2_000_000L

@@ -1495,6 +1495,66 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("move into occupied targets cancels cleanly then commits and undoes exact preimages") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("MoveOccupied", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, -90f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.DIAMOND_BLOCK
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            val before = player.inventory.contents.map { it?.clone() }
+
+            journey.command(player, "builder move") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).moveDeconstruction?.positions shouldBe
+                listOf(BuilderBlockPos(world.uid, 1, 64, 0))
+            journey.command(player, "builder cancel") shouldBe true
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIAMOND_BLOCK
+            player.inventory.contents.toList() shouldBe before
+
+            journey.command(player, "builder move") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.AIR &&
+                world.getBlockAt(1, 64, 0).type == Material.STONE }
+            journey.command(player, "builder undo") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE &&
+                world.getBlockAt(1, 64, 0).type == Material.DIAMOND_BLOCK }
+            player.inventory.contents.toList() shouldBe before
+        }
+    }
+
+    test("move rechecks visually unchanged occupied targets and restores interrupted preimages") {
+        strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
+            val player = journey.builder("MoveSameState", GameMode.CREATIVE)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5, -90f, 0f))
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            (0..1).forEach { world.getBlockAt(it, 64, 0).type = Material.STONE }
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 0, 64, 0)
+            journey.command(player, "builder move") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).changes.size shouldBe 2
+            world.getBlockAt(1, 64, 0).type = Material.DIRT
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE }
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT
+
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+            journey.command(player, "builder move") shouldBe true
+            val records = journey.seedInterruptedPlans(listOf(player), appliedChanges = 1)
+            records.single().plan.moveDeconstruction?.positions shouldBe listOf(BuilderBlockPos(world.uid, 1, 64, 0))
+            world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
+            journey.restartForRecovery()
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.STONE }
+            world.getBlockAt(1, 64, 0).type shouldBe Material.STONE
+            journey.activeLeases() shouldBe 0
+        }
+    }
+
     test("move panel waits for a fresh main hand direction click before preview and confirmation") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("MoveDirection", GameMode.CREATIVE)

@@ -987,6 +987,42 @@ class BuilderToolsDomainTest : FunSpec({
         }
     }
 
+    test("journal loads legacy MOVE records and round trips occupied MOVE preimages and frozen output") {
+        val root = Files.createTempDirectory("builder-move-journal-")
+        try {
+            val oldId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+            val directory = Files.createDirectories(root.resolve("data/builder-tools-journal"))
+            Files.writeString(directory.resolve("$oldId.json"), """
+                {"schemaVersion":1,"operationId":"$oldId","playerId":"$playerId","playerName":"LegacyMove",
+                 "phase":"COMMITTED","createdAtMillis":1000,"updatedAtMillis":1002,"committedAtMillis":1002,
+                 "inventoryBefore":{"payloadBase64":"AAAA","sha256":"${"a".repeat(64)}"},
+                 "plan":{"id":"$oldId","playerId":"$playerId","kind":"MOVE","costs":[],"rewards":[],
+                  "toolDamage":0,"createdAtMillis":1000,"expiresAtMillis":31000,"skippedUnsafeBlocks":0,
+                  "changes":[
+                   {"position":{"worldId":"$worldId","x":0,"y":64,"z":0},"beforeBlockData":"minecraft:stone","afterBlockData":"minecraft:air"},
+                   {"position":{"worldId":"$worldId","x":1,"y":64,"z":0},"beforeBlockData":"minecraft:air","afterBlockData":"minecraft:stone"}]}}
+            """.trimIndent())
+            val store = BuilderJournalStore(root, 64)
+            val legacy = store.loadAll().single().value
+            legacy.plan.moveDeconstruction shouldBe null
+            legacy.plan.validated() shouldBe legacy.plan
+
+            val currentId = UUID.randomUUID()
+            val target = legacy.plan.changes[1]
+            val plan = legacy.plan.copy(id = currentId,
+                changes = listOf(legacy.plan.changes[0], target.copy(beforeBlockData = target.afterBlockData)),
+                rewards = listOf(BuilderItemAmount("AAAA", "minecraft:cobblestone", 1)),
+                toolFingerprintBase64 = "BBBB", toolDamage = 1,
+                moveDeconstruction = BuilderMoveDeconstruction(listOf(target.position), false))
+            val current = legacy.copy(operationId = currentId, plan = plan).validated()
+            store.commit(current) shouldBe current
+            store.loadAll().map { it.value }.toSet() shouldBe setOf(legacy, current)
+            BuilderUndoRules.exchangeFor(plan) shouldBe BuilderUndoExchange(plan.rewards, emptyList())
+        } finally {
+            Files.walk(root).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists) }
+        }
+    }
+
     test("undo reverses ordinary materials without reissuing a consumed build book") {
         val now = 1_800_000_000_000L
         val change = BuilderBlockChange(

@@ -39,6 +39,15 @@ internal interface BuilderDeconstructionHost : BuilderPlanningTasks {
     fun fail(path: String): Nothing
 }
 
+internal data class BuilderDeconstructionCapture(
+    val changes: List<BuilderBlockChange>,
+    val rewards: List<BuilderItemAmount>,
+    val toolFingerprint: String?,
+    val toolDamage: Int,
+    val toolBypassUsed: Boolean,
+    val skippedUnsafeBlocks: Int,
+)
+
 /**
  * Main-thread owner of bounded deconstruction planning.
  *
@@ -67,9 +76,44 @@ internal class BuilderDeconstructionController(
         val selection = host.requiredSelection(player)
         val world = host.world(selection.worldId)
         val gameMode = player.gameMode
-        val usesInventory = BuilderGameModePolicy.usesInventory(gameMode)
         val current = { isCurrent() && player.isOnline && player.world.uid == selection.worldId &&
             player.gameMode == gameMode && host.requiredSelection(player) == selection }
+        return capture(player, world, selection.positionsTopDown().iterator(), current).thenCompose { captured ->
+            if (captured.changes.isEmpty()) host.fail("errors.nothing-to-change")
+            host.onMain {
+                requireCurrentBuilderPlanning(current)
+                host.createPlanAsync(player, captured.changes, captured.rewards, captured.toolFingerprint,
+                    captured.toolDamage, captured.skippedUnsafeBlocks)
+            }.thenCompose { it }
+        }
+    }
+
+    /** MOVE consumes this same tool/drop pipeline for exact occupied target preimages. */
+    fun captureBlocks(
+        player: Player,
+        before: Map<BuilderBlockPos, String>,
+        isCurrent: () -> Boolean,
+    ): CompletableFuture<BuilderDeconstructionCapture> {
+        host.ensurePermission(player)
+        require(before.isNotEmpty() && before.size <= maximumChanges)
+        val worldId = before.keys.first().worldId
+        return host.compute {
+            require(before.keys.all { it.worldId == worldId })
+            before.keys.sortedWith(compareByDescending<BuilderBlockPos> { it.y }.thenBy { it.x }.thenBy { it.z })
+        }.thenCompose { positions -> host.onMain {
+            requireCurrentBuilderPlanning(isCurrent)
+            capture(player, host.world(worldId), positions.iterator(), isCurrent, before)
+        }.thenCompose { it } }
+    }
+
+    private fun capture(
+        player: Player,
+        world: World,
+        positions: Iterator<BuilderBlockPos>,
+        current: () -> Boolean,
+        expectedBefore: Map<BuilderBlockPos, String> = emptyMap(),
+    ): CompletableFuture<BuilderDeconstructionCapture> {
+        val usesInventory = BuilderGameModePolicy.usesInventory(player.gameMode)
         val canBypassTool = usesInventory && host.canDeconstructWithoutTool(player)
         val tools = if (usesInventory) pooledTools(player) else emptyList()
         val usesTools = tools.any(PooledTool::available)
@@ -77,7 +121,6 @@ internal class BuilderDeconstructionController(
         val changes = mutableListOf<BuilderBlockChange>()
         val refunds = mutableListOf<BuilderItemAmount>()
         val prototypes = BuilderItemCodec.PrototypeCache()
-        val positions = selection.positionsTopDown().iterator()
         var pendingDrops = emptyList<ItemStack>().iterator()
         val air = Material.AIR.createBlockData().asString
         var skippedUnsafe = 0
@@ -93,8 +136,10 @@ internal class BuilderDeconstructionController(
             val position = positions.next()
             if (!world.isChunkLoaded(position.x shr 4, position.z shr 4)) host.fail("errors.chunk-unloaded")
             val block = world.getBlockAt(position.x, position.y, position.z)
+            if (expectedBefore[position]?.let { it != block.blockData.asString } == true) host.fail("errors.expired")
             if (block.type.isAir || safety.isReplaceable(block)) return@capture false
             if (!safety.isSafeExisting(block)) {
+                if (position in expectedBefore) host.fail("errors.expired")
                 skippedUnsafe += 1
                 return@capture false
             }
@@ -110,7 +155,6 @@ internal class BuilderDeconstructionController(
             if (changes.size > maximumChanges) host.fail("errors.selection-too-large")
             false
         }.thenCompose {
-            if (changes.isEmpty()) host.fail("errors.nothing-to-change")
             // Storage contains at most 36 tools; native item encoding stays in its own capture steps.
             val remainingTools = tools.iterator()
             val toolUses = mutableListOf<BuilderPooledToolUse>()
@@ -125,18 +169,18 @@ internal class BuilderDeconstructionController(
                     val fingerprint = toolUses.takeIf { it.isNotEmpty() }?.let { uses ->
                         BuilderPooledToolCodec.encode(BuilderPooledToolPlan(uses, toolBypassUsed))
                     }
-                    Triple(rewards, fingerprint, toolDamage)
+                    BuilderDeconstructionCapture(changes, rewards, fingerprint, toolDamage, toolBypassUsed, skippedUnsafe)
                 }
             }
-        }.thenCompose { (rewards, fingerprint, toolDamage) ->
+        }.thenCompose { captured ->
             host.onMain {
                 requireCurrentBuilderPlanning(current)
                 // The inventory has 36 slots; with no costs, a non-fitting reward stops this simulation immediately.
-                if (!BuilderInventory.canApply(player, emptyList(), rewards, fingerprint, toolDamage)) {
+                if (!BuilderInventory.canApply(player, emptyList(), captured.rewards, captured.toolFingerprint, captured.toolDamage)) {
                     host.fail("errors.inventory")
                 }
-                host.createPlanAsync(player, changes, rewards, fingerprint, toolDamage, skippedUnsafe)
-            }.thenCompose { it }
+                captured
+            }
         }
     }
 
@@ -189,7 +233,9 @@ internal object BuilderDeconstructionDrops {
 
 internal object BuilderDeconstructionToolPolicy {
     fun requiresBypass(gameMode: org.bukkit.GameMode, plan: BuilderPlan): Boolean {
-        if (plan.kind != BuilderPlanKind.DECONSTRUCT || !BuilderGameModePolicy.usesInventory(gameMode)) return false
+        if (!BuilderGameModePolicy.usesInventory(gameMode)) return false
+        if (plan.kind == BuilderPlanKind.MOVE) return plan.moveDeconstruction?.toolBypassUsed == true
+        if (plan.kind != BuilderPlanKind.DECONSTRUCT) return false
         val fingerprint = plan.toolFingerprintBase64 ?: return true
         return BuilderPooledToolCodec.isPooled(fingerprint) && BuilderPooledToolCodec.decode(fingerprint).bypassUsed
     }

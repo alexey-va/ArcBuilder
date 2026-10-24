@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import org.bukkit.Bukkit
+import org.bukkit.GameMode
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.World
@@ -13,6 +14,9 @@ import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.BlockData
 import org.bukkit.block.data.type.Door
 import org.bukkit.entity.Player
+import org.bukkit.enchantments.Enchantment
+import org.bukkit.inventory.ItemStack
+import org.bukkit.inventory.meta.Damageable
 import org.bukkit.plugin.Plugin
 import org.bukkit.util.Vector
 import ru.arc.paper.testing.MockBukkitTestRuntime
@@ -138,21 +142,116 @@ class BuilderMoveControllerTest : FunSpec({
         }
     }
 
-    test("an occupied destination outside the movable source rejects the whole plan") {
+    test("occupied destinations use deconstruction tools and exact drops while overlap stays conserved") {
         MockBukkitTestRuntime.open().use { paper ->
             val world = paper.addSimpleWorld("move-occupied")
             val player = paper.addPlayer("MoveOccupied")
             player.teleport(Location(world, 0.5, 64.0, 3.5))
-            val harness = MoveHarness(paper.createSimplePlugin("MoveOccupied"), world)
+            val named = ItemStack(Material.DIAMOND, 3).apply {
+                editMeta { it.displayName(net.kyori.adventure.text.Component.text("Exact target drops")) }
+            }
+            val harness = MoveHarness(paper.createSimplePlugin("MoveOccupied"), world, drops = { _, tool ->
+                checkNotNull(tool).containsEnchantment(Enchantment.SILK_TOUCH) shouldBe false
+                tool.getEnchantmentLevel(Enchantment.FORTUNE) shouldBe 3
+                listOf(named.clone())
+            })
+            harness.select(0, 64, 0, 1, 64, 0)
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.DIRT
+            world.getBlockAt(2, 64, 0).type = Material.DIAMOND_BLOCK
+            player.inventory.setItem(10, ItemStack(Material.DIAMOND_PICKAXE).apply {
+                addUnsafeEnchantment(Enchantment.SILK_TOUCH, 1)
+                addUnsafeEnchantment(Enchantment.FORTUNE, 3)
+            })
+
+            val plan = harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning()
+
+            plan.changes.associate { it.position.x to it.afterBlockData } shouldBe mapOf(
+                0 to "minecraft:air", 1 to "minecraft:stone", 2 to "minecraft:dirt",
+            )
+            plan.rewards.single().amount shouldBe 3
+            BuilderItemCodec.decodePrototype(plan.rewards.single().itemBase64).isSimilar(named) shouldBe true
+            plan.toolDamage shouldBe 1
+            BuilderPooledToolCodec.decode(checkNotNull(plan.toolFingerprintBase64)).uses.single().slot shouldBe 10
+            plan.moveDeconstruction shouldBe BuilderMoveDeconstruction(listOf(BuilderBlockPos(world.uid, 2, 64, 0)), false)
+            BuilderUndoRules.exchangeFor(plan) shouldBe BuilderUndoExchange(plan.rewards, emptyList())
+            (player.inventory.getItem(10)?.itemMeta as Damageable).damage shouldBe 0
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT
+            world.getBlockAt(2, 64, 0).type shouldBe Material.DIAMOND_BLOCK
+        }
+    }
+
+    test("identical occupied target states remain journaled and require declared deconstruction") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("move-identical")
+            val player = paper.addPlayer("MoveIdentical")
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.IRON_PICKAXE))
+            val harness = MoveHarness(paper.createSimplePlugin("MoveIdentical"), world)
+            harness.select(0, 64, 0, 0, 64, 0)
+            (0..1).forEach { world.getBlockAt(it, 64, 0).type = Material.STONE }
+
+            val plan = harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning()
+
+            plan.changes.size shouldBe 2
+            plan.changes.single { it.position.x == 1 }.let { it.beforeBlockData shouldBe it.afterBlockData }
+            plan.rewards.single().amount shouldBe 1
+            plan.validated() shouldBe plan
+            shouldThrow<IllegalArgumentException> { plan.copy(moveDeconstruction = null).validated() }
+            shouldThrow<IllegalArgumentException> { plan.copy(changes = plan.changes.take(1)).validated() }
+            val inverse = plan.copy(kind = BuilderPlanKind.UNDO, sourceRecordId = plan.id,
+                changes = plan.changes.asReversed().map { BuilderBlockChange(it.position, it.afterBlockData, it.beforeBlockData) },
+                costs = plan.rewards, rewards = emptyList(), toolFingerprintBase64 = null, toolDamage = 0, moveDeconstruction = null)
+            inverse.validated() shouldBe inverse
+        }
+    }
+
+    test("occupied move obeys tool capacity inventory capacity permission and bypass rules") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("move-material-guards")
+            val player = paper.addPlayer("MoveGuards")
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            val harness = MoveHarness(paper.createSimplePlugin("MoveGuards"), world)
+            harness.select(0, 64, 0, 0, 64, 0)
+            (0..1).forEach { world.getBlockAt(it, 64, 0).type = Material.STONE }
+            shouldThrow<MoveFailure> { harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning() }
+                .path shouldBe "errors.tool"
+            player.inventory.storageContents = Array(36) { ItemStack(Material.DIRT, 64) }
+            player.inventory.setItem(10, ItemStack(Material.IRON_PICKAXE))
+            shouldThrow<MoveFailure> { harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning() }
+                .path shouldBe "errors.inventory"
+            player.inventory.clear()
+            harness.withoutToolPermission = true
+            val bypass = harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning()
+            BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, bypass) shouldBe true
+            bypass.toolDamage shouldBe 0
+            harness.deniedFeature = BuilderFeature.DECONSTRUCT
+            shouldThrow<MoveFailure> { harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning() }
+                .path shouldBe "errors.no-permission"
+            harness.createdPlans shouldBe 1
+            (0..1).forEach { world.getBlockAt(it, 64, 0).type shouldBe Material.STONE }
+        }
+    }
+
+    test("replaceable plants have no drops or tool wear and creative deconstruction yields no items") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("move-replaceable")
+            val player = paper.addPlayer("MoveReplaceable")
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            val harness = MoveHarness(paper.createSimplePlugin("MoveReplaceable"), world)
             harness.select(0, 64, 0, 0, 64, 0)
             world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.SHORT_GRASS
+            val plant = harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning()
+            plant.rewards shouldBe emptyList()
+            plant.toolDamage shouldBe 0
+            BuilderDeconstructionToolPolicy.requiresBypass(player.gameMode, plant) shouldBe false
+            player.gameMode = GameMode.CREATIVE
             world.getBlockAt(1, 64, 0).type = Material.DIAMOND_BLOCK
-
-            shouldThrow<MoveFailure> { harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning() }
-                .path shouldBe "errors.move-occupied"
-            harness.createdPlans shouldBe 0
-            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
-            world.getBlockAt(1, 64, 0).type shouldBe Material.DIAMOND_BLOCK
+            val creative = harness.controller.plan(player, BlockFace.EAST).awaitBuilderPlanning()
+            creative.rewards shouldBe emptyList()
+            creative.toolDamage shouldBe 0
         }
     }
 
@@ -256,6 +355,31 @@ class BuilderMoveControllerTest : FunSpec({
             harness.createdPlans shouldBe 0
         }
     }
+
+    test("selection changes cancel sliced target drops without wearing tools or modifying either block") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("move-target-cancel")
+            val player = paper.addPlayer("MoveTargetCancel")
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            player.inventory.setItemInMainHand(ItemStack(Material.IRON_PICKAXE))
+            val tasks = QueuedBuilderPlanningTasks()
+            var dropsRead = false
+            val harness = MoveHarness(paper.createSimplePlugin("MoveTargetCancel"), world, tasks = tasks,
+                drops = { _, _ -> dropsRead = true; List(200) { ItemStack(Material.COBBLESTONE) } })
+            harness.select(0, 64, 0, 0, 64, 0)
+            (0..1).forEach { world.getBlockAt(it, 64, 0).type = Material.STONE }
+            val pending = harness.controller.plan(player, BlockFace.EAST)
+            repeat(3) { tasks.tick(); tasks.runComputations() }
+            dropsRead shouldBe true
+            pending.isDone shouldBe false
+            harness.select(0, 64, 1, 0, 64, 1)
+            tasks.tick()
+            shouldThrow<java.util.concurrent.CancellationException> { pending.awaitBuilderPlanning() }
+            harness.createdPlans shouldBe 0
+            (player.inventory.itemInMainHand.itemMeta as Damageable).damage shouldBe 0
+            (0..1).forEach { world.getBlockAt(it, 64, 0).type shouldBe Material.STONE }
+        }
+    }
 })
 
 private class MoveHarness(
@@ -263,6 +387,7 @@ private class MoveHarness(
     private val world: World,
     maximumChanges: Int = 64,
     private val tasks: BuilderPlanningTasks = ImmediateBuilderPlanningTasks,
+    drops: (Block, ItemStack?) -> Collection<ItemStack> = { block, _ -> listOfNotNull(BuilderPlacementCost.itemOrNull(block.blockData)) },
 ) {
     private var selection: BuilderSelection? = null
     val permissionChecks = mutableListOf<BuilderFeature>()
@@ -270,10 +395,37 @@ private class MoveHarness(
     var protectedPosition: BuilderBlockPos? = null
     var mutableChecks = 0
     var createdPlans = 0
+    var withoutToolPermission = false
+    var deniedFeature: BuilderFeature? = null
+    private val safety = BuilderBlockSafety(plugin, setOf("AIR", "SHORT_GRASS"))
+    private val deconstruction = BuilderDeconstructionController(safety, maximumChanges,
+        object : BuilderDeconstructionHost, BuilderPlanningTasks by tasks {
+            override fun ensurePermission(player: Player) {
+                if (deniedFeature == BuilderFeature.DECONSTRUCT) fail("errors.no-permission")
+            }
+            override fun canDeconstructWithoutTool(player: Player) = withoutToolPermission
+            override fun requiredSelection(player: Player) = checkNotNull(selection)
+            override fun world(worldId: UUID): World = checkNotNull(Bukkit.getWorld(worldId))
+            override fun ensureMutable(player: Player, block: Block) {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
+                if (BuilderBlockPos(world.uid, block.x, block.y, block.z) == protectedPosition) fail("errors.protection")
+            }
+            override fun createPlan(player: Player, changes: List<BuilderBlockChange>, rewards: List<BuilderItemAmount>,
+                toolFingerprint: String?, toolDamage: Int, skippedUnsafeBlocks: Int): BuilderPlan = error("MOVE uses capture only")
+            override fun fail(path: String): Nothing = throw MoveFailure(path)
+        }, isPreferredTool = { _, tool -> tool.type.name.endsWith("_PICKAXE") },
+        blockDrops = { block, tool, _ ->
+            (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
+            drops(block, tool)
+        },
+    )
     val controller = BuilderMoveController(
-        BuilderBlockSafety(plugin, setOf("AIR", "SHORT_GRASS")), maximumChanges,
-        object : BuilderPlanningHost, BuilderPlanningTasks by tasks {
-            override fun ensurePermission(player: Player, feature: BuilderFeature) { permissionChecks += feature }
+        safety, maximumChanges,
+        object : BuilderMoveHost, BuilderPlanningTasks by tasks {
+            override fun ensurePermission(player: Player, feature: BuilderFeature) {
+                permissionChecks += feature
+                if (feature == deniedFeature) fail("errors.no-permission")
+            }
             override fun requiredSelection(player: Player) = checkNotNull(selection)
             override fun world(worldId: UUID): World = checkNotNull(Bukkit.getWorld(worldId))
             override fun placementData(material: Material): BlockData = material.createBlockData()
@@ -295,8 +447,23 @@ private class MoveHarness(
                 return BuilderPlan(UUID.randomUUID(), player.uniqueId, kind, changes, costs, rewards,
                     createdAtMillis = 1L, expiresAtMillis = 2L, skippedUnsafeBlocks = skippedUnsafeBlocks).validated(maximumChanges)
             }
+            override fun createMovePlanAsync(player: Player, changes: List<BuilderBlockChange>,
+                deconstruction: BuilderDeconstructionCapture?, displaced: List<BuilderBlockPos>,
+                skippedUnsafeBlocks: Int): java.util.concurrent.CompletableFuture<BuilderPlan> {
+                (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
+                createdPlans++
+                return java.util.concurrent.CompletableFuture.completedFuture(BuilderPlan(
+                    UUID.randomUUID(), player.uniqueId, BuilderPlanKind.MOVE, changes, emptyList(), deconstruction?.rewards.orEmpty(),
+                    toolFingerprintBase64 = deconstruction?.toolFingerprint, toolDamage = deconstruction?.toolDamage ?: 0,
+                    createdAtMillis = 1L, expiresAtMillis = 2L, skippedUnsafeBlocks = skippedUnsafeBlocks,
+                    moveDeconstruction = displaced.takeIf { it.isNotEmpty() }?.let {
+                        BuilderMoveDeconstruction(it, deconstruction?.toolBypassUsed == true)
+                    },
+                ).validated(maximumChanges))
+            }
             override fun fail(path: String): Nothing = throw MoveFailure(path)
         },
+        deconstruction,
     )
 
     fun select(x1: Int, y1: Int, z1: Int, x2: Int, y2: Int, z2: Int) {

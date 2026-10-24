@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "title": "ArcBuilder occupied MOVE reuses deconstruction material flows",
+  "assumptions": [
+    "Low/base/high are illustrative 100/1000/10000 displaced stone blocks per player-day, 1/5/20 participants, 100/500/2500 displaced blocks per active hour and 1/2/4 active hours. Not telemetry, a daily cap or a measured practical rate.",
+    "Separate units: vault, tokens, player XP, cobblestone items and planned durability points. No conversion or native random-drop expectation is invented.",
+    "MOVE previously rejected occupied targets. The existing DECONSTRUCT then MOVE route has the same drops and wear for identical targets and tools; the new path merely combines it.",
+    "Tool-free permission, no-Silk-Touch drops, native Fortune, inventory capacity, safety, protection and hourly/change limits are unchanged. Creative has no item or durability output.",
+    "Source blocks conserve exact states; displaced targets are removed once. Frozen rewards and exact preimages share the existing journal/rollback/recovery transaction; undo consumes rewards and preserves spent wear.",
+    "MOVE does not emit construction rewards. Current SELL and future SELL-to-contract transition remain unchanged. No hypothetical SELL/SHADOW income, accumulation time or all-account farm rate is asserted.",
+    "Existing hourly allowance H is unchanged, but a simple N-block source with N occupied non-overlapping targets costs 3N counted changes via DECONSTRUCT then MOVE and 2N via combined MOVE: floor(H/3) versus floor(H/2) targets. This can raise the accounting ceiling by 1.5x, without increasing drops per removed block; actual throughput is unmeasured."
+  ],
+  "participants": [
+    1,
+    5,
+    20
+  ],
+  "currencies": {
+    "vault": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "move_direct_vault",
+          "kind": "mint",
+          "source": "BuilderMoveController and BuilderOperationCommittedEventFactory",
+          "basis": "No direct money, token or player XP issuance in MOVE before or after.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "tokens": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "move_direct_tokens",
+          "kind": "mint",
+          "source": "BuilderMoveController and BuilderOperationCommittedEventFactory",
+          "basis": "No direct money, token or player XP issuance in MOVE before or after.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "player_xp": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "move_direct_player_xp",
+          "kind": "mint",
+          "source": "BuilderMoveController and BuilderOperationCommittedEventFactory",
+          "basis": "No direct money, token or player XP issuance in MOVE before or after.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "cobblestone_item": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "occupied_move_cobblestone_item",
+          "kind": "item",
+          "source": "BuilderDeconstructionController.captureBlocks",
+          "basis": "Deterministic suitable-tool stone example; one removed destination block backs one cobblestone and one planned durability point. Existing DECONSTRUCT then MOVE has the same material flow.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "1",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "1",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "tool_durability_point": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "occupied_move_tool_durability_point",
+          "kind": "item",
+          "source": "BuilderDeconstructionController.captureBlocks",
+          "basis": "Deterministic suitable-tool stone example; one removed destination block backs one cobblestone and one planned durability point. Existing DECONSTRUCT then MOVE has the same material flow.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "1",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "1",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "prices": []
+}
