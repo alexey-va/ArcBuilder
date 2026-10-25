@@ -171,6 +171,7 @@ class DisplayEditorAxesTest : FunSpec({
 /** Exercise the dependency's actual metadata encoder, not a duplicate of its pulse logic. */
 private class CompiledAxisMetadataEncoder {
     private val viewerType = Class.forName("ru.arc.paper.display.PacketDisplayViewer")
+    private val carrierType = Class.forName("ru.arc.paper.display.PacketDisplayCarrier")
     private val frameType = Class.forName("ru.arc.paper.display.PacketDisplayFrame")
     private val attachmentType = Class.forName("ru.arc.paper.display.PacketDisplayAttachment")
     private val backendType = Class.forName("ru.arc.paper.display.PacketDisplayChannelBackend")
@@ -182,8 +183,9 @@ private class CompiledAxisMetadataEncoder {
         passengerType.getConstructor().newInstance(),
     )
     private val encode = attachmentType.getDeclaredMethod("metadataValues", frameType, frameType).apply { isAccessible = true }
+    private val captureFrame = PacketBlockDisplay::class.java.getMethod("frame\$arc_core_paper", viewerType, carrierType)
 
-    fun frame(display: PacketBlockDisplay): Any = display.javaClass.getMethod("frame\$arc_core_paper", viewerType).invoke(display, null)
+    fun frame(display: PacketBlockDisplay): Any = captureFrame.invoke(display, null, null)
 
     @Suppress("UNCHECKED_CAST")
     fun delta(before: Any?, after: Any): Map<Int, Any?> =
