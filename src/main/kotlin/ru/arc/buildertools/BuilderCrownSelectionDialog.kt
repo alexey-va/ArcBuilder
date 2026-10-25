@@ -184,12 +184,6 @@ internal class BuilderCrownSelectionDialog(
                 ),
             ),
             buttons = buttons,
-            exitButton = PaperDialogButton(
-                id = CANCEL_ACTION,
-                label = text("cancel"),
-                width = 200,
-                onClick = {},
-            ),
             columns = 2,
         )
         dialogs.open(
@@ -236,6 +230,5 @@ internal class BuilderCrownSelectionDialog(
         val THICKNESS_INPUT = PaperDialogInputId.of("thickness")
         val MATERIAL_ACTION = PaperDialogActionId.of("material")
         val PREVIEW_ACTION = PaperDialogActionId.of("preview")
-        val CANCEL_ACTION = PaperDialogActionId.of("cancel")
     }
 }

@@ -493,8 +493,9 @@ locales:
       find: '<#92bed8>Найти'
       no-results: '<#e8dfd2>Блоки не найдены. Попробуй другое название.'
       page: '<#e8dfd2>Страница <current> из <total>'
-      previous: '<white>\<'
-      next: '<white>>'
+      previous: '<#92bed8>Предыдущая'
+      next: '<#92bed8>Следующая'
+      recent: '<#e8dfd2>Недавно использован'
       back: '<white>Назад'
     selection-panel:
       selection: '<#e8dfd2><x> × <y> × <z><newline><white>ЛКМ / ПКМ — выбрать действие'
@@ -526,8 +527,8 @@ locales:
       title: '<#d48763>Настроить крону'
       body: '<#e8dfd2>Область <x> × <y> × <z> · толщина кроны <thickness> блока. Занятые блоки сохраняются.'
       thickness-label: "<hover:show_text:'Расстояние от выделения до внешнего края кроны.'><white>Толщина / радиус</hover>"
-      density-option: '<#92bed8><density>'
-      density-selected: '<#2bba43><density> ✓'
+      density-option: '<white>○ <density>'
+      density-selected: '<#9bd48d>✔ <density>'
       density-help: "<hover:show_text:'Воздушная крона оставляет больше просветов; густая — меньше.'><#e8dfd2>Плотность листьев</hover>"
       material-button: '<#d48763>Листва: <material>'
       material-help: "<hover:show_text:'Выбери один тип листвы для всей новой кроны.'><#e8dfd2>Материал листвы</hover>"
@@ -1642,8 +1643,9 @@ locales:
       find: '<#92bed8>Find'
       no-results: '<#e8dfd2>No matching blocks. Try another name.'
       page: '<#e8dfd2>Page <current> of <total>'
-      previous: '<white>\<'
-      next: '<white>>'
+      previous: '<#92bed8>Previous'
+      next: '<#92bed8>Next'
+      recent: '<#e8dfd2>Recently used'
       back: '<white>Back'
     selection-panel:
       selection: '<#e8dfd2><x> × <y> × <z><newline><white>Left / right click to choose'
@@ -1675,8 +1677,8 @@ locales:
       title: '<#d48763>Set up crown'
       body: '<#e8dfd2>Selection <x> × <y> × <z> · foliage thickness <thickness>. Existing blocks are preserved.'
       thickness-label: "<hover:show_text:'Distance from the selection to the outer crown edge.'><white>Thickness / radius</hover>"
-      density-option: '<#92bed8><density>'
-      density-selected: '<#2bba43><density> ✓'
+      density-option: '<white>○ <density>'
+      density-selected: '<#9bd48d>✔ <density>'
       density-help: "<hover:show_text:'Airy foliage leaves more gaps; dense foliage leaves fewer.'><#e8dfd2>Foliage density</hover>"
       material-button: '<#d48763>Leaves: <material>'
       material-help: "<hover:show_text:'Choose one foliage type for the whole new crown.'><#e8dfd2>Leaf material</hover>"

@@ -25,10 +25,17 @@ internal fun exportBuilderDialog(id: String, screen: PaperDialogScreen) {
         content["$key-tooltip"] = legacy.serialize(value.tooltip)
         return mapOf("id" to key, "text-key" to key, "tooltip-key" to "$key-tooltip", "width" to value.width)
     }
+    val inputs = screen.inputs.map { value ->
+        val key = value.id.value
+        content["$key-label"] = legacy.serialize(value.label)
+        content["$key-initial"] = value.initial
+        mapOf("id" to key, "label-key" to "$key-label", "initial-key" to "$key-initial", "width" to value.width)
+    }
     val dialog = mapOf("id" to id, "source" to id, "format" to "reference-multi-action", "name-key" to "title",
         "columns" to screen.columns, "body" to body, "buttons" to screen.buttons.map(::button),
         "exit-button" to screen.exitButton?.let(::button), "viewport" to listOf(640, 360),
-        "variants" to listOf(mapOf("id" to "example")))
+        "variants" to listOf(mapOf("id" to "example"))) +
+        if (inputs.isEmpty()) emptyMap() else mapOf("inputs" to inputs)
     val numbers = screen.numberInputs.map { mapOf("id" to it.id.value,
         "label" to legacy.serialize(it.label), "start" to it.start, "end" to it.end,
         "initial" to it.initial, "step" to it.step, "width" to it.width) }
@@ -36,6 +43,7 @@ internal fun exportBuilderDialog(id: String, screen: PaperDialogScreen) {
     Files.createDirectories(out)
     val sourceHashes = listOf(
         "src/main/kotlin/ru/arc/buildertools/BuilderCrownSelectionDialog.kt",
+        "src/main/kotlin/ru/arc/buildertools/BuilderMaterialPicker.kt",
         "src/main/kotlin/ru/arc/buildertools/BuilderDialogPresentation.kt",
         "src/main/kotlin/ru/arc/buildertools/display/DisplayEditorMenu.kt",
         "src/main/resources/modules/builder-tools.yml",

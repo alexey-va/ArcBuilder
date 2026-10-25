@@ -17,6 +17,7 @@ import ru.arc.paper.menu.PaperDialogActionId
 import ru.arc.paper.menu.PaperDialogBody
 import ru.arc.paper.menu.PaperDialogButton
 import ru.arc.paper.menu.PaperDialogInputId
+import ru.arc.paper.menu.PaperDialogNavigation
 import ru.arc.paper.menu.PaperDialogRuntime
 import ru.arc.paper.menu.PaperDialogScreen
 import ru.arc.paper.menu.PaperDialogTextInput
@@ -179,7 +180,10 @@ internal class BuilderMaterialPicker(
                     PaperDialogButton(
                         id = PaperDialogActionId.of("material_$index"),
                         label = choiceLabel(player, material, material in recent),
-                        tooltip = BuilderMaterialPresentation.label(player, material),
+                        tooltip = BuilderMaterialPresentation.label(player, material).let { label ->
+                            if (material in recent) label.append(Component.newline())
+                                .append(messages.render("material-picker.recent", locale)) else label
+                        },
                         width = BUTTON_WIDTH,
                         onClick = { context ->
                             if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
@@ -199,7 +203,7 @@ internal class BuilderMaterialPicker(
                 add(
                     PaperDialogButton(
                         id = PREVIOUS_ACTION,
-                        label = Component.text("<"),
+                        label = messages.render("material-picker.previous", locale),
                         width = BUTTON_WIDTH,
                         onClick = { context ->
                             if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
@@ -219,7 +223,7 @@ internal class BuilderMaterialPicker(
                 add(
                     PaperDialogButton(
                         id = NEXT_ACTION,
-                        label = Component.text(">"),
+                        label = messages.render("material-picker.next", locale),
                         width = BUTTON_WIDTH,
                         onClick = { context ->
                             if (!validAction(player, flow, screen, revision)) return@PaperDialogButton
@@ -253,12 +257,6 @@ internal class BuilderMaterialPicker(
                 ),
             )
         }
-        val back = PaperDialogButton(
-            id = BACK_ACTION,
-            label = messages.render("material-picker.back", locale),
-            width = 200,
-            onClick = {},
-        )
         dialogs.open(
             player,
             PaperDialogScreen(
@@ -275,9 +273,14 @@ internal class BuilderMaterialPicker(
                     ),
                 ),
                 buttons = buttons,
-                exitButton = back,
                 columns = 3,
-            ),
+            ).let { dialog ->
+                PaperDialogNavigation.bottom(
+                    dialog,
+                    buttons.firstOrNull { it.id == PREVIOUS_ACTION }?.let { PaperDialogNavigation.previous(it, it.label) },
+                    buttons.firstOrNull { it.id == NEXT_ACTION }?.let { PaperDialogNavigation.next(it, it.label) },
+                )
+            },
             reopen = null,
             onDismiss = { dismiss(playerId, flow, screen) },
         )
@@ -327,9 +330,7 @@ internal class BuilderMaterialPicker(
 
     private fun choiceLabel(player: Player, material: Material, recent: Boolean): Component {
         val color = if (recent) RECENT_COLOR else NamedTextColor.WHITE
-        val marker = if (recent) "↻ " else "○ "
-        return Component.text(marker, color)
-            .append(BuilderMaterialPresentation.label(player, material).color(color))
+        return BuilderMaterialPresentation.label(player, material).color(color)
             .decoration(TextDecoration.ITALIC, false)
     }
 
@@ -353,6 +354,5 @@ internal class BuilderMaterialPicker(
         val SEARCH_ACTION = PaperDialogActionId.of("find")
         val PREVIOUS_ACTION = PaperDialogActionId.of("previous")
         val NEXT_ACTION = PaperDialogActionId.of("next")
-        val BACK_ACTION = PaperDialogActionId.of("back")
     }
 }

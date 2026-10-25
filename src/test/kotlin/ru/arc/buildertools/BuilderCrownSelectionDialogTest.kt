@@ -82,6 +82,13 @@ class BuilderCrownSelectionDialogTest : FunSpec({
                             crown.buttons.map { it.id.value } shouldBe listOf("density_airy", "density_natural", "density_dense", "material", "preview")
                             decorated(crown) shouldBe font.isNotEmpty()
                             exportBuilderDialog("crown-$state$suffix", crown)
+                            if (!long && System.getenv("BUILDER_DIALOG_PREVIEW_OUT") != null) {
+                                harness.click("material", thickness = 3f)
+                                exportBuilderDialog("material-picker-$suffix", harness.screen())
+                                harness.click("material_0")
+                                harness.click("material", thickness = 3f)
+                                exportBuilderDialog("material-picker-recent-$suffix", harness.screen())
+                            }
                         }
                     }
                 }
