@@ -13,17 +13,21 @@ import ru.arc.core.Tasks
 import ru.arc.hooks.HookRegistry
 import ru.arc.paper.sql.PaperSqlServices
 import ru.arc.paper.runtime.PaperPluginRuntime
+import ru.arc.paper.runtime.PaperPluginHotload
 import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
 import java.util.logging.Level
 
 open class ArcBuilderPlugin : JavaPlugin() {
     private var lifecycle: PaperPluginRuntime? = null
+    private val hotload = PaperPluginHotload(this, ::stopRuntime)
 
     /** Observation of detached packet cleanup; start/stop never waits for future Paper ticks. */
     internal fun drained(): CompletableFuture<Unit> = BuilderToolsModule.drained()
 
     override fun onEnable() {
+        hotload.beginGeneration()
+        hotload.register()
         PaperArcRuntime.installScheduling(this)
         val runtime = PaperPluginRuntime(this, "arc-builder").also {
             lifecycle = it
@@ -59,16 +63,33 @@ open class ArcBuilderPlugin : JavaPlugin() {
     }
 
     override fun onDisable() {
-        runCatching { BuilderToolsModule.shutdown() }
-            .onFailure { logger.log(Level.SEVERE, "Could not close Builder Tools", it) }
-        runCatching { HookRegistry.close() }
-        runCatching { lifecycle?.close() }
-            .onFailure { logger.log(Level.SEVERE, "Could not close ArcBuilder lifecycle", it) }
+        hotload.prepare()
+        hotload.close()
+    }
+
+    private fun stopRuntime(): Map<String, CompletableFuture<*>> {
+        var failure: Throwable? = null
+        fun attempt(close: () -> Unit) {
+            try { close() } catch (problem: Throwable) {
+                if (failure == null) failure = problem else failure.addSuppressed(problem)
+                logger.log(Level.SEVERE, "Could not close ArcBuilder", problem)
+            }
+        }
+        attempt { BuilderToolsModule.shutdown() }
+        val nativeDrain = BuilderToolsModule.drained()
+        attempt { HookRegistry.close() }
+        attempt { lifecycle?.close() }
         lifecycle = null
-        BuilderToolsConfiguration.clear()
-        ARC.clear(this)
-        ConfigManager.clear()
-        Tasks.reset()
+        attempt { BuilderToolsConfiguration.clear() }
+        attempt { ARC.clear(this) }
+        attempt { ConfigManager.clear() }
+        attempt { Tasks.reset() }
+        attempt { hotload.retireGameplayRegistrations() }
+        return linkedMapOf(
+            "runtime" to (failure?.let { CompletableFuture.failedFuture<Unit>(it) }
+                ?: CompletableFuture.completedFuture(Unit)),
+            "native" to nativeDrain,
+        )
     }
 
     private fun saveResourceIfMissing(path: String) {
