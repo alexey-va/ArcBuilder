@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "title": "ArcBuilder selective replacement to air, 2026-10-26",
+  "assumptions": [
+    "Before: replacement target AIR is rejected; after: safe selected source blocks can be replaced with AIR. Existing non-air replacement and deconstruction remain available.",
+    "Illustrative low/base/high: 100/500/2500 accepted safe stone blocks per active hour and 1/2/4 hours per day, producing 100/1000/10000 changes per player-day with 1/5/20 participants. These are assumptions, not telemetry, practical maxima or new caps.",
+    "Each accepted survival STONE-to-AIR change returns the existing replacement's one canonical STONE item backed by removal of one world block. It consumes no target item and no tool durability. Creative exchanges no items. No random drops or new BlockBreak/BlockPlace events are introduced.",
+    "Undo consumes the exact original source refunds before restoring exact block preimages; AIR contributes no item debit or refund. Existing protection, unsafe/custom/container/ore exclusions, inventory capacity, change/hour limits, journals and committed physics rules remain authoritative.",
+    "Direct Vault, premium tokens and player XP remain zero separately. Replacing stone with a non-air block already returns that same stone item but consumes a target item. Native DECONSTRUCT may return cobblestone; no equivalence of its drop composition is asserted.",
+    "Current SELL and planned SELL-to-contract transition are unchanged. Potential indirect sale income, native physics drops and actual use frequency are unmeasured; no item/currency exchange rate, accumulation time or SHADOW income is assumed.",
+    "Read-only shared ledger observed 2026-10-26: exact requested window 1792431594878..1793036394880, 3102 records, 27967 operations, 22 players. Classified operation coverage 0.9641005470733365; unclassified records 1004. This ledger does not measure builder item-removal throughput or prove absence of indirect income."
+  ],
+  "participants": [
+    1,
+    5,
+    20
+  ],
+  "currencies": {
+    "vault": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "replace_air_direct_vault",
+          "kind": "mint",
+          "source": "BuilderReplaceController and BuilderOperationCommittedEventFactory",
+          "basis": "No direct currency or XP issuance is added by removal to air.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "tokens": {
+      "minor_per_unit": 100,
+      "flows": [
+        {
+          "id": "replace_air_direct_tokens",
+          "kind": "mint",
+          "source": "BuilderReplaceController and BuilderOperationCommittedEventFactory",
+          "basis": "No direct currency or XP issuance is added by removal to air.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "player_xp": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "replace_air_direct_player_xp",
+          "kind": "mint",
+          "source": "BuilderReplaceController and BuilderOperationCommittedEventFactory",
+          "basis": "No direct currency or XP issuance is added by removal to air.",
+          "before": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "0",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    },
+    "stone_item": {
+      "minor_per_unit": 1,
+      "flows": [
+        {
+          "id": "replace_air_backed_stone_refund",
+          "kind": "item",
+          "source": "BuilderReplaceController and BuilderPlacementCost.itemOrNull",
+          "basis": "Representative one-full-stone-block removal; per-block source item refund is unchanged from existing replacement. Before AIR target was unsupported.",
+          "before": {
+            "enabled": false,
+            "amount_per_event": {
+              "value": "1",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          },
+          "after": {
+            "enabled": true,
+            "amount_per_event": {
+              "value": "1",
+              "unit": "major"
+            },
+            "events_per_player_day": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "prices": []
+}

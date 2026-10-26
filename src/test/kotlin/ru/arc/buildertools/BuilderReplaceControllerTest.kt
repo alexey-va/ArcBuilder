@@ -20,6 +20,58 @@ import ru.arc.paper.testing.MockBukkitTestRuntime
 import java.util.UUID
 
 class BuilderReplaceControllerTest : FunSpec({
+    test("replacing with air removes only the chosen safe material and refunds it without a target cost") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("replace-to-air")
+            val player = paper.addPlayer("RemoveMaterial")
+            player.gameMode = GameMode.SURVIVAL
+            world.getBlockAt(0, 64, 0).type = Material.STONE
+            world.getBlockAt(1, 64, 0).type = Material.STONE
+            world.getBlockAt(2, 64, 0).type = Material.DIRT
+            val harness = ReplaceHarness(paper.createSimplePlugin("ReplaceToAir"), world)
+            harness.select(0, 64, 0, 2, 64, 0)
+
+            val plan = harness.controller.plan(player, Material.STONE, Material.AIR).awaitBuilderPlanning()
+
+            plan.changes.map { it.position.x } shouldBe listOf(0, 1)
+            plan.changes.map { it.afterBlockData } shouldBe listOf("minecraft:air", "minecraft:air")
+            plan.costs shouldBe emptyList()
+            plan.rewards.map { it.materialKey to it.amount } shouldBe listOf("minecraft:stone" to 2)
+            plan.toolDamage shouldBe 0
+            harness.placingChecks shouldBe listOf(null, null)
+            BuilderOperationCommittedEventFactory.create(plan, GameMode.SURVIVAL) shouldBe null
+            BuilderUndoRules.exchangeFor(plan).costs shouldBe plan.rewards
+            BuilderUndoRules.exchangeFor(plan).rewards shouldBe emptyList()
+            world.getBlockAt(0, 64, 0).type shouldBe Material.STONE
+            world.getBlockAt(2, 64, 0).type shouldBe Material.DIRT
+
+            player.gameMode = GameMode.CREATIVE
+            val creative = harness.controller.plan(player, Material.STONE, Material.AIR).awaitBuilderPlanning()
+            creative.costs shouldBe emptyList()
+            creative.rewards shouldBe emptyList()
+            shouldThrow<ReplaceFailure> { harness.controller.plan(player, Material.AIR, Material.AIR) }
+                .path shouldBe "errors.nothing-to-change"
+        }
+    }
+
+    test("air targets retain unsafe and coupled source exclusions") {
+        MockBukkitTestRuntime.open().use { paper ->
+            val world = paper.addSimpleWorld("replace-air-unsafe")
+            val player = paper.addPlayer("RemoveUnsafe")
+            val harness = ReplaceHarness(paper.createSimplePlugin("ReplaceAirUnsafe"), world)
+            harness.select(0, 64, 0, 0, 64, 0)
+            listOf(Material.CHEST, Material.BEDROCK, Material.DIAMOND_ORE, Material.OAK_DOOR).forEach { source ->
+                world.getBlockAt(0, 64, 0).type = source
+                shouldThrow<ReplaceFailure> {
+                    harness.controller.plan(player, source, Material.AIR).awaitBuilderPlanning()
+                }.path shouldBe "errors.nothing-to-change"
+                world.getBlockAt(0, 64, 0).type shouldBe source
+            }
+            harness.createdPlans shouldBe 0
+            harness.mutableChecks shouldBe 0
+        }
+    }
+
     test("air replacement retains every original air variant and only target costs without requiring inventory stock") {
         MockBukkitTestRuntime.open().use { paper ->
             val world = paper.addSimpleWorld("replace-air-async")
@@ -192,6 +244,7 @@ private class ReplaceHarness(
     private var selection: BuilderSelection? = null
     var mutableChecks = 0
     var createdPlans = 0
+    val placingChecks = mutableListOf<Material?>()
 
     val safety = BuilderBlockSafety(plugin, emptySet())
 
@@ -214,6 +267,7 @@ private class ReplaceHarness(
             override fun ensureMutable(player: Player, block: Block, placing: Material?) {
                 (tasks as? QueuedBuilderPlanningTasks)?.assertMain()
                 mutableChecks++
+                placingChecks += placing
             }
 
             override fun createPlan(

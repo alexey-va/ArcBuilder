@@ -38,11 +38,47 @@ class BuilderMaterialSearchTest : FunSpec({
         BuilderMaterialArguments.search(candidates, "chest", setOf(Material.CHEST)) shouldBe emptyList()
     }
 
-    test("recent materials are promoted newest first only within the matching allowlist") {
+    test("match relevance precedes recent choices and recent choices only break equal matches") {
         BuilderMaterialArguments.search(
             listOf(Material.STONE, Material.DIRT, Material.STONE_BRICKS, Material.MOSSY_STONE_BRICKS),
             "stone",
             recentMaterials = listOf(Material.MOSSY_STONE_BRICKS, Material.DIRT, Material.STONE),
-        ) shouldContainExactly listOf(Material.MOSSY_STONE_BRICKS, Material.STONE, Material.STONE_BRICKS)
+        ) shouldContainExactly listOf(Material.STONE, Material.STONE_BRICKS, Material.MOSSY_STONE_BRICKS)
+        BuilderMaterialArguments.search(
+            listOf(Material.STONE_BRICKS, Material.STONE_STAIRS),
+            "stone",
+            recentMaterials = listOf(Material.STONE_STAIRS),
+        ).first() shouldBe Material.STONE_STAIRS
+    }
+
+    test("air leads blank results but never bypasses the query or supplied candidates") {
+        val candidates = listOf(Material.DIRT, Material.STONE, Material.AIR)
+        BuilderMaterialArguments.search(candidates, "  ", setOf(Material.DIRT), listOf(Material.STONE))
+            .first() shouldBe Material.AIR
+        listOf("воздух", " ВоЗдУх ", "AIR", "minecraft:air").forEach { query ->
+            BuilderMaterialArguments.search(candidates, query) shouldContainExactly listOf(Material.AIR)
+        }
+        BuilderMaterialArguments.search(candidates, "stone") shouldContainExactly listOf(Material.STONE)
+        BuilderMaterialArguments.search(listOf(Material.STONE), "воздух") shouldBe emptyList()
+    }
+
+    test("English ids phrases enum names and fragments share case insensitive relevance") {
+        val candidates = listOf(Material.MOSSY_STONE_BRICKS, Material.STONE_BRICK_STAIRS, Material.STONE_BRICKS)
+        listOf("STONE_BRICKS", "minecraft:stone_bricks", " StOnE Bri ", "sto bri", "one_brick").forEach { query ->
+            BuilderMaterialArguments.search(candidates, query).first() shouldBe Material.STONE_BRICKS
+        }
+        BuilderMaterialArguments.search(listOf(Material.MOSSY_STONE_BRICKS, Material.BRICKS), "bricks")
+            .first() shouldBe Material.BRICKS
+    }
+
+    test("bounded Russian and English typos follow literal matches deterministically") {
+        val candidates = listOf(Material.STONE_BRICKS, Material.STONE, Material.DIRT)
+        listOf("stnoe", "stome", "камеьн").forEach { query ->
+            BuilderMaterialArguments.search(candidates, query).first() shouldBe Material.STONE
+        }
+        BuilderMaterialArguments.search(listOf(Material.DIRT), "dri") shouldBe emptyList()
+        BuilderMaterialArguments.search(candidates, "completely unrelated") shouldBe emptyList()
+        BuilderMaterialArguments.search(listOf(Material.STONE, Material.STONE_STAIRS), "stone stairs")
+            .first() shouldBe Material.STONE_STAIRS
     }
 })

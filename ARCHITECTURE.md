@@ -435,8 +435,15 @@ the command's existing main-hand source and journal recovery remain available.
 Fill opens safe placement materials; replace collects safe source materials in
 1024-block server-thread slices before opening source and target screens. Search
 uses bundled Russian labels and English material IDs, explicit submission and
-24 results in three columns per page. A bounded per-player list promotes the six
-most recently selected final materials without bypassing query or safety filters.
+24 results in three columns per page. Case, spaces, underscores and the vanilla
+namespace are normalized. Exact, whole-name prefix, word-prefix and substring matches precede
+bounded typo matches; adjacent transposed letters count as one typo. Queries of
+four to six characters allow one typo, longer queries allow two, and shorter
+queries require a literal match. Shorter identifiers precede longer equal-rank
+matches, then recent choices break equal relevance scores.
+With no query, air comes first when supplied by the caller, followed by the six
+most recently selected final materials and owned materials. Search never adds
+materials outside the caller's safe candidate list.
 Query edits are not streamed by vanilla Dialogs. `BuilderLocalePolicy` selects
 `default-locale` unless `locale.follow-client` is enabled; the module runtime
 factory applies and restores that policy through the existing reload transaction.
@@ -479,9 +486,13 @@ In survival, every changed block consumes the target construction item and
 returns the source construction item when present. `replace air stone` (or
 `replace воздух камень`) fills all three vanilla air variants and returns no
 source item. Explicit `cave_air` and `void_air` match only their exact variant.
-The journal retains each original state for undo. Air is suggested only as the
-source argument. Creative plans carry no item exchange.
-Replacing with air remains unsupported; removal belongs to `deconstruct`.
+The journal retains each original state for undo. Canonical `air` is also a
+replacement target: it removes only the selected source material, costs no
+target item, and retains replacement's canonical source-item refund. It does not
+use deconstruction's native loot or tool-wear rules, nor emit placement progress.
+Undo consumes that refund before restoring the exact original block state.
+The source picker still lists only safe materials actually present in the
+selection. Creative plans carry no item exchange.
 
 ## Clipboard and construction books
 

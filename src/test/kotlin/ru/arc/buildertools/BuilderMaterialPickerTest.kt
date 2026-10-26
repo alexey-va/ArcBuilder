@@ -28,6 +28,34 @@ import kotlin.Function3
 import org.opentest4j.TestAbortedException
 
 class BuilderMaterialPickerTest : FunSpec({
+    test("air is the first target and its Russian search click keeps source candidates restricted") {
+        strictPickerRuntime { paper ->
+            val player = spyk(paper.addPlayer("PickerAir"))
+            every { player.closeDialog() } just Runs
+            val plugin = paper.createSimplePlugin("BuilderPickerAirTest")
+            PickerHarness(plugin, player).use { harness ->
+                var selectedTarget: Material? = null
+                harness.picker.open(player, SOURCE_TITLE, listOf(Material.STONE), { true }, { source ->
+                    source shouldBe Material.STONE
+                    harness.picker.open(player, TARGET_TITLE, listOf(Material.DIRT, Material.AIR), { true },
+                        { selectedTarget = it }, beginFlow = false)
+                }, closeOnSelect = false)
+                harness.click("find", "воздух")
+                harness.presentations.last().screen.materialChoiceCount() shouldBe 0
+                harness.click("find", "")
+                harness.presentations.last().screen.materialChoiceCount() shouldBe 1
+                harness.click("material_0")
+                val firstTarget = harness.presentations.last().screen.buttons.first { it.id.value == "material_0" }
+                PlainTextComponentSerializer.plainText().serialize(firstTarget.label) shouldBe "Воздух"
+                harness.click("find", "ВоЗдУх")
+                harness.presentations.last().screen.materialChoiceCount() shouldBe 1
+                harness.click("material_0", "ВоЗдУх")
+                selectedTarget shouldBe Material.AIR
+                harness.picker.isOpen(player.uniqueId) shouldBe false
+            }
+        }
+    }
+
     test("search refreshes replace the same history visit") {
         strictPickerRuntime { paper ->
             val player = spyk(paper.addPlayer("PickerRefresh"))

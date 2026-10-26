@@ -3476,7 +3476,7 @@ internal class BuilderToolsRuntime(
                     val safeSystemContainer =
                         change.position in systemBookExceptionPositions &&
                             (safety.isSafeSystemLootContainer(after) || safety.isSafeSystemFurniture(after))
-                    if (!safety.isSafePlacement(after) && !safeSystemContainer && after.material !in safety.replaceable) {
+                    if (!after.material.isAir && !safety.isSafePlacement(after) && !safeSystemContainer && after.material !in safety.replaceable) {
                         throw BuilderUserFailure("errors.plan-failed")
                     }
                     index >= plan.changes.size
@@ -4083,14 +4083,14 @@ internal class BuilderToolsRuntime(
     private val placementMaterials by lazy { safeMaterials.filter { safety.isSafePlacement(it.createBlockData()) } }
     private val safeMaterialNames by lazy { BuilderMaterialArguments.names(safeMaterials) }
     private val replaceMaterials by lazy {
-        safeMaterials.filter { material ->
+        listOf(Material.AIR) + safeMaterials.filter { material ->
             val data = material.createBlockData()
             safety.isSafePlacement(data) && !BuilderReplaceController.isCoupledMultiBlock(data)
         }
     }
     private val replaceMaterialNames by lazy { BuilderMaterialArguments.names(replaceMaterials) }
     private val replaceSourceMaterialNames by lazy {
-        BuilderMaterialArguments.names(listOf(Material.AIR, Material.CAVE_AIR, Material.VOID_AIR)) + replaceMaterialNames
+        (BuilderMaterialArguments.names(listOf(Material.AIR, Material.CAVE_AIR, Material.VOID_AIR)) + replaceMaterialNames).distinct()
     }
 
     private data class ReplaceRequest(

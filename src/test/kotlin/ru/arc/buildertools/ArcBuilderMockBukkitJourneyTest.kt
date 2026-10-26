@@ -1827,6 +1827,71 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
         }
     }
 
+    test("air target preserves confirmation protection refunds and exact undo") {
+        strictMockBukkit(open = { ArcBuilderJourney.open(replaceableMaterials = listOf("SHORT_GRASS")) }) { journey ->
+            val player = journey.builder("AirTarget", GameMode.SURVIVAL)
+            val world = journey.world
+            player.teleport(Location(world, 0.5, 64.0, 3.5))
+            val original = (Material.OAK_STAIRS.createBlockData() as Stairs).apply {
+                facing = BlockFace.WEST
+                half = Bisected.Half.TOP
+                shape = Stairs.Shape.OUTER_RIGHT
+            }
+            world.getBlockAt(0, 64, 0).setBlockData(original, false)
+            world.getBlockAt(1, 64, 0).type = Material.DIRT
+            world.getBlockAt(2, 64, 0).type = Material.CHEST
+            var protected = false
+            journey.paper.server.servicesManager.register(ArcBlockProtectionService::class.java,
+                ArcBlockProtectionService { id, x, _, _ -> protected && id == world.uid && x == 0 },
+                journey.plugin, ServicePriority.Normal)
+            player.inventory.setItemInMainHand(ItemStack(Material.ECHO_SHARD))
+            player.performCommand("builder wand") shouldBe true
+            journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 2, 64, 0)
+            journey.paper.server.getCommandTabComplete(player, "builder replace oak_stairs воз")
+                .contains("воздух") shouldBe true
+            journey.paper.server.getCommandTabComplete(player, "builder replace oak_stairs air c") shouldBe listOf("confirm")
+
+            journey.command(player, "builder replace oak_stairs воздух") shouldBe true
+            val plan = checkNotNull(journey.renderer.plans[player.uniqueId])
+            plan.changes.map { it.position.x } shouldBe listOf(0)
+            plan.costs shouldBe emptyList()
+            plan.rewards.map { it.materialKey to it.amount } shouldBe listOf("minecraft:oak_stairs" to 1)
+            world.getBlockAt(0, 64, 0).blockData.asString shouldBe original.asString
+            player.performCommand("builder cancel") shouldBe true
+            journey.amount(player, Material.OAK_STAIRS) shouldBe 0
+
+            journey.command(player, "builder replace oak_stairs AIR") shouldBe true
+            protected = true
+            journey.command(player, "builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.OAK_STAIRS }
+            journey.health().recoveryBacklog shouldBe 0
+            journey.activeLeases() shouldBe 0
+            journey.amount(player, Material.OAK_STAIRS) shouldBe 0
+            protected = false
+            journey.command(player, "builder replace oak_stairs minecraft:air") shouldBe true
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.AIR }
+            journey.amount(player, Material.OAK_STAIRS) shouldBe 1
+            world.getBlockAt(1, 64, 0).type shouldBe Material.DIRT
+            world.getBlockAt(2, 64, 0).type shouldBe Material.CHEST
+            val committed = BuilderJournalStore(journey.plugin.dataPath, 64).loadAll().single().value
+            committed.phase shouldBe BuilderJournalPhase.COMMITTED
+            committed.plan.changes.single().beforeBlockData shouldBe original.asString
+
+            player.inventory.remove(Material.OAK_STAIRS)
+            journey.command(player, "builder undo") shouldBe true
+            journey.command(player, "builder confirm") shouldBe true
+            world.getBlockAt(0, 64, 0).type shouldBe Material.AIR
+            player.inventory.addItem(ItemStack(Material.OAK_STAIRS))
+            journey.command(player, "builder undo") shouldBe true
+            checkNotNull(journey.renderer.plans[player.uniqueId]).costs shouldBe plan.rewards
+            player.performCommand("builder confirm") shouldBe true
+            journey.awaitSettled(player) { world.getBlockAt(0, 64, 0).type == Material.OAK_STAIRS }
+            world.getBlockAt(0, 64, 0).blockData.asString shouldBe original.asString
+            journey.amount(player, Material.OAK_STAIRS) shouldBe 0
+        }
+    }
+
     test("air replacement consumes only target items and undo restores each original air variant") {
         strictMockBukkit(open = { ArcBuilderJourney.open() }) { journey ->
             val player = journey.builder("AirReplacer", GameMode.SURVIVAL)
@@ -1840,7 +1905,7 @@ class ArcBuilderMockBukkitJourneyTest : FunSpec({
             journey.select(player, world, player.inventory.itemInMainHand, 0, 64, 0, 3, 64, 0)
             journey.paper.server.getCommandTabComplete(player, "builder replace воз").contains("воздух") shouldBe true
             journey.paper.server.getCommandTabComplete(player, "builder replace a").contains("air") shouldBe true
-            journey.paper.server.getCommandTabComplete(player, "builder replace stone air") shouldBe emptyList()
+            journey.paper.server.getCommandTabComplete(player, "builder replace stone air") shouldBe listOf("air")
             journey.command(player, "builder replace воздух камень")
             val plan = checkNotNull(journey.renderer.plans[player.uniqueId]) {
                 generateSequence { player.nextComponentMessage() }.joinToString(" | ") {
@@ -2481,6 +2546,7 @@ private class ArcBuilderJourney private constructor(
             lootTableResolver: (NamespacedKey) -> LootTable? = Bukkit::getLootTable,
             lootTableAccess: BuilderLootTableAccess = PaperBuilderLootTableAccess,
             schematicLoader: ((String, String?) -> java.util.concurrent.CompletableFuture<Building>)? = null,
+            replaceableMaterials: List<String>? = null,
         ): ArcBuilderJourney {
             mockkStatic(PacketEvents::class)
             try {
@@ -2506,6 +2572,7 @@ private class ArcBuilderJourney private constructor(
                     setBoolean("safety.require-coreprotect", false)
                     setBoolean("shop.enabled", false)
                     setInt("limits.blocks-per-tick", blocksPerTick)
+                    replaceableMaterials?.let { setStringList("safety.replaceable-materials", it) }
                     saveStrict()
                 }
                 BuilderToolsModule.shutdown()

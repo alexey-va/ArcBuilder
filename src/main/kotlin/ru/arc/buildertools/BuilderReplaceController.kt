@@ -25,7 +25,7 @@ internal class BuilderReplaceController(
     fun plan(player: Player, source: Material, target: Material, isCurrent: () -> Boolean = { true }): CompletableFuture<BuilderPlan> {
         host.ensurePermission(player, BuilderFeature.REPLACE)
         if (source == target) host.fail("errors.nothing-to-change")
-        val targetTemplate = host.placementData(target)
+        val targetTemplate = if (target == Material.AIR) target.createBlockData() else host.placementData(target)
         if (isCoupledMultiBlock(targetTemplate)) host.fail("errors.material")
         val selection = host.requiredSelection(player)
         val world = host.world(selection.worldId)
@@ -53,21 +53,21 @@ internal class BuilderReplaceController(
             }
             val after = targetTemplate.clone()
             BuilderCompatibleBlockState.copy(before, after)
-            if (!safety.isSafePlacement(after)) {
+            if (!after.material.isAir && !safety.isSafePlacement(after)) {
                 skippedUnsafe += 1
                 return@capture false
             }
-            val cost = BuilderPlacementCost.itemOrNull(after)
+            val cost = BuilderPlacementCost.itemOrNull(after)?.takeUnless { it.type.isAir || it.amount <= 0 }
             val reward = BuilderPlacementCost.itemOrNull(before)
-            if (usesInventory && (cost == null || reward == null && !before.material.isAir)) {
+            if (usesInventory && (cost == null && !after.material.isAir || reward == null && !before.material.isAir)) {
                 skippedUnsafe += 1
                 return@capture false
             }
             if (before.asString == after.asString) return@capture false
-            host.ensurePlacement(player, block, after.material)
+            host.ensureMutable(player, block, after.material.takeUnless(Material::isAir))
             changes += BuilderBlockChange(position, before.asString, after.asString)
             if (usesInventory) {
-                costs += prototypes.capture(checkNotNull(cost))
+                cost?.let { costs += prototypes.capture(it) }
                 // Air variants can expose an AIR ItemStack; the previous aggregate discarded empty refunds.
                 reward?.takeUnless { it.type.isAir || it.amount <= 0 }?.let { rewards += prototypes.capture(it) }
             }
