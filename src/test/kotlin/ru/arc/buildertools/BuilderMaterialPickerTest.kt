@@ -239,14 +239,15 @@ class BuilderMaterialPickerTest : FunSpec({
                 val recentChoices = harness.presentations.last().screen.buttons
                     .filter { it.id.value.startsWith("material_") }
                 recentChoices.take(6).map { PlainTextComponentSerializer.plainText().serialize(it.label) } shouldBe
-                    recent.map { "↻ ${checkNotNull(BuilderMaterialArguments.russianLabel(it))}" }
+                    recent.map { checkNotNull(BuilderMaterialArguments.russianLabel(it)) }
                 recentChoices.take(6).forEach { it.label.color() shouldBe TextColor.color(0xE8DFD2) }
 
                 val unselected = recentChoices.single {
                     PlainTextComponentSerializer.plainText().serialize(it.label).contains("Берёз")
                 }
                 unselected.label.color() shouldBe NamedTextColor.WHITE
-                PlainTextComponentSerializer.plainText().serialize(unselected.label).startsWith("○ ") shouldBe true
+                PlainTextComponentSerializer.plainText().serialize(unselected.label) shouldBe
+                    checkNotNull(BuilderMaterialArguments.russianLabel(Material.BIRCH_LOG))
             }
         }
     }
