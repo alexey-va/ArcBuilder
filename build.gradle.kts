@@ -135,6 +135,8 @@ tasks {
         exclude("com/sk89q/**")
         exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
         exclude("ru/arc/paper/display/PaperDisplayPassengerServiceProvider*.class")
+        exclude("ru/arc/paper/scene/PaperSceneObservationServiceProvider*.class")
+        exclude("ru/arc/paper/scene/PaperSceneEntityInfoServiceProvider*.class")
         exclude("ru/arc/paper/api/**")
         exclude("ru/arc/staffspells/api/**")
         exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
@@ -152,8 +154,8 @@ tasks {
 // E2E uses the same separate service provider and API owner as production.
 val e2eArcVersion = "1.4.500"
 val e2eArcSha256 = "0e3d47293f164d33bb559c3934884624291a0b9ee410323a3529a440bb9badba"
-val e2eArcCoreVersion = "0.1.27"
-val e2eArcCoreSha256 = "1fdb6c9159b5302bf2aed90f6bbab80ffc5124ddb3a284510438117ba1f0c691"
+val e2eArcCoreVersion = "0.1.28"
+val e2eArcCoreSha256 = "fb136467b825648025322f9252cd203874ac7864dc769112932380015a57466a"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
 val e2eArcCoreArtifact = configurations.detachedConfiguration(
     dependencies.create("ru.ruscrafting:ArcCore:$e2eArcCoreVersion"),
