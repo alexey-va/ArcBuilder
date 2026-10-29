@@ -134,6 +134,7 @@ tasks {
         exclude("io/papermc/**")
         exclude("com/sk89q/**")
         exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
+        exclude("ru/arc/paper/display/PaperDisplayPassengerServiceProvider*.class")
         exclude("ru/arc/paper/api/**")
         exclude("ru/arc/staffspells/api/**")
         exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
