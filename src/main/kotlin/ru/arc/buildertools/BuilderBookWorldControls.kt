@@ -22,33 +22,51 @@ internal object BuilderBookWorldControls {
         busy: Boolean = false,
         primaryEnabled: Boolean = true,
     ): ActionPanelLayout<BuilderBookWorldAction> {
+        val spacing = .85
         fun rect(x: Double, y: Double, width: Double, height: Double) =
-            ActionPanelRect(ActionPanelPoint(x, y, 0.0), width, height)
-        fun button(action: BuilderBookWorldAction, x: Double, y: Double, width: Double = .76,
-            height: Double = .25, scale: Float = .8f): ActionPanelButton<BuilderBookWorldAction> =
-            ActionPanelButton(action, rect(x, y, width, height), text(if (action == BuilderBookWorldAction.PRIMARY) primary else action.localeKey),
-                ActionPanelTextStyle(scale, (width * 40 / scale).toInt() - 5, width.toFloat(), height.toFloat(), .025),
+            ActionPanelRect(ActionPanelPoint(x * spacing, y * spacing, 0.0), width * spacing, height * spacing)
+        fun button(action: BuilderBookWorldAction, x: Double, y: Double, width: Double = .42,
+            height: Double = .32, scale: Float = .9f): ActionPanelButton<BuilderBookWorldAction> {
+            val area = rect(x, y, width, height)
+            val direction = when (action) {
+                BuilderBookWorldAction.LEFT -> 180f
+                BuilderBookWorldAction.RIGHT -> 0f
+                BuilderBookWorldAction.AWAY, BuilderBookWorldAction.UP -> 90f
+                BuilderBookWorldAction.TOWARD, BuilderBookWorldAction.DOWN -> -90f
+                else -> null
+            }
+            val textKey = when {
+                direction != null -> "right"
+                action == BuilderBookWorldAction.PRIMARY -> primary
+                else -> action.localeKey
+            }
+            return ActionPanelButton(action, area, text(textKey),
+                ActionPanelTextStyle(scale, (area.width * 40 / scale).toInt() - 5,
+                    area.width.toFloat(), area.height.toFloat(), .025, 0, 0, direction ?: 0f),
                 true, if (action == BuilderBookWorldAction.CANCEL) true else !busy &&
                     (action != BuilderBookWorldAction.PRIMARY || primaryEnabled))
-        fun label(key: String, x: Double, y: Double, width: Double, scale: Float = .48f, textKey: String = key) =
-            ActionPanelLabel(key, rect(x, y, width, .18), text(textKey),
-                ActionPanelTextStyle(scale, (width * 40 / scale).toInt() - 5, width.toFloat(), .18f, .025))
+        }
+        fun label(key: String, y: Double, scale: Float, textKey: String = key): ActionPanelLabel {
+            val area = rect(0.0, y, 3.1, .22)
+            return ActionPanelLabel(key, area, text(textKey),
+                ActionPanelTextStyle(scale, (area.width * 40 / scale).toInt() - 5,
+                    area.width.toFloat(), area.height.toFloat(), .025))
+        }
         return ActionPanelLayout(listOf(
-            button(BuilderBookWorldAction.AWAY, -.55, .47),
-            button(BuilderBookWorldAction.LEFT, -1.37, .18),
-            button(BuilderBookWorldAction.RIGHT, .27, .18),
-            button(BuilderBookWorldAction.TOWARD, -.55, -.11),
-            button(BuilderBookWorldAction.UP, 1.12, .47, .9),
-            button(BuilderBookWorldAction.DOWN, 1.12, -.11, .9),
-            button(BuilderBookWorldAction.ROTATE, -1.08, -.46, 1.02, scale = .55f),
-            button(BuilderBookWorldAction.MIRROR, 0.0, -.46, 1.02, scale = .55f),
-            button(BuilderBookWorldAction.RESET, 1.08, -.46, 1.02, scale = .55f),
-            button(BuilderBookWorldAction.PRIMARY, -.53, -.83, 2.12, .42, .54f),
-            button(BuilderBookWorldAction.CANCEL, 1.12, -.83, .9, .42, .5f),
-        ), listOf(
-            label("title", 0.0, 1.0, 3.5, .56f),
-            label("status", 0.0, .74, 3.5, .46f, status),
-            label("height", 1.12, .18, .9, .46f),
-        ))
+            button(BuilderBookWorldAction.AWAY, -.55, .32),
+            button(BuilderBookWorldAction.LEFT, -1.05, .08),
+            button(BuilderBookWorldAction.RIGHT, -.05, .08),
+            button(BuilderBookWorldAction.TOWARD, -.55, -.16),
+            button(BuilderBookWorldAction.UP, .92, .32, .50),
+            button(BuilderBookWorldAction.DOWN, .92, -.16, .50),
+            button(BuilderBookWorldAction.ROTATE, -1.0, -.48, .94, .27, .55f),
+            button(BuilderBookWorldAction.MIRROR, 0.0, -.48, .94, .27, .55f),
+            button(BuilderBookWorldAction.RESET, 1.0, -.48, .94, .27, .55f),
+            button(BuilderBookWorldAction.PRIMARY, -.50, -.84, 1.94, .42, .54f),
+            button(BuilderBookWorldAction.CANCEL, 1.04, -.84, 1.0, .42, .5f),
+        ), buildList {
+            add(label("title", .64, .56f))
+            if (status != "hint") add(label("status", .90, .46f, status))
+        })
     }
 }

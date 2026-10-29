@@ -1,6 +1,7 @@
 package ru.arc.buildertools
 
 import net.kyori.adventure.text.Component
+import org.bukkit.Bukkit
 import org.bukkit.entity.Player
 import org.bukkit.plugin.Plugin
 import ru.arc.paper.actionpanel.ActionPanelAction
@@ -96,10 +97,17 @@ internal class BuilderSelectionActionPanel(
     )
     private var closed = false
     private val panels = PaperActionPanels(plugin, displays, this)
+    private val guidanceSuppression = BuilderGuidanceSuppression(plugin, "selection-panel")
 
-    fun tick() = panels.tick()
+    fun tick() {
+        panels.tick()
+        guidanceSuppression.sync(Bukkit.getOnlinePlayers().map { it.uniqueId }.filter(panels::contains))
+    }
 
-    fun clear(playerId: UUID) = panels.clear(playerId)
+    fun clear(playerId: UUID) {
+        panels.clear(playerId)
+        guidanceSuppression.clear(playerId)
+    }
 
     /** The selector calls this before changing a corner; a miss remains an ordinary tool gesture. */
     fun intercept(player: Player): Boolean = panels.intercept(player)
@@ -162,6 +170,7 @@ internal class BuilderSelectionActionPanel(
         try {
             panels.close()
         } finally {
+            guidanceSuppression.close()
             displays.close()
         }
     }

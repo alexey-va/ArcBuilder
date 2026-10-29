@@ -14,6 +14,9 @@ class BuilderBookWorldControlsTest : StringSpec({
     "the complete owner overlay remains within ordinary reach in every facing direction" {
         val layout = BuilderBookWorldControls.layout({ net.kyori.adventure.text.Component.text(it) }, "quote")
         val rects = layout.buttons.map { it.rect } + layout.labels.map { it.rect }
+        layout.labels.map { it.key } shouldBe listOf("title")
+        (rects.maxOf { it.center.x + it.width / 2 } - rects.minOf { it.center.x - it.width / 2 } < 2.7) shouldBe true
+        (rects.maxOf { it.center.y + it.height / 2 } - rects.minOf { it.center.y - it.height / 2 } < 1.6) shouldBe true
         val eye = ru.arc.paper.actionpanel.ActionPanelPoint(1.0, 65.62, -3.05)
         val frames = listOf(0f, 90f, 180f, 270f).map { yaw ->
             val anchor = ru.arc.paper.actionpanel.ActionPanelGeometry.followingAnchor(eye, yaw, rects, 2.4, 0.0, 0.0)
@@ -50,6 +53,16 @@ class BuilderBookWorldControlsTest : StringSpec({
             (away.y > left.y && toward.y < left.y && left.x < away.x && right.x > away.x) shouldBe true
             (byAction.getValue(BuilderBookWorldAction.UP).rect.center.x > right.x) shouldBe true
             layout.buttons.map { it.action }.toSet() shouldBe BuilderBookWorldAction.entries.toSet()
+            val directions = listOf(BuilderBookWorldAction.AWAY, BuilderBookWorldAction.LEFT,
+                BuilderBookWorldAction.RIGHT, BuilderBookWorldAction.TOWARD, BuilderBookWorldAction.UP, BuilderBookWorldAction.DOWN)
+                .map(byAction::getValue)
+            directions.map { plain.serialize(it.text) }.distinct() shouldBe listOf(">")
+            directions.map { it.style.rotationDegrees } shouldBe listOf(90f, 180f, 0f, -90f, 90f, -90f)
+            directions.map { it.style.scale }.distinct() shouldBe listOf(.9f)
+            layout.labels.map { it.key } shouldBe if (state in listOf("preparing", "cooldown", "error"))
+                listOf("title", "status") else listOf("title")
+            if (state == "continue") plain.serialize(byAction.getValue(BuilderBookWorldAction.PRIMARY).text) shouldBe
+                if (locale == "ru") "Начать стройку" else "Start building"
             layout.buttons.forEachIndexed { index, a -> layout.buttons.drop(index + 1).forEach { b ->
                 val separated = kotlin.math.abs(a.rect.center.x - b.rect.center.x) >= (a.rect.width + b.rect.width) / 2 ||
                     kotlin.math.abs(a.rect.center.y - b.rect.center.y) >= (a.rect.height + b.rect.height) / 2
@@ -64,7 +77,8 @@ class BuilderBookWorldControlsTest : StringSpec({
                 "viewerZ" to if (state == "near-ghost") -3.05 else -7.0, "buttons" to layout.buttons.map { mapOf(
                 "action" to it.action.name, "text" to plain.serialize(it.text), "rect" to it.rect,
                 "component" to GsonComponentSerializer.gson().serialize(it.text),
-                "scale" to it.style.scale, "lineWidth" to it.style.lineWidth, "baselineInset" to it.style.baselineInset, "enabled" to it.enabled,
+                "scale" to it.style.scale, "lineWidth" to it.style.lineWidth, "baselineInset" to it.style.baselineInset,
+                "rotationDegrees" to it.style.rotationDegrees, "enabled" to it.enabled,
             ) }, "labels" to layout.labels.map { mapOf("key" to it.key, "text" to plain.serialize(it.text),
                 "component" to GsonComponentSerializer.gson().serialize(it.text),
                 "rect" to it.rect, "scale" to it.style.scale, "lineWidth" to it.style.lineWidth, "baselineInset" to it.style.baselineInset) })

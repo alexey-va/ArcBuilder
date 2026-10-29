@@ -211,6 +211,7 @@ internal class BuilderBookPreviewPresentation(
             activateWorld(player, context, action)
     }
     private val worldPanels = PaperActionPanels(plugin, displays, worldController)
+    private val guidanceSuppression = BuilderGuidanceSuppression(plugin, "book-preview")
 
     init {
         Bukkit.getPluginManager().registerEvents(this, plugin)
@@ -222,6 +223,7 @@ internal class BuilderBookPreviewPresentation(
             runCatching { movePlaque(scene) }.onFailure { removePanel(scene.site.player.uniqueId) }
         }
         if (worldControlsEnabled) worldPanels.tick()
+        guidanceSuppression.sync(placementSites.keys)
     }
 
     fun intercept(player: Player): Boolean {
@@ -335,6 +337,7 @@ internal class BuilderBookPreviewPresentation(
         worldSessions[site.player.uniqueId] = Any()
         worldFailures.remove(site.player.uniqueId)
         renderer.open(site)
+        guidanceSuppression.sync(placementSites.keys)
         replacePanelSafely(site)
     }
 
@@ -353,6 +356,7 @@ internal class BuilderBookPreviewPresentation(
         renderer.close(playerId)
         removePanel(playerId)
         placementSites.remove(playerId)
+        guidanceSuppression.clear(playerId)
         val player = Bukkit.getPlayer(playerId)
         if (playerId !in snapshots) {
             player?.let(menus::session)?.takeIf { it.menuId == PLACEMENT_MENU }?.close()
@@ -365,6 +369,7 @@ internal class BuilderBookPreviewPresentation(
         snapshots[site.player.uniqueId] = site.snapshot()
         placementSites[site.player.uniqueId] = site
         worldSessions.getOrPut(site.player.uniqueId) { Any() }
+        guidanceSuppression.sync(placementSites.keys)
         replacePanelSafely(site)
     }
 
@@ -374,6 +379,7 @@ internal class BuilderBookPreviewPresentation(
         if (snapshots.remove(playerId) == null) return
         confirmationInventories.remove(playerId)
         placementSites.remove(playerId)
+        guidanceSuppression.clear(playerId)
         worldSessions.remove(playerId)
         worldFailures.remove(playerId)
         worldPanels.clear(playerId)
@@ -873,6 +879,7 @@ internal class BuilderBookPreviewPresentation(
         }
         attempt { controls.close() }
         attempt { worldPanels.close() }
+        attempt { guidanceSuppression.close() }
         panels.values.forEach { scene ->
             attempt { scene.plaque.close() }
             attempt { scene.audience.close() }

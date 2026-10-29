@@ -66,15 +66,24 @@ def panel(sample):
         assert max(widths)<=item['lineWidth'], (item,max(widths))
         world_w=(max(widths)+2)*.025*scale
         world_h=len(lines)*10*.025*scale
-        assert world_w<=rect['width'] and world_h+item['baselineInset']<=rect['height']+.00001, (item,world_w,world_h)
-        metrics.append({'locale':sample['locale'],'key':item.get('action',item.get('key')),'widthPx':max(widths),'widthBlocks':world_w,'heightBlocks':world_h,'rect':rect})
+        rotation=item.get('rotationDegrees',0.0); angle=math.radians(rotation)
+        bottom=-rect['height']/2+item['baselineInset']
+        corners=[(math.cos(angle)*x-math.sin(angle)*y,math.sin(angle)*x+math.cos(angle)*y)
+                 for x in (-world_w/2,world_w/2) for y in (bottom,bottom+world_h)]
+        assert all(abs(x)<=rect['width']/2+.00001 and abs(y)<=rect['height']/2+.00001 for x,y in corners), (item,corners)
+        metrics.append({'locale':sample['locale'],'key':item.get('action',item.get('key')),'widthPx':max(widths),'widthBlocks':world_w,'heightBlocks':world_h,'rotationDegrees':rotation,'rect':rect})
         texture=Image.new('RGBA',((max(widths)+2)*3,len(lines)*30),(22,29,34,210))
         for row,line in enumerate(lines):
             core.draw_text(texture,(round((max(widths)-widths[row])*1.5)+3,row*30),painted[row],stack)
         texture=texture.resize((max(1,round(world_w*px)),max(1,round(world_h*px))),Image.Resampling.NEAREST)
-        left=round(480+c['x']*px-texture.width/2)
-        bottom=360-(sample['anchorY']+c['y']-rect['height']/2+item['baselineInset'])*px
-        image.alpha_composite(texture,(left,round(bottom-texture.height)))
+        if rotation: texture=texture.rotate(rotation,resample=Image.Resampling.NEAREST,expand=True)
+        # Core rotates around the authored hit rectangle's center, not the glyph bitmap's center.
+        center_y=bottom+world_h/2
+        center_x=-math.sin(angle)*center_y
+        center_y=math.cos(angle)*center_y
+        left=round(480+(c['x']+center_x)*px-texture.width/2)
+        top=round(360-(sample['anchorY']+c['y']+center_y)*px-texture.height/2)
+        image.alpha_composite(texture,(left,top))
     draw=ImageDraw.Draw(image)
     draw.rectangle((0,0,960,38),fill='#101820')
     draw.text((16,11),'SOURCE EXPORT / '+sample['locale'].upper()+' '+sample['state'].upper()+f' / 70 deg player-eye / {distance:.2f} blocks / native font',fill='white')

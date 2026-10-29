@@ -188,7 +188,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     offered.layout.buttons.size shouldBe 11
                     presentation.tick()
                     tasks.workerRuns shouldBe 0
-                    packet.texts.size shouldBe 14 // All owner controls already exist; plaque scan has not started.
+                    packet.texts.size shouldBe 12 // Eleven actions and the title; no static instruction or height rows.
                     packet.texts.forEach { text -> verify {
                         text.display.isSeeThrough = true
                         text.display.isVisibleByDefault = false
@@ -196,7 +196,8 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     } }
                     collisionQueries shouldBe 0
                     rayQueries shouldBe 0
-                    val right = packet.texts.single { plain(it.content) == "[ > ]" }
+                    val right = packet.texts[offered.layout.buttons.indexOfFirst { it.action == BuilderBookWorldAction.RIGHT }]
+                    plain(right.content) shouldBe ">"
                     val aim = right.location.clone().add(0.0, .1, 0.0)
                     eye = feet.clone().add(0.0, 1.62, 0.0).apply { direction = aim.toVector().subtract(toVector()) }
                     presentation.intercept(player) shouldBe true
@@ -212,7 +213,7 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     tasks.tick()
                     tasks.workerRuns shouldBe 1
                     presentation.tick()
-                    packet.texts.size shouldBe 16
+                    packet.texts.size shouldBe 14
                     checkNotNull(presentation.worldFrame(player)).context shouldBe offered.context
                     val old = checkNotNull(presentation.worldFrame(player)).context
                     every { site.rotation } returns 90

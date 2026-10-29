@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ru.ruscrafting"
-version = "1.0.108"
+version = "1.0.109"
 description = "Survival-friendly builder tools for RusCrafting"
 
 val integrationTestSourceSet = sourceSets.create("integrationTest") {
@@ -45,6 +45,7 @@ dependencies {
     implementation("ru.ruscrafting.arc:arc-core-sql:2.7.69")
     compileOnly("ru.ruscrafting.arc:arc-core-paper-api:2.7.69")
     compileOnly("ru.ruscrafting.arc:arc-onboarding-api:0.1.0")
+    compileOnly("ru.ruscrafting.arc:arc-staff-spells-api:0.1.3")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.jeff-media:custom-block-data:2.2.4")
     implementation("de.tr7zw:item-nbt-api:2.15.7")
@@ -74,6 +75,7 @@ dependencies {
     testImplementation("ru.ruscrafting.arc:arc-core-paper-testing:2.7.69")
     testImplementation("ru.ruscrafting.arc:arc-core-paper-api:2.7.69")
     testImplementation("ru.ruscrafting.arc:arc-onboarding-api:0.1.0")
+    testImplementation("ru.ruscrafting.arc:arc-staff-spells-api:0.1.3")
     testImplementation("com.sk89q.worldedit:worldedit-bukkit:7.3.18")
     testImplementation("com.github.Slimefun:Slimefun4:4.10")
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
@@ -133,6 +135,7 @@ tasks {
         exclude("com/sk89q/**")
         exclude("ru/arc/paper/packet/PaperVisualPacketRuntime*.class")
         exclude("ru/arc/paper/api/**")
+        exclude("ru/arc/staffspells/api/**")
         exclude("ru/arc/paper/sql/PaperSqlServiceProvider*.class")
         exclude("ru/arc/paper/sql/SharedPaperSqlService*.class")
         exclude("ru/arc/paper/redis/PaperRedisServiceProvider*.class")
