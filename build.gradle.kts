@@ -149,9 +149,10 @@ tasks {
 }
 
 // E2E uses the same separate service provider and API owner as production.
-val e2eArcVersion = "1.4.429"
-val e2eArcCoreVersion = "0.1.16"
-val e2eArcCoreSha256 = "310d53d5c1ae83a47a957fd944cee390d7eb197932cefd4960dd0eb095a6803b"
+val e2eArcVersion = "1.4.500"
+val e2eArcSha256 = "0e3d47293f164d33bb559c3934884624291a0b9ee410323a3529a440bb9badba"
+val e2eArcCoreVersion = "0.1.27"
+val e2eArcCoreSha256 = "1fdb6c9159b5302bf2aed90f6bbab80ffc5124ddb3a284510438117ba1f0c691"
 val e2eArcJar = providers.gradleProperty("e2eArcJar").map { project.file(it) }
 val e2eArcCoreArtifact = configurations.detachedConfiguration(
     dependencies.create("ru.ruscrafting:ArcCore:$e2eArcCoreVersion"),
@@ -166,12 +167,13 @@ val prepareE2eRuntimeArtifacts = tasks.register("prepareE2eRuntimeArtifacts") {
     inputs.file(e2eArcJar).optional()
     inputs.file(e2eArcCoreJar)
     inputs.property("arcVersion", e2eArcVersion)
+    inputs.property("arcSha256", e2eArcSha256)
     inputs.property("arcCoreVersion", e2eArcCoreVersion)
     inputs.property("arcCoreSha256", e2eArcCoreSha256)
     outputs.dir(e2eRuntimeArtifacts)
     doLast {
         val arc = requireNotNull(e2eArcJar.orNull) {
-            "Supply -Pe2eArcJar=/absolute/path/ARC-$e2eArcVersion.jar from the pinned ARC checkout"
+            "Supply -Pe2eArcJar=/absolute/path/ARC-$e2eArcVersion.jar from the pinned published ARC artifact"
         }
         val core = e2eArcCoreJar.get()
         fun inspect(file: File, expectedName: String, expectedVersion: String): Set<String> {
@@ -201,19 +203,25 @@ val prepareE2eRuntimeArtifacts = tasks.register("prepareE2eRuntimeArtifacts") {
             "ru/ruscrafting/onboarding/api/OnboardingBuildProgressService\$Stage.class" in arcEntries) {
             "ARC must provide the onboarding progress API and stage enum consumed by ArcBuilder"
         }
+        require("ru/arc/staffspells/api/QuestGuidanceHudService.class" in arcEntries &&
+            "ru/arc/staffspells/api/QuestGuidanceHudService\$Source.class" in arcEntries) {
+            "ARC must provide the quest guidance HUD API and source enum consumed by ArcBuilder"
+        }
         require("ru/arc/paper/api/ArcSchematicService.class" in coreEntries &&
             "ru/arc/paper/schematics/PaperSchematicServiceProvider.class" in coreEntries) {
             "ArcCore must contain the shared schematic API and provider"
         }
         fun sha256(file: File): String = MessageDigest.getInstance("SHA-256")
             .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+        val arcSha256 = sha256(arc)
+        require(arcSha256 == e2eArcSha256) { "ARC E2E artifact checksum mismatch: $arcSha256" }
         val coreSha256 = sha256(core)
         require(coreSha256 == e2eArcCoreSha256) { "ArcCore E2E artifact checksum mismatch: $coreSha256" }
         val prepared = e2eRuntimeArtifacts.get().asFile.apply { mkdirs() }
         arc.copyTo(prepared.resolve("ARC.jar"), overwrite = true)
         core.copyTo(prepared.resolve("ArcCore.jar"), overwrite = true)
         prepared.resolve("runtime-artifacts.properties").writeText(
-            "arc.version=$e2eArcVersion\narc.sha256=${sha256(arc)}\n" +
+            "arc.version=$e2eArcVersion\narc.sha256=$arcSha256\n" +
                 "arccore.version=$e2eArcCoreVersion\narccore.sha256=$coreSha256\n",
         )
         logger.lifecycle("E2E runtime artifacts verified: ARC $e2eArcVersion, ArcCore $e2eArcCoreVersion")

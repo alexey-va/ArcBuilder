@@ -56,7 +56,7 @@ jobs:
           jar tf "$jar_path" > build/production-jar.entries
           grep -Fx plugin.yml build/production-jar.entries
           grep -Fq 'kotlin/collections/CollectionsKt.class' build/production-jar.entries
-          ! grep -Eq '^(org/bukkit|io/papermc|com/sk89q|ru/arc/paper/api|ru/arc/paper/schematics)/' build/production-jar.entries
+          ! grep -Eq '^(org/bukkit|io/papermc|com/sk89q|ru/arc/paper/api|ru/arc/paper/schematics|ru/arc/staffspells/api)/' build/production-jar.entries
           ! grep -Eq '^ru/arc/paper/runtime/PaperNativeCleanupServiceProvider' build/production-jar.entries
           unzip -p "$jar_path" plugin.yml | grep -Fx 'name: ArcBuilder'
           printf 'path=%s\n' "$jar_path" >> "$GITHUB_OUTPUT"
@@ -97,29 +97,27 @@ jobs:
       TEST_TIMEOUT: "60000"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Check out ARC runtime
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          repository: alexey-va/ARC
-          ref: e0c435122142b200f35b172e4e4df83d8dbea658 # ARC 1.4.429 baseline; standalone ArcCore 0.1.16 is pinned in build.gradle.kts
-          path: e2e-arc
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
-      - name: Build ARC runtime
-        working-directory: e2e-arc
-        run: ./gradlew --no-daemon shadowJar
+      - name: Download pinned ARC runtime
+        shell: bash
+        run: |
+          arc_jar="$RUNNER_TEMP/ARC-1.4.500.jar"
+          curl --fail --location --retry 3 \
+            --output "$arc_jar" \
+            https://repo.rus-crafting.ru/grocermc/ru/ruscrafting/ARC/1.4.500/ARC-1.4.500.jar
+          printf '%s  %s\n' '0e3d47293f164d33bb559c3934884624291a0b9ee410323a3529a440bb9badba' "$arc_jar" | sha256sum --check --status
       - name: Test ArcBuilder on real Paper
         shell: bash
         run: |
           set -o pipefail
           mkdir -p build
-          mapfile -t arc_jars < <(find "$GITHUB_WORKSPACE/e2e-arc/build/libs" -maxdepth 1 -type f -name 'ARC-*.jar' ! -name '*-plain.jar' -print | sort)
-          test "${#arc_jars[@]}" -eq 1
-          ./gradlew --no-daemon prepareE2eRuntimeArtifacts "-Pe2eArcJar=${arc_jars[0]}"
-          ./gradlew --no-daemon plugwrightTest "-Pe2eArcJar=${arc_jars[0]}" 2>&1 | tee build/plugwright-e2e.log
+          arc_jar="$RUNNER_TEMP/ARC-1.4.500.jar"
+          ./gradlew --no-daemon prepareE2eRuntimeArtifacts "-Pe2eArcJar=$arc_jar"
+          ./gradlew --no-daemon plugwrightTest "-Pe2eArcJar=$arc_jar" 2>&1 | tee build/plugwright-e2e.log
           git diff --exit-code -- src/test/e2e/package-lock.json
       - name: Upload E2E results and Paper logs
         if: always()
