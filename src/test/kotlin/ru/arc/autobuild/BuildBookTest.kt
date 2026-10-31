@@ -170,7 +170,7 @@ class BuildBookTest : TestBase() {
         val draftLore = draftItem.itemMeta.lore().orEmpty().map(plainText::serialize)
         val registeredLore = registeredItem.itemMeta.lore().orEmpty().map(plainText::serialize)
         assertTrue(draftLore.any { it.contains("Цена новой копии: после расчёта") })
-        assertTrue(registeredLore.any { it.contains("Цена новой копии: 123.45 💰") })
+        assertTrue(registeredLore.any { it.contains("Цена новой копии: 123.45💰") })
         assertTrue(registeredLore.any { it.contains("При строительстве: монеты не списываются") })
         assertTrue(registeredLore.any { it.contains("Принести для строительства") })
         assertTrue(registeredLore.any { it.contains("32×") })

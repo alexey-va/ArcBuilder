@@ -261,12 +261,12 @@ class BuilderBookPreviewPresentationMockBukkitTest : FunSpec({
                     presentation.activateWorld(owner, initial.context, BuilderBookWorldAction.PRIMARY)
                     host.confirmCalls shouldBe 0
                     val priced = checkNotNull(presentation.worldFrame(owner))
-                    plain.serialize(priced.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.text) shouldContain "148.45 💰"
+                    plain.serialize(priced.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.text) shouldContain "148.45💰"
                     host.confirmation = host.confirmation.copy(issuePriceMinor = 15_000)
                     presentation.activateWorld(owner, priced.context, BuilderBookWorldAction.PRIMARY)
                     host.confirmCalls shouldBe 0
                     val repriced = checkNotNull(presentation.worldFrame(owner))
-                    plain.serialize(repriced.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.text) shouldContain "150.00 💰"
+                    plain.serialize(repriced.layout.buttons.single { it.action == BuilderBookWorldAction.PRIMARY }.text) shouldContain "150.00💰"
                     presentation.activateWorld(owner, repriced.context, BuilderBookWorldAction.PRIMARY)
                     host.confirmCalls shouldBe 1
                     val busy = checkNotNull(presentation.worldFrame(owner))
